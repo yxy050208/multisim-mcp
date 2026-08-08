@@ -17,6 +17,8 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "mcp_server" / "pyproject.toml"
+SERVER_JSON = ROOT / "server.json"
+MCP_NAME = "io.github.yxy050208/multisim-mcp"
 
 
 @dataclass
@@ -70,6 +72,7 @@ def audit() -> list[Finding]:
         "CHANGELOG.md",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
+        "server.json",
         "docs/PUBLISHING.md",
         "docs/RELEASE_NOTES_v0.1.0-alpha.md",
     )
@@ -134,6 +137,36 @@ def audit() -> list[Finding]:
                     "repository-url",
                     "发布前必须填写真实 GitHub Repository URL",
                     str(PYPROJECT.relative_to(ROOT)),
+                )
+            )
+
+        try:
+            registry = json.loads(SERVER_JSON.read_text(encoding="utf-8"))
+            packages = registry.get("packages") or []
+            package = next(
+                item
+                for item in packages
+                if item.get("registryType") == "pypi"
+                and item.get("identifier") == "multisim-mcp"
+            )
+            if registry.get("name") != MCP_NAME:
+                raise ValueError("registry name mismatch")
+            if registry.get("version") != version or package.get("version") != version:
+                raise ValueError("registry/package version mismatch")
+            if package.get("transport", {}).get("type") != "stdio":
+                raise ValueError("stdio transport missing")
+            package_readme = (ROOT / "mcp_server" / "README.md").read_text(
+                encoding="utf-8"
+            )
+            if f"mcp-name: {MCP_NAME}" not in package_readme:
+                raise ValueError("PyPI ownership marker missing")
+        except (OSError, StopIteration, ValueError, json.JSONDecodeError) as exc:
+            findings.append(
+                Finding(
+                    "error",
+                    "mcp-registry-metadata",
+                    f"MCP Registry 元数据无效: {exc}",
+                    "server.json",
                 )
             )
 

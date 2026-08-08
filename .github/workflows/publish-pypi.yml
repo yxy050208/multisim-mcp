@@ -1,0 +1,54 @@
+name: Publish Python package
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/multisim-mcp
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build mcp_server --outdir dist
+      - name: Verify public package boundary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          marker = "mcp-name: io.github.yxy050208/multisim-mcp"
+          wheel = next(Path("dist").glob("*.whl"))
+          sdist = next(Path("dist").glob("*.tar.gz"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+              assert marker in archive.read(metadata_name).decode("utf-8")
+          with tarfile.open(sdist, "r:gz") as archive:
+              names = archive.getnames()
+              assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              readme = next(member for member in archive.getmembers() if member.name.endswith("/README.md"))
+              assert marker in archive.extractfile(readme).read().decode("utf-8")
+          PY
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/

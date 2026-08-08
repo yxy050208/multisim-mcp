@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yxy050208/multisim-mcp",
+  "title": "Multisim MCP",
+  "description": "Generate Multisim circuits, run simulations, export data, and create experiment reports.",
+  "repository": {
+    "url": "https://github.com/yxy050208/multisim-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0a1",
+  "websiteUrl": "https://github.com/yxy050208/multisim-mcp",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "multisim-mcp",
+      "version": "0.1.0a1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MULTISIM_MCP_TEMPLATE_DIR",
+          "description": "User-local template pack generated from a licensed Multisim installation.",
+          "format": "filepath",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 # Multisim MCP
 
+<!-- mcp-name: io.github.yxy050208/multisim-mcp -->
+
 Unofficial Windows MCP server for creating NI Multisim schematics, running
 experiments, exporting data, and generating reproducible reports.
 

@@ -16,6 +16,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m build mcp_server
+      - name: Validate MCP Registry metadata
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import re
+          from pathlib import Path
+
+          registry = json.loads(Path("server.json").read_text(encoding="utf-8"))
+          pyproject = Path("mcp_server/pyproject.toml").read_text(encoding="utf-8")
+          version = re.search(r'(?m)^version\s*=\s*"([^"]+)"$', pyproject).group(1)
+          assert registry["name"] == "io.github.yxy050208/multisim-mcp"
+          assert registry["version"] == version
+          package = registry["packages"][0]
+          assert package["registryType"] == "pypi"
+          assert package["identifier"] == "multisim-mcp"
+          assert package["version"] == version
+          assert package["transport"]["type"] == "stdio"
+          readme = Path("mcp_server/README.md").read_text(encoding="utf-8")
+          assert "mcp-name: io.github.yxy050208/multisim-mcp" in readme
+          '@ | python -
       - name: Install built wheel
         shell: pwsh
         run: |
@@ -44,6 +65,9 @@ jobs:
               names = archive.namelist()
               assert any(name.endswith("licenses/LICENSE") for name in names)
               assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+              metadata = archive.read(metadata_name).decode("utf-8")
+              assert "mcp-name: io.github.yxy050208/multisim-mcp" in metadata
           sdists = list(Path("mcp_server/dist").glob("*.tar.gz"))
           assert sdists
           with tarfile.open(sdists[0], "r:gz") as archive:

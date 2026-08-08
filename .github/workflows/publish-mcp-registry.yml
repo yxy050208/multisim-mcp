@@ -1,0 +1,61 @@
+name: Publish MCP Registry metadata
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-mcp-registry
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify published PyPI ownership marker
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          with urllib.request.urlopen("https://pypi.org/pypi/multisim-mcp/0.1.0a1/json") as response:
+              package = json.load(response)
+          assert package["info"]["version"] == "0.1.0a1"
+          assert "mcp-name: io.github.yxy050208/multisim-mcp" in package["info"]["description"]
+          PY
+      - name: Install verified MCP Publisher v1.8.1
+        run: |
+          curl --fail --location --retry 5 \
+            https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz \
+            --output mcp-publisher.tar.gz
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+      - name: Publish MCP server metadata
+        run: ./mcp-publisher publish
+      - name: Verify official Registry search
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.parse
+          import urllib.request
+
+          name = "io.github.yxy050208/multisim-mcp"
+          url = "https://registry.modelcontextprotocol.io/v0.1/servers?search=" + urllib.parse.quote(name)
+          for attempt in range(12):
+              with urllib.request.urlopen(url) as response:
+                  payload = json.load(response)
+              if any(item.get("server", item).get("name") == name for item in payload.get("servers", [])):
+                  print(f"Registry search verified after {attempt + 1} attempt(s)")
+                  break
+              time.sleep(5)
+          else:
+              raise SystemExit("Published server was not returned by Registry search")
+          PY
