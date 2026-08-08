@@ -22,9 +22,9 @@ jobs:
           import json
           import urllib.request
 
-          with urllib.request.urlopen("https://pypi.org/pypi/multisim-mcp/0.1.0a1/json") as response:
+          with urllib.request.urlopen("https://pypi.org/pypi/multisim-mcp/0.1.0a2/json") as response:
               package = json.load(response)
-          assert package["info"]["version"] == "0.1.0a1"
+          assert package["info"]["version"] == "0.1.0a2"
           assert "mcp-name: io.github.yxy050208/multisim-mcp" in package["info"]["description"]
           PY
       - name: Install verified MCP Publisher v1.8.1

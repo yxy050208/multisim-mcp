@@ -2,6 +2,25 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
+## [0.1.0-alpha.2] - 2026-08-09
+
+### 中文
+
+- 增加 Linux/Docker `introspection-only` 模式，可完成 MCP 初始化和工具发现。
+- 将 `pywin32` 限定为 Windows 依赖；非 Windows 自动化调用返回明确兼容性提示。
+- 增加最小权限 Glama 验证镜像、严格 Docker 构建上下文和 Ubuntu 容器握手 CI。
+- 实际 Multisim 电路生成、仿真和导出仍仅支持本地 Windows + 32 位 Python。
+
+### English
+
+- Added a Linux/Docker `introspection-only` mode for MCP initialization and
+  tool discovery.
+- Made `pywin32` Windows-specific and added explicit diagnostics for unsupported
+  automation runtimes.
+- Added a least-privilege Glama validation image, a strict Docker build context,
+  and an Ubuntu container handshake check.
+- Real Multisim generation, simulation, and export remain Windows-only.
+
 ## [0.1.0-alpha] - 2026-08-09
 
 ### 中文

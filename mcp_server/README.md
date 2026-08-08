@@ -11,6 +11,13 @@ Multisim 执行实验，并导出 `.ms14`、原理图、raw、CSV、SVG 和 Mark
 > Alpha software. This project is not affiliated with NI. Multisim must be
 > installed and licensed locally. The current COM worker requires 32-bit Python.
 
+Linux and Docker support MCP initialization, tool discovery, and
+`runtime_status` diagnostics only. They do not run Multisim. On an unsupported
+platform the server starts in `introspection-only` mode, while every COM-backed
+operation fails closed with a Windows compatibility message. The repository's
+minimal non-root Docker image exists for registry validation and contains no NI
+software, samples, licenses, or extracted templates.
+
 ## Current capability
 
 Stable and verified on Multisim 14.3:

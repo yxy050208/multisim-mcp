@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "mcp_server" / "pyproject.toml"
+PACKAGE_INIT = ROOT / "mcp_server" / "multisim_mcp" / "__init__.py"
 SERVER_JSON = ROOT / "server.json"
 MCP_NAME = "io.github.yxy050208/multisim-mcp"
 
@@ -72,9 +73,12 @@ def audit() -> list[Finding]:
         "CHANGELOG.md",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
+        ".dockerignore",
+        "Dockerfile",
         "server.json",
         "docs/PUBLISHING.md",
         "docs/RELEASE_NOTES_v0.1.0-alpha.md",
+        "docs/RELEASE_NOTES_v0.1.0-alpha.2.md",
     )
     for relative in required:
         if not (ROOT / relative).is_file():
@@ -122,9 +126,19 @@ def audit() -> list[Finding]:
             r'(?m)^version\s*=\s*"([^"]+)"\s*$', pyproject_text
         )
         version = version_match.group(1) if version_match else None
-        if version != "0.1.0a1":
+        init_text = PACKAGE_INIT.read_text(encoding="utf-8")
+        init_version_match = re.search(
+            r'(?m)^__version__\s*=\s*"([^"]+)"\s*$', init_text
+        )
+        init_version = init_version_match.group(1) if init_version_match else None
+        if not version or version != init_version:
             findings.append(
-                Finding("error", "version", "pyproject 版本应为 0.1.0a1", str(PYPROJECT.relative_to(ROOT)))
+                Finding(
+                    "error",
+                    "version",
+                    "pyproject 与包 __version__ 必须存在且一致",
+                    str(PYPROJECT.relative_to(ROOT)),
+                )
             )
         repository_match = re.search(
             r'(?m)^Repository\s*=\s*"([^"]+)"\s*$', pyproject_text

@@ -10,7 +10,6 @@ import shutil
 import uuid
 from pathlib import Path
 
-import pythoncom
 from mcp.server.fastmcp import FastMCP
 
 from multisim_mcp.multisim_client import (
@@ -941,7 +940,15 @@ def encode_ms14(source_xml: str, output_ms14: str | None = None) -> dict:
 
 
 def main() -> None:
-    pythoncom.CoInitialize()
+    if os.name == "nt":
+        try:
+            import pythoncom
+
+            pythoncom.CoInitialize()
+        except ImportError:
+            # Keep protocol introspection available so runtime_status can explain
+            # how to repair an incomplete Windows installation.
+            pass
     mcp.run()
 
 

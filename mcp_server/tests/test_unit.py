@@ -1,6 +1,8 @@
 """COM-free unit tests for the Multisim MCP server."""
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,7 @@ from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
     clean_error,
+    require_compatible_runtime,
     runtime_diagnostics,
 )
 
@@ -52,6 +55,50 @@ class RuntimeDiagnosticsTest(unittest.TestCase):
         self.assertIn(result["python_bits"], (32, 64))
         self.assertEqual(result["required_python_bits"], 32)
         self.assertIn("python_executable", result)
+        self.assertIn("pywin32_available", result)
+        self.assertIn(result["runtime_mode"], ("automation", "introspection-only"))
+
+    def test_non_windows_runtime_supports_introspection_only(self) -> None:
+        with (
+            patch("multisim_mcp.multisim_client.os.name", "posix"),
+            patch("multisim_mcp.multisim_client.pythoncom", None),
+            patch("multisim_mcp.multisim_client.win32_client", None),
+        ):
+            result = runtime_diagnostics()
+            self.assertFalse(result["runtime_compatible"])
+            self.assertEqual(result["runtime_mode"], "introspection-only")
+            with self.assertRaisesRegex(RuntimeError, "requires Windows"):
+                require_compatible_runtime()
+
+    def test_server_imports_when_pywin32_is_unavailable(self) -> None:
+        script = """
+import builtins
+
+real_import = builtins.__import__
+
+def import_without_pywin32(name, *args, **kwargs):
+    if name == "pythoncom" or name.startswith("win32com"):
+        raise ImportError("blocked for portable introspection test")
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_pywin32
+from multisim_mcp.multisim_client import runtime_diagnostics
+from multisim_mcp import server
+
+result = runtime_diagnostics()
+assert result["pywin32_available"] is False
+assert result["runtime_mode"] == "introspection-only"
+assert server.mcp is not None
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 class SpiceValueTest(unittest.TestCase):
