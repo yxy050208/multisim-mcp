@@ -79,3 +79,48 @@ jobs:
           '@ | python -
       - name: Compile release audit and local-pack tools
         run: python -m compileall tools/release_audit.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
+
+  linux-introspection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Build introspection-only image
+        run: docker build --tag multisim-mcp-glama .
+      - name: Verify Linux runtime diagnostics
+        run: |
+          docker run --rm -i multisim-mcp-glama python - <<'PY'
+          from multisim_mcp.multisim_client import runtime_diagnostics
+
+          result = runtime_diagnostics()
+          assert result["windows"] is False
+          assert result["runtime_compatible"] is False
+          assert result["runtime_mode"] == "introspection-only"
+          print(result)
+          PY
+      - name: Verify MCP initialize and tool introspection through Docker stdio
+        run: |
+          python -m pip install "mcp>=1.2.0,<2"
+          python - <<'PY'
+          import asyncio
+          from mcp import ClientSession, StdioServerParameters
+          from mcp.client.stdio import stdio_client
+
+          async def main():
+              params = StdioServerParameters(
+                  command="docker",
+                  args=["run", "--rm", "-i", "multisim-mcp-glama"],
+              )
+              async with stdio_client(params) as (read, write):
+                  async with ClientSession(read, write) as session:
+                      await session.initialize()
+                      response = await session.list_tools()
+              names = {tool.name for tool in response.tools}
+              assert "runtime_status" in names
+              assert "run_circuit_experiment" in names
+              print(f"Introspection returned {len(names)} tools")
+
+          asyncio.run(main())
+          PY

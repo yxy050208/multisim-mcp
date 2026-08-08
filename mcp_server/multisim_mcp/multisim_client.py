@@ -17,9 +17,15 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-import pythoncom
-import win32com.client
-import win32com.client.gencache
+try:
+    import pythoncom as _pythoncom
+    from win32com import client as _win32_client
+except ImportError:
+    _pythoncom = None
+    _win32_client = None
+
+pythoncom: Any = _pythoncom
+win32_client: Any = _win32_client
 
 from multisim_mcp import __version__
 from multisim_mcp.safety import NPX_DOWNLOAD_ENV, env_flag
@@ -32,16 +38,27 @@ CODEC_PACKAGE = "electronics-workbench-decoder@0.2.0"
 def runtime_diagnostics() -> dict:
     """Return actionable runtime details without starting Multisim."""
     bits = struct.calcsize("P") * 8
+    windows = os.name == "nt"
+    pywin32_available = pythoncom is not None and win32_client is not None
+    runtime_compatible = windows and bits == 32 and pywin32_available
     return {
         "platform": platform.platform(),
-        "windows": os.name == "nt",
+        "windows": windows,
         "python": sys.version.split()[0],
         "multisim_mcp": __version__,
         "python_executable": sys.executable,
         "python_bits": bits,
         "required_python_bits": 32,
+        "pywin32_available": pywin32_available,
         "prog_id": PROG_ID,
-        "runtime_compatible": os.name == "nt" and bits == 32,
+        "runtime_compatible": runtime_compatible,
+        "runtime_mode": "automation" if runtime_compatible else "introspection-only",
+        "runtime_message": (
+            "Multisim automation is available."
+            if runtime_compatible
+            else "MCP introspection is available, but Multisim automation requires "
+            "32-bit Python with pywin32 on Windows and a licensed Multisim installation."
+        ),
     }
 
 
@@ -54,6 +71,11 @@ def require_compatible_runtime() -> None:
         raise RuntimeError(
             "Multisim automation requires a 32-bit Python interpreter; "
             f"current interpreter is {info['python_bits']}-bit: {info['python_executable']}"
+        )
+    if not info["pywin32_available"]:
+        raise RuntimeError(
+            "Multisim automation requires pywin32; reinstall multisim-mcp in the "
+            "32-bit Windows Python environment"
         )
 
 
@@ -68,13 +90,15 @@ def clean_error(text: str) -> str:
 
 
 def bstr_array(values: Iterable[str]) -> Any:
-    return win32com.client.VARIANT(
+    require_compatible_runtime()
+    return win32_client.VARIANT(
         pythoncom.VT_ARRAY | pythoncom.VT_BSTR, list(values)
     )
 
 
 def r8_array(values: Iterable[float]) -> Any:
-    return win32com.client.VARIANT(
+    require_compatible_runtime()
+    return win32_client.VARIANT(
         pythoncom.VT_ARRAY | pythoncom.VT_R8, list(values)
     )
 
@@ -85,6 +109,7 @@ class MultisimClient:
         self._circuit: Any = None
 
     def _ensure_com(self) -> None:
+        require_compatible_runtime()
         try:
             pythoncom.CoInitialize()
         except Exception:
@@ -95,7 +120,7 @@ class MultisimClient:
         self._ensure_com()
         if self._app is None:
             try:
-                self._app = win32com.client.gencache.EnsureDispatch(PROG_ID)
+                self._app = win32_client.gencache.EnsureDispatch(PROG_ID)
             except Exception as exc:
                 raise RuntimeError(
                     "Could not activate the Multisim Automation API. Verify that "

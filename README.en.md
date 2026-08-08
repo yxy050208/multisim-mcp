@@ -6,13 +6,13 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> Current target: `v0.1.0-alpha`. This project is not affiliated with or
+> Current target: `v0.1.0-alpha.2`. This project is not affiliated with or
 > endorsed by NI. A locally installed and licensed Multisim 14+ environment is
 > required. The current COM worker uses 32-bit Python.
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.2)
 
 ## End-to-end workflow
 
@@ -73,9 +73,16 @@ See the [publishing guide](docs/PUBLISHING.md) and
 Install the published package into a 32-bit Python environment:
 
 ```powershell
-C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a1"
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a2"
 C:\path\to\python32\Scripts\multisim-mcp.exe
 ```
+
+Linux and Docker provide MCP tool discovery and compatibility diagnostics only;
+they cannot run Multisim simulations. `runtime_status` reports
+`introspection-only` in the container, while every COM automation capability
+continues to require the Windows environment described above. The root
+`Dockerfile` exists for registries such as Glama to validate the protocol and
+tool definitions.
 
 To build a user-local component pack, install from source and run:
 
