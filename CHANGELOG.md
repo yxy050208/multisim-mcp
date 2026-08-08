@@ -2,7 +2,7 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
-## [0.1.0-alpha] - Unreleased
+## [0.1.0-alpha] - 2026-08-09
 
 ### 中文
 
@@ -12,6 +12,7 @@
 - 接入原生 XFG 函数发生器和 XSC 示波器状态。
 - 增加命令白名单、外部文件指令拦截、覆盖保护和本机 stdio 安全边界。
 - 增加本地模板包生成器，避免在公开仓库分发许可不明确的 NI 派生 XML。
+- 发布 `multisim-mcp==0.1.0a1` 到 PyPI，并登记到官方 MCP Registry。
 - 48 项无 COM 测试、19 项安装包资源测试和 8 组真实 Multisim 元件族回归通过。
 
 ### English
@@ -22,5 +23,6 @@
   JK timing, and native XFG/XSC instrument state.
 - Added safe command validation, overwrite protection, local-pack generation,
   and release-time asset separation.
+- Published `multisim-mcp==0.1.0a1` to PyPI and the official MCP Registry.
 - Verified 48 COM-free tests, 19 installed-package resource tests, and eight
   real Multisim component-family groups.

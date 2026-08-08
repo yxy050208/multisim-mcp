@@ -10,6 +10,10 @@ and create reproducible reports.
 > endorsed by NI. A locally installed and licensed Multisim 14+ environment is
 > required. The current COM worker uses 32-bit Python.
 
+[PyPI package](https://pypi.org/project/multisim-mcp/) ·
+[Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha)
+
 ## End-to-end workflow
 
 `run_circuit_experiment` uses one validated source netlist to:
@@ -65,6 +69,15 @@ See the [publishing guide](docs/PUBLISHING.md) and
 [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Quick start
+
+Install the published package into a 32-bit Python environment:
+
+```powershell
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a1"
+C:\path\to\python32\Scripts\multisim-mcp.exe
+```
+
+To build a user-local component pack, install from source and run:
 
 ```powershell
 cd mcp_server

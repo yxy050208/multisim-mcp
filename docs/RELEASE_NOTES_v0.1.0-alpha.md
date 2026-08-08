@@ -1,5 +1,9 @@
 # Multisim MCP v0.1.0-alpha
 
+[PyPI](https://pypi.org/project/multisim-mcp/0.1.0a1/) ·
+[官方 MCP Registry / Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
+[源代码 / Source](https://github.com/yxy050208/multisim-mcp/tree/v0.1.0-alpha)
+
 ## 中文（主要说明）
 
 这是 Multisim MCP 的首个 Alpha 版本。它允许本机 AI Agent 根据受限 SPICE 网表
@@ -24,6 +28,12 @@
 许可说明：MIT 仅覆盖项目自有代码。发布附件不包含 NI Multisim、NI 示例电路或
 从本地样例提取的 XML 模板。用户必须从自己的授权安装生成模板包。
 
+PyPI 安装：
+
+```powershell
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a1"
+```
+
 ## English summary
 
 The first alpha release provides a local constrained-SPICE-to-Multisim workflow:
@@ -34,3 +44,6 @@ logic/JK timing, and native XFG/XSC instrument state.
 Windows, a licensed local Multisim installation, and 32-bit Python for COM are
 required. The MIT license covers project-owned code only; NI software, samples,
 and locally extracted XML packs are not distributed.
+
+The package is published as `multisim-mcp==0.1.0a1` and is discoverable in the
+official MCP Registry as `io.github.yxy050208/multisim-mcp`.

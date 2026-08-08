@@ -8,9 +8,14 @@
 > 当前版本定位为 `v0.1.0-alpha`。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；当前 COM 运行时使用 32 位 Python。
 
+[PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
+[官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha)
+
 ## 开源发布状态
 
-代码、测试和文档已进入 Alpha 发布候选阶段。由本地 NI 样例提取的 XML 模板不属于
+`0.1.0a1` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
+MCP Registry。由本地 NI 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
 
@@ -55,6 +60,15 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
   命令引擎执行的结果。
 
 ## 快速开始
+
+从 PyPI 安装到 32 位 Python 环境：
+
+```powershell
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a1"
+C:\path\to\python32\Scripts\multisim-mcp.exe
+```
+
+从源码安装并生成本地元件模板包：
 
 ```powershell
 cd mcp_server
