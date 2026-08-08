@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "notice": "Template provenance and redistribution permission must be reviewed before public release.",
+  "families": {
+    "R": {
+      "status": "native-verified",
+      "source": "existing project research template"
+    },
+    "C": {
+      "status": "native-verified",
+      "source": "local NI sample LowPassFilter.ms14.xml, component C9"
+    },
+    "L": {
+      "status": "native-verified",
+      "source": "local NI sample Monte Carlo - RLC Circuit.ms14.xml, component L1"
+    },
+    "V": {
+      "status": "native-verified",
+      "source": "existing project research template"
+    },
+    "I": {
+      "status": "template-extracted",
+      "source": "local NI sample Batched Analyses - CMOS Common Source Amplifier.ms14, component Iref"
+    },
+    "E": {
+      "status": "native-verified-experimental-carrier",
+      "source": "generated E-source semantics on the tracked four-terminal carrier"
+    },
+    "F": {
+      "status": "native-verified-experimental-carrier",
+      "source": "generated F-source semantics on the tracked current-source carrier"
+    },
+    "G": {
+      "status": "native-verified-experimental-carrier",
+      "source": "generated G-source semantics on the tracked four-terminal carrier"
+    },
+    "H": {
+      "status": "native-verified-experimental-carrier",
+      "source": "generated H-source semantics on the tracked voltage-source carrier"
+    },
+    "BV/BI/T/XSUB2-5/S/JN/JP/ZN/ZP": {
+      "status": "native-verified-experimental-carriers",
+      "source": "generated standard SPICE semantics on provenance-tracked carrier templates"
+    },
+    "XSUBN": {
+      "status": "native-verified-experimental-carrier",
+      "source": "local NI sample Getting Started/Getting Started 1.ms14 component R2, adapted as a 6-16-terminal block",
+      "notice": "Redistribution review remains required"
+    },
+    "K/O/U": {
+      "status": "native-verified-experimental-carriers",
+      "source": "generated mutual-coupling, LTRA, and URC semantics on provenance-tracked carrier templates"
+    },
+    "W": {
+      "status": "native-verified-experimental-carrier",
+      "source": "generated W-source semantics on the tracked resistor carrier"
+    },
+    "DNOT4/DAND5/DOR5/DNAND5/DNOR5/DXOR5/DXNOR5/DJK7": {
+      "status": "native-preview-open-export-and-timing-verified",
+      "source": "local NI sample Up-DownCounter.ms14 components U13/U5/U14/U1",
+      "notice": "Derived-gate artwork uses AND/OR carriers; redistribution review remains pending"
+    },
+    "OSC6": {
+      "status": "native-instrument-open-save-verified",
+      "source": "local NI sample LowPassFilter.ms14 component XSC1 and its instrument-state node",
+      "notice": "Redistribution review remains required"
+    },
+    "XFG3": {
+      "status": "native-instrument-open-save-and-waveform-verified",
+      "source": "local NI sample Non-InvertingOpAmp.ms14 component XFG1 and its instrument-state node",
+      "notice": "Redistribution review remains required"
+    },
+    "GND": {
+      "status": "native-verified",
+      "source": "existing project research template"
+    },
+    "D": {
+      "status": "template-extracted",
+      "native_model": "1N4001GP",
+      "source": "local NI sample ClassBPushPullAmp.ms14, component D1"
+    },
+    "QNPN": {
+      "status": "template-extracted",
+      "native_model": "2N3904",
+      "source": "local NI sample ClassBPushPullAmp.ms14, component Q1"
+    },
+    "QPNP": {
+      "status": "template-extracted",
+      "native_model": "2N3906",
+      "source": "local NI sample ClassBPushPullAmp.ms14, component Q2"
+    },
+    "MNMOS": {
+      "status": "template-extracted",
+      "native_model": "configurable NMOS",
+      "source": "local NI sample DC Sweep - CMOS Inverter.ms14, component Q1"
+    },
+    "MPMOS": {
+      "status": "template-extracted",
+      "native_model": "configurable PMOS",
+      "source": "local NI sample DC Sweep - CMOS Inverter.ms14, component Q2"
+    },
+    "OPAMP5": {
+      "status": "template-extracted",
+      "native_model": "5T_Virtual",
+      "source": "local NI sample LowPassFilter.ms14, component U4"
+    }
+  }
+}

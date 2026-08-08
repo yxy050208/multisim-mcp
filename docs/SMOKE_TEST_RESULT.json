@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "test_name": "dc_voltage_divider",
+  "multisim_version": "14.3",
+  "netlist_sha256": "4065326cd5b4ab5ab7ae04b9f7e3a48269e412bcd87fa0bfecfd68bd0ba7cacb",
+  "analysis": {
+    "command": "dc VIN 0 10 0.1",
+    "success": true,
+    "points": 101,
+    "columns": [
+      "vin voltage (v)",
+      "V(vin)",
+      "V(vout)",
+      "I(vin)"
+    ]
+  },
+  "measurements": {
+    "V(vin)": {
+      "minimum": 0.0,
+      "maximum": 10.0,
+      "mean": 5.0
+    },
+    "V(vout)": {
+      "minimum": 0.0,
+      "maximum": 5.0,
+      "mean": 2.5
+    },
+    "I(vin)": {
+      "minimum": -0.005,
+      "maximum": 0.0
+    }
+  },
+  "timed_out": false,
+  "last_error": "",
+  "sanitized": true
+}

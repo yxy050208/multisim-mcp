@@ -1,0 +1,52 @@
+# NI copy and local tooling
+multisim/
+tools/python32/
+tools/wheels/
+tools/7zip/
+tools/7zipfull/
+tools/com_probe_cs/
+tools/7z-extra.7z
+tools/7z2602-x64.exe
+tools/7zr.exe
+
+# One-off COM/reverse-engineering probes stay local. The supported public tools
+# are bootstrap_local_component_pack.py, extract_native_component_templates.py,
+# and release_audit.py.
+tools/_probe.py
+tools/*_probe.py
+tools/*_probe.ps1
+tools/com_*.py
+tools/com_*.ps1
+tools/dump_typelib.py
+tools/fetch_competitors.ps1
+tools/compare_probe_xml.py
+tools/dump_probe_net.py
+tools/verify_probe_ms14.py
+
+# Local interoperability research and generated artifacts. Public releases use
+# sanitized documentation under docs/ instead of files from analysis/.
+analysis/
+competitors/
+
+# Generated from locally licensed Multisim samples. Keep manifest.json tracked,
+# but never add the extracted XML pack without a completed redistribution review.
+mcp_server/multisim_mcp/templates/*.xml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.whl
+.coverage
+.pytest_cache/
+release/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multisim-mcp"
+version = "0.1.0a1"
+description = "Unofficial MCP server for NI Multisim Automation API"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Multisim MCP contributors" }]
+keywords = ["multisim", "mcp", "circuit", "simulation", "ai-agent", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.2.0,<2",
+    "pywin32>=306",
+]
+
+[project.urls]
+Homepage = "https://github.com/yxy050208/multisim-mcp"
+Repository = "https://github.com/yxy050208/multisim-mcp"
+Issues = "https://github.com/yxy050208/multisim-mcp/issues"
+Security = "https://github.com/yxy050208/multisim-mcp/security/advisories/new"
+
+[project.scripts]
+multisim-mcp = "multisim_mcp.server:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["multisim_mcp*"]
+
+[tool.setuptools.package-data]
+multisim_mcp = ["templates/*.json"]
