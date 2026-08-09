@@ -11,7 +11,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from multisim_mcp.cli import (
+    LOCAL_PACK_SCHEMA_VERSION,
     REQUIRED_TEMPLATES,
+    _local_pack_status,
     _write_config,
     collect_doctor_report,
     main,
@@ -20,6 +22,21 @@ from multisim_mcp.cli import (
 
 
 class DoctorTest(unittest.TestCase):
+    def test_generated_local_pack_schema_rejects_legacy_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "local-pack-manifest.json"
+            manifest.write_text('{"schema_version": 1}', encoding="utf-8")
+            legacy = _local_pack_status([root])
+            manifest.write_text(
+                json.dumps({"schema_version": LOCAL_PACK_SCHEMA_VERSION}),
+                encoding="utf-8",
+            )
+            current = _local_pack_status([root])
+        self.assertTrue(legacy["managed"])
+        self.assertFalse(legacy["compatible"])
+        self.assertTrue(current["compatible"])
+
     def test_report_has_stable_machine_readable_shape(self) -> None:
         report = collect_doctor_report("en")
         self.assertEqual(report["schema_version"], 1)

@@ -77,6 +77,9 @@ def audit() -> list[Finding]:
         "Dockerfile",
         "server.json",
         "docs/PUBLISHING.md",
+        "docs/MIGRATION_TO_1.0.md",
+        "docs/RECOVERY.md",
+        "docs/RELEASE_NOTES_v1.0.0.md",
         "docs/RELEASE_NOTES_v0.1.0-alpha.md",
         "docs/RELEASE_NOTES_v0.1.0-alpha.2.md",
     )

@@ -26,6 +26,22 @@ def _port_sort_key(item: ET.Element) -> tuple[int, str]:
     return (int(match.group()) if match else 1_000_000, name)
 
 
+def _write_template(path: Path, element: ET.Element) -> Path:
+    """Write decoder-compatible fragments without formatting text nodes.
+
+    The Multisim XML codec preserves whitespace-only nodes. Pretty-printing an
+    extracted component therefore changes the encoded object graph and can make
+    Multisim silently omit an otherwise valid part from its native netlist.
+    """
+    for node in element.iter():
+        if node.text is not None and not node.text.strip():
+            node.text = None
+        if node.tail is not None and not node.tail.strip():
+            node.tail = None
+    ET.ElementTree(element).write(path, encoding="ASCII", xml_declaration=True)
+    return path
+
+
 def extract_templates(
     source: Path,
     refdes: str,
@@ -113,20 +129,17 @@ def extract_templates(
 
     written: list[Path] = []
     for path, element in outputs:
-        ET.indent(element, space="  ")
-        ET.ElementTree(element).write(path, encoding="utf-8", xml_declaration=True)
-        written.append(path)
+        written.append(_write_template(path, element))
     return written
 
 
-def _write_template(path: Path, element: ET.Element) -> Path:
-    ET.indent(element, space="  ")
-    ET.ElementTree(element).write(path, encoding="utf-8", xml_declaration=True)
-    return path
-
-
-def extract_structural_templates(source: Path, output_dir: Path) -> list[Path]:
-    """Derive the non-component schematic scaffolding from a licensed design."""
+def extract_structural_templates(
+    source: Path,
+    output_dir: Path,
+    *,
+    minimal_source: Path | None = None,
+) -> list[Path]:
+    """Derive reusable wiring plus a blank version-matched project shell."""
     root = ET.parse(source).getroot()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,7 +194,8 @@ def extract_structural_templates(source: Path, output_dir: Path) -> list[Path]:
     junction_member = first_item("CODPinComp", pin_with("1", "CODPinComp"))
     junction_owner = first_item("CODPinComp", pin_with("0", "CODPinComp", minimum=2))
 
-    minimal = copy.deepcopy(root)
+    minimal_path = minimal_source or source
+    minimal = ET.parse(minimal_path).getroot()
     main_diagram = None
     circuit_item = None
     for diagram in minimal.iter("CIITDiagram"):
@@ -197,7 +211,7 @@ def extract_structural_templates(source: Path, output_dir: Path) -> list[Path]:
             main_diagram, circuit_item = diagram, candidate
             break
     if main_diagram is None or circuit_item is None:
-        raise ValueError(f"No main circuit diagram was found in {source}")
+        raise ValueError(f"No main circuit diagram was found in {minimal_path}")
     composite = main_diagram.find("./Components/CODComposite")
     elements = main_diagram.find("./Elements")
     for container_name in ("Objects", "ReferencedComponents"):

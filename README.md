@@ -7,19 +7,18 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前公开发行版为 `v0.1.0-alpha.3`。项目非 NI 官方产品，需要本机安装并授权
+> 当前稳定发行版为 `v1.0.0`。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；当前 COM 运行时使用 32 位 Python。
 
-主分支正在按 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md) 分阶段开发；下一次公开发布
-计划直接升级到 `v1.0.0`，期间不会发布中间 PyPI/MCP Registry 版本。
+四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.3)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.0.0)
 
 ## 开源发布状态
 
-`0.1.0a3` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
+`1.0.0` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
 MCP Registry。由本地 NI 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
@@ -39,14 +38,14 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 6. 导出 raw、CSV、SVG 波形和命令日志。
 7. 生成 Markdown、中英双语独立 HTML/PDF 报告及带 SHA-256 的 `manifest.json`。
 
-对于较长实验，主分支新增 `submit_circuit_experiment` 持久任务接口。它会立即返回
+对于较长实验，`submit_circuit_experiment` 持久任务接口会立即返回
 `job_id`，可通过 `get_experiment_job`、`list_experiment_jobs`、
 `cancel_experiment_job`、`retry_experiment_job` 或 `multisim://jobs/{job_id}` 查询、
 取消和重试任务。每个实验
 运行在隔离 worker 进程中；worker 崩溃或心跳超时不会拖垮 MCP 服务，服务重启后未完成
-任务会安全地重新排队。该能力将在完成其余路线图后随 `v1.0.0` 发布。
+任务会安全地重新排队。
 
-第三阶段还加入了可计算的设计验收与批量实验：
+1.0 还加入了可计算的设计验收与批量实验：
 
 - `run_verified_circuit_experiment` 接收版本化 `ExperimentSpec`，自动测量增益、
   带宽、截止频率、上升时间、过冲、纹波、功耗等指标，并把逐项
@@ -93,7 +92,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 已经在 Multisim 14.3 上完成分压器、耦合电感、数字门/JK 时序以及
 函数发生器 + 示波器联合实验的真实验证。
 
-第四阶段加入不分发 NI 数据库资产的可移植元件与数据仪器：
+1.0 加入不分发 NI 数据库资产的可移植元件与数据仪器：
 
 - `@TRANSFORMER`、`@POTENTIOMETER`、`@RELAY`、`@CRYSTAL`、功率二极管/MOS；
 - `@DFF`、`@TFF`、`@COUNTER4`、`@SHIFT_REGISTER4`、`@ADC1`、`@DAC1`；
@@ -102,7 +101,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 适配器语法与社区 JSON 接口见 [`docs/COMPONENT_ADAPTERS.md`](docs/COMPONENT_ADAPTERS.md)，
 真实版本边界见 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)。
-第四阶段真实回归覆盖适配器原理图打开/回导、变压器瞬态、继电器与功率器件工作点、
+1.0 真实回归覆盖适配器原理图打开/回导、变压器瞬态、继电器与功率器件工作点、
 晶振 AC、DFF 瞬态以及双语正式报告的完整事务发布。
 
 ## 能力成熟度
@@ -134,7 +133,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 从 PyPI 安装到 32 位 Python 环境：
 
 ```powershell
-C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a3"
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.0.0"
 C:\path\to\python32\Scripts\multisim-mcp.exe
 ```
 
@@ -157,7 +156,10 @@ cd mcp_server
 .\run_server.ps1
 ```
 
-`v0.1.0-alpha.3` 源码提供安装诊断和配置生成命令。默认情况下它们不会启动
+模板包生成器会连接已授权的 Multisim，并新建一个临时空白电路以取得与当前安装版本
+一致的工程骨架；执行前请保存正在编辑的工作。alpha 版本生成的 schema 1 包需要重建。
+
+`v1.0.0` 提供安装诊断和配置生成命令。默认情况下它们不会启动
 Multisim，也不会修改现有客户端配置：
 
 ```powershell
@@ -201,6 +203,8 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 
 详细安装、工具、安全开关和测试说明见 [`mcp_server/README.md`](mcp_server/README.md)。
 元件覆盖和剩余边界见 [`docs/COMPONENT_COVERAGE.md`](docs/COMPONENT_COVERAGE.md)。
+从 alpha 升级请阅读 [`docs/MIGRATION_TO_1.0.md`](docs/MIGRATION_TO_1.0.md)；任务与
+实验恢复流程见 [`docs/RECOVERY.md`](docs/RECOVERY.md)。
 
 ## 仓库结构
 

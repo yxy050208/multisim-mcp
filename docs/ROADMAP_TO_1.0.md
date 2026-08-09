@@ -1,8 +1,8 @@
 # Multisim MCP 1.0 路线图
 
-当前公开版本仍为 `v0.1.0-alpha.3`。主分支将分阶段完成 1.0 能力，期间不发布新的
-PyPI、MCP Registry 或 GitHub Release；所有阶段及真实 Multisim 回归通过后，下一次
-公开发布直接定为 `v1.0.0`。
+四个开发阶段已经完成，源码版本已进入 `v1.0.0` 发布门禁。功能、真实 Multisim、
+安装包和文档验证均已通过；远程 CI、PyPI、MCP Registry、GitHub Release 与社区目录
+将在正式发布时按顺序完成。
 
 ## 第一阶段：MCP 2 平台层（已完成）
 
@@ -47,17 +47,15 @@ PyPI、MCP Registry 或 GitHub Release；所有阶段及真实 Multisim 回归�
 
 ## 1.0 发布门槛
 
-- [ ] 全部无 COM、现代/旧协议、打包和安全测试通过。
-- [ ] Windows 32 位 Python + Multisim 14.3 完整回归通过。
-- [ ] wheel/sdist 不包含 NI 派生模板、实验数据或开发环境。
-- [ ] 安装、迁移、故障恢复、贡献和中英双语用户文档完成。
+- [x] 全部无 COM、现代/旧协议、打包和安全测试通过。
+- [x] Windows 32 位 Python + Multisim 14.3 完整回归通过。
+- [x] wheel/sdist 不包含 NI 派生模板、实验数据或开发环境。
+- [x] 安装、迁移、故障恢复、贡献和中英双语用户文档完成。
 - [ ] PyPI、官方 MCP Registry、GitHub Release 和社区目录信息一次性更新到
       `v1.0.0`。
 
 ## English summary
 
-The public release remains `v0.1.0-alpha.3`. Development proceeds through four
-gated phases—MCP 2 foundations, resilient experiment jobs, measurable design
-requirements, and high-value components/reports. No intermediate package or
-registry release is planned; the next public release is `v1.0.0` after all
-gates and real-Multisim regressions pass.
+All four development phases are complete and the source version is at the
+`v1.0.0` release gate. Local protocol, package, documentation, and real-Multisim
+checks have passed; public CI and registry/release publication remain.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multisim-mcp"
-version = "0.1.0a3"
+version = "1.0.0"
 description = "Unofficial MCP server for NI Multisim Automation API"
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Multisim MCP contributors" }]
 keywords = ["multisim", "mcp", "circuit", "simulation", "ai-agent", "automation"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Win32 (MS Windows)",
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",

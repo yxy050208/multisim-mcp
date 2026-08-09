@@ -57,3 +57,24 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Publish `0.1.0a3` to PyPI through Trusted Publishing.
 - [x] Publish the matching official MCP Registry metadata.
 - [x] Create and push the annotated `v0.1.0-alpha.3` tag and GitHub Release.
+
+## Required before v1.0.0
+
+- [x] Complete all four phases in `ROADMAP_TO_1.0.md`.
+- [x] Synchronize `pyproject.toml`, `multisim_mcp.__version__`, and both
+      `server.json` version fields at `1.0.0`.
+- [x] Pass 116 COM-free tests on both 32-bit and 64-bit Python.
+- [x] Pass modern and legacy MCP stdio introspection with 51 tools, 19 Resource
+      templates, and 5 prompts.
+- [x] Verify all 13 portable adapters open and reverse-export in Multisim 14.3,
+      plus representative analog, power, digital, and complex-AC simulations.
+- [x] Verify standalone Chinese/English HTML/PDF reports and SHA-256 manifests.
+- [x] Build and inspect wheel/sdist with no NI XML, `.ms14`, experiment output,
+      research artifacts, or development environment files.
+- [x] Publish migration, recovery, compatibility, adapter, contribution, and
+      bilingual installation documentation.
+- [x] Produce bilingual `RELEASE_NOTES_v1.0.0.md` and pass the local release audit.
+- [ ] Push the release commit and wait for all public CI jobs to pass.
+- [ ] Push annotated tag `v1.0.0` and verify the Trusted Publishing result on PyPI.
+- [ ] Publish matching MCP Registry metadata and GitHub Release artifacts.
+- [ ] Verify Glama and awesome-mcp-servers directory metadata after publication.

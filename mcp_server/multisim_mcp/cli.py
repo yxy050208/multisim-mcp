@@ -16,6 +16,7 @@ from typing import Any, Sequence
 from multisim_mcp import __version__
 
 SCHEMA_VERSION = 1
+LOCAL_PACK_SCHEMA_VERSION = 2
 REQUIRED_TEMPLATES = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
 CLIENTS = ("claude-desktop", "codex", "generic")
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -54,6 +55,40 @@ def _check(
         result["repair"] = repair
     result.update(details)
     return result
+
+
+def _local_pack_status(paths: list[Path]) -> dict[str, Any]:
+    """Reject generated packs whose extraction contract predates this release."""
+    for root in paths:
+        manifest = root / "local-pack-manifest.json"
+        if not manifest.is_file():
+            continue
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            schema_version = int(payload.get("schema_version", 0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            return {
+                "managed": True,
+                "compatible": False,
+                "manifest": str(manifest),
+                "schema_version": None,
+                "error": str(exc),
+            }
+        return {
+            "managed": True,
+            "compatible": schema_version == LOCAL_PACK_SCHEMA_VERSION,
+            "manifest": str(manifest),
+            "schema_version": schema_version,
+            "required_schema_version": LOCAL_PACK_SCHEMA_VERSION,
+            "generator": payload.get("generator"),
+        }
+    return {
+        "managed": False,
+        "compatible": True,
+        "manifest": None,
+        "schema_version": None,
+        "required_schema_version": LOCAL_PACK_SCHEMA_VERSION,
+    }
 
 
 def _com_registration() -> dict[str, Any]:
@@ -353,31 +388,44 @@ def collect_doctor_report(
         for name in REQUIRED_TEMPLATES
         if not any((path / name).is_file() for path in paths)
     ]
-    templates_ready = not missing_templates
+    local_pack = _local_pack_status(paths)
+    templates_ready = not missing_templates and bool(local_pack["compatible"])
+    incompatible_pack = not local_pack["compatible"]
+    if templates_ready:
+        template_message = _message(
+            language,
+            "原理图模板包可用。",
+            "The schematic template pack is ready.",
+        )
+    elif incompatible_pack:
+        template_message = _message(
+            language,
+            "本地模板包版本过旧或 manifest 无效。",
+            "The local template pack is outdated or has an invalid manifest.",
+        )
+    else:
+        template_message = _message(
+            language,
+            "原理图模板包不完整。",
+            "The schematic template pack is incomplete.",
+        )
     checks.append(
         _check(
             "schematic.template_pack",
             "pass" if templates_ready else "fail",
-            _message(
-                language,
-                "原理图模板包可用。" if templates_ready else "原理图模板包不完整。",
-                (
-                    "The schematic template pack is ready."
-                    if templates_ready
-                    else "The schematic template pack is incomplete."
-                ),
-            ),
+            template_message,
             (
                 None
                 if templates_ready
                 else _message(
                     language,
-                    "运行 tools/bootstrap_local_component_pack.py，并设置 MULTISIM_MCP_TEMPLATE_DIR。",
-                    "Run tools/bootstrap_local_component_pack.py and set MULTISIM_MCP_TEMPLATE_DIR.",
+                    "使用 1.0 源码重新运行 tools/bootstrap_local_component_pack.py，并设置 MULTISIM_MCP_TEMPLATE_DIR。",
+                    "Rebuild the pack with the 1.0 tools/bootstrap_local_component_pack.py and set MULTISIM_MCP_TEMPLATE_DIR.",
                 )
             ),
             search_paths=[str(path) for path in paths],
             missing=missing_templates,
+            local_pack=local_pack,
         )
     )
 

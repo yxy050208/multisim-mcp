@@ -2,7 +2,11 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
-## [Unreleased - toward 1.0.0]
+## [Unreleased]
+
+暂无变更。 / No changes yet.
+
+## [1.0.0] - 2026-08-10
 
 ### 中文
 
@@ -27,6 +31,10 @@
 - SPICE3 ASCII raw 解析器新增复数 AC 数据、幅值、实部、虚部与相位支持。
 - 完整实验自动输出中英双语独立 HTML/PDF 与带 SHA-256 的 `manifest.json`，并新增 5 个 Resource 模板。
 - 公开严格声明式 JSON 元件适配器接口、贡献示例和兼容性矩阵；禁止执行代码和外部文件指令。
+- 本地模板生成器改用当前 Multisim 自动创建的空白电路作为工程骨架，写入 schema 2
+  manifest；`doctor` 拒绝可能静默丢失元件的旧 schema 1 包。
+- 完成 116 项无 COM 测试、32/64 位 Python 安装回归、现代/旧 MCP 协议握手、
+  代码型 wheel/sdist 审计以及真实 Multisim 14.3 元件与代表性仿真回归。
 
 ### English
 
@@ -53,6 +61,12 @@
 - Added complex SPICE3 raw parsing with magnitude, real, imaginary, and phase data.
 - Added standalone Chinese/English HTML and PDF reports, a SHA-256
   reproducibility manifest, five resources, and a strict declarative adapter API.
+- Rebuilt user-local pack scaffolding from a blank circuit created by the
+  installed Multisim version, added a schema-2 manifest, and made `doctor`
+  reject legacy schema-1 packs that can silently omit components.
+- Completed 116 COM-free tests, 32/64-bit Python installation checks, modern
+  and legacy MCP handshakes, code-only artifact audits, and real Multisim 14.3
+  component and representative-simulation regressions.
 
 ## [0.1.0-alpha.3] - 2026-08-09
 

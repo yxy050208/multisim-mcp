@@ -16,7 +16,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from multisim_mcp.multisim_client import Ms14Codec
+from multisim_mcp import __version__
+from multisim_mcp.multisim_client import Ms14Codec, MultisimClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from extract_native_component_templates import (
@@ -32,8 +33,14 @@ class Extraction:
     kind: str
 
 
+RLC_SAMPLE = "LabVIEW Multisim API Toolkit/RLC Values/RLC Values.ms14"
+
+
 EXTRACTIONS = (
-    Extraction("LowPassFilter.ms14", "R11", "R"),
+    # LowPassFilter.ms14/R11 looks structurally valid but Multisim 14.3 drops
+    # transplanted instances from its native netlist. The API Toolkit's R1 is
+    # verified to survive open/save/reverse-netlist generation.
+    Extraction(RLC_SAMPLE, "R1", "R"),
     Extraction("LowPassFilter.ms14", "C9", "C"),
     Extraction("LowPassFilter.ms14", "V1", "V"),
     Extraction("LowPassFilter.ms14", "0", "GND"),
@@ -101,13 +108,29 @@ def build_pack(samples_root: Path, output: Path, force: bool) -> dict:
                 decoded_by_sample[item.sample] = decoded
             for path in extract_templates(decoded, item.refdes, item.kind, output):
                 written.append(path.name)
+        # Installed samples may retain a much older file format than the local
+        # application. Generate a blank design through the licensed Automation
+        # API so structural scaffolding always matches the installed Multisim.
+        blank_ms14 = temp_root / "multisim-mcp-blank.ms14"
+        blank_client = MultisimClient()
+        try:
+            connection = blank_client.connect()
+            blank_client.new_circuit()
+            blank_client.save_circuit(str(blank_ms14))
+        finally:
+            blank_client.disconnect()
+        blank_xml = Path(codec.decode(str(blank_ms14))["xml"])
+        blank_payload = blank_xml.read_bytes()
+        if b"\x00" in blank_payload:
+            blank_xml.write_bytes(blank_payload.replace(b"\x00", b""))
         for path in extract_structural_templates(
-            decoded_by_sample["LowPassFilter.ms14"], output
+            decoded_by_sample[RLC_SAMPLE], output, minimal_source=blank_xml
         ):
             written.append(path.name)
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "generator": {"name": "multisim-mcp", "version": __version__},
         "local_only": True,
         "notice": (
             "Generated from the user's licensed Multisim samples. Do not redistribute "
@@ -117,7 +140,10 @@ def build_pack(samples_root: Path, output: Path, force: bool) -> dict:
             {"kind": item.kind, "sample": item.sample, "refdes": item.refdes}
             for item in EXTRACTIONS
         ],
-        "structural_source": "LowPassFilter.ms14",
+        "structural_source": {
+            "kind": "automation_blank",
+            "multisim_version": connection["version"],
+        },
         "files": sorted(set(written)),
     }
     manifest_path = output / "local-pack-manifest.json"

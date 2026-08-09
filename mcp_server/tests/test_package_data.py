@@ -1,6 +1,7 @@
 """Verify resources required by an installed wheel are present."""
 
 import unittest
+import xml.etree.ElementTree as ET
 
 from multisim_mcp.schematic_builder import (
     TEMPLATE_DIR,
@@ -37,6 +38,35 @@ class PackageDataTest(unittest.TestCase):
             paths = template_search_paths()
         self.assertEqual(paths[0], Path(tmp).resolve())
         self.assertEqual(paths[-1], TEMPLATE_DIR)
+
+    def test_extractor_writes_decoder_compatible_compact_ascii(self) -> None:
+        import importlib.util
+        import tempfile
+        from pathlib import Path
+
+        tool_path = (
+            Path(__file__).resolve().parents[2]
+            / "tools"
+            / "extract_native_component_templates.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "template_extractor_test", tool_path
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        root = ET.Element("Item")
+        child = ET.SubElement(root, "Value")
+        child.text = "\n    "
+        child.tail = "\n  "
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "fragment.xml"
+            module._write_template(output, root)
+            payload = output.read_bytes()
+        self.assertIn(b"encoding='ASCII'", payload)
+        self.assertNotIn(b"\n  ", payload)
 
     def test_schematic_templates_are_installed(self) -> None:
         required = {
