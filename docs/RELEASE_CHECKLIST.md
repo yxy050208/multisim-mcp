@@ -74,7 +74,7 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Publish migration, recovery, compatibility, adapter, contribution, and
       bilingual installation documentation.
 - [x] Produce bilingual `RELEASE_NOTES_v1.0.0.md` and pass the local release audit.
-- [ ] Push the release commit and wait for all public CI jobs to pass.
-- [ ] Push annotated tag `v1.0.0` and verify the Trusted Publishing result on PyPI.
-- [ ] Publish matching MCP Registry metadata and GitHub Release artifacts.
-- [ ] Verify Glama and awesome-mcp-servers directory metadata after publication.
+- [x] Push the release commit and wait for all public CI jobs to pass.
+- [x] Push annotated tag `v1.0.0` and verify the Trusted Publishing result on PyPI.
+- [x] Publish matching MCP Registry metadata and GitHub Release artifacts.
+- [x] Verify Glama and awesome-mcp-servers directory metadata after publication.
