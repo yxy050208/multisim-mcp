@@ -31,8 +31,13 @@ Stable and verified on Multisim 14.3:
 - High-level `run_circuit_experiment` workflow.
 - Durable `submit_circuit_experiment` queue with progress, cancellation,
   total/heartbeat timeouts, and isolated-worker recovery.
+- Versioned `ExperimentSpec` verification with persisted PASS/FAIL/unverified
+  evidence and theory-versus-simulation error.
+- Parameter, tolerance, temperature, and seeded Monte Carlo sweeps with a
+  100-run hard limit and durable-worker support.
 - MCP `2026-07-28` discovery plus automatic compatibility with legacy clients.
-- Ten experiment artifact Resources, one job-status Resource, and five
+- Eleven experiment artifact Resources, two sweep Resources, one job-status
+  Resource, and five
   bilingual workflow Prompts.
 - Validated structured output for the complete experiment workflow.
 
@@ -45,6 +50,9 @@ multisim://experiments/{experiment_id}/report
 multisim://experiments/{experiment_id}/schematic
 multisim://experiments/{experiment_id}/data
 multisim://experiments/{experiment_id}/plot
+multisim://experiments/{experiment_id}/verification
+multisim://sweeps/{sweep_id}/summary
+multisim://sweeps/{sweep_id}/data
 ```
 
 Completed durable jobs restore their handles after restarting the server. For
@@ -268,6 +276,21 @@ cross-process sibling lock and remains transactional. A queue-wide lease keeps
 execution serialized even if multiple MCP frontend processes use the same job
 state directory.
 
+### Design verification and sweeps
+
+Use `run_verified_circuit_experiment` with an `ExperimentSpec` containing
+explicit measurement signals, criteria, tolerances, and optional theoretical
+values. Supported metrics include scalar statistics, gain, cutoff frequency,
+bandwidth, rise time, overshoot, ripple, and power. Each requirement is reported
+as `pass`, `fail`, or `unverified`; unavailable evidence is never guessed.
+
+Use `plan_experiment_sweep` before execution to preview every rendered run.
+`run_experiment_sweep` executes synchronously, while `submit_experiment_sweep`
+uses the durable job worker. Modes are `parameter`, `tolerance`, `temperature`,
+and `monte_carlo`; Monte Carlo runs use an explicit integer seed. Sweep values
+are finite numbers substituted into declared `{{NAME}}` placeholders, and every
+rendered netlist passes the same safety validator as a normal experiment.
+
 Use `create_schematic_from_netlist` when only an editable schematic is needed,
 or `run_spice_netlist` for netlist-only simulation.
 
@@ -292,6 +315,8 @@ SQUARE, or TRIANGLE), `FREQ`, `AMPLITUDE`, `OFFSET`, `DUTY`, and `RISE`.
   `MULTISIM_MCP_EWD` and `MULTISIM_MCP_EWE` to its `dist/ewd.js` and
   `dist/ewe.js` entry points; the server invokes them through `node.exe`.
 - Existing experiment artifacts are not overwritten unless `overwrite=true`.
+- Sweep expansion is capped at 100 runs and only finite numeric substitutions
+  are accepted.
 - Asynchronous job specifications are persisted locally for recovery; their
   state directory must not be shared with untrusted users.
 - The server is intended for trusted local stdio clients, not public network

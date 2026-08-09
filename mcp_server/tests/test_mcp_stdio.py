@@ -53,6 +53,9 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 mode
             )
             self.assertEqual(protocol, expected_protocol)
+            self.assertEqual(len(names), 46)
+            self.assertEqual(len(prompts), 5)
+            self.assertEqual(len(resources), 14)
 
             self.assertIn("runtime_status", names)
             self.assertIn("schematic_component_catalog", names)
@@ -64,12 +67,22 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("cancel_experiment_job", names)
             self.assertIn("retry_experiment_job", names)
             self.assertIn("register_experiment_artifacts", names)
+            self.assertIn("run_verified_circuit_experiment", names)
+            self.assertIn("measure_experiment", names)
+            self.assertIn("verify_experiment_requirements", names)
+            self.assertIn("plan_experiment_sweep", names)
+            self.assertIn("run_experiment_sweep", names)
+            self.assertIn("submit_experiment_sweep", names)
+            self.assertIn("register_sweep_artifacts", names)
             self.assertIn("run_spice_netlist", names)
             self.assertIn("create_circuit_experiment", prompts)
             self.assertIn("verify_design_requirements", prompts)
             self.assertIn("multisim://experiments/{experiment_id}/manifest", resources)
             self.assertIn("multisim://experiments/{experiment_id}/schematic", resources)
             self.assertIn("multisim://jobs/{job_id}", resources)
+            self.assertIn("multisim://experiments/{experiment_id}/verification", resources)
+            self.assertIn("multisim://sweeps/{sweep_id}/summary", resources)
+            self.assertIn("multisim://sweeps/{sweep_id}/data", resources)
             self.assertEqual(
                 set(output_schema["required"]),
                 {

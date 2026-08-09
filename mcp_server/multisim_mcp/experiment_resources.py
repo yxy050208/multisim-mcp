@@ -45,6 +45,13 @@ class ExperimentResult(TypedDict):
     output_dir: str
 
 
+class VerifiedExperimentResult(ExperimentResult):
+    """High-level result with persisted machine-readable requirement verdicts."""
+
+    verification: dict[str, Any]
+    verification_path: str
+
+
 _RESOURCE_SCHEME: Final = "multisim://experiments"
 _EXPERIMENT_ID_PATTERN: Final = re.compile(r"^exp-[0-9a-f]{24}$")
 _DEFAULT_MAX_RESOURCE_BYTES: Final = 16 * 1024 * 1024
@@ -61,6 +68,7 @@ _ARTIFACTS: Final[dict[str, tuple[str, str, bool]]] = {
     "raw": ("result.raw", "application/octet-stream", True),
     "commands": ("run.txt", "text/plain", False),
     "log": ("run.log", "text/plain", False),
+    "verification": ("verification.json", "application/json", False),
 }
 _REQUIRED_FILES: Final = (
     "circuit.ms14",
@@ -129,13 +137,18 @@ def register_experiment(output_dir: str) -> ExperimentResourceIndex:
     experiment_id = _stable_experiment_id(root)
     with _registry_lock:
         _registry[experiment_id] = root
+    available = {
+        name: definition
+        for name, definition in _ARTIFACTS.items()
+        if (root / definition[0]).is_file()
+    }
     return {
         "success": True,
         "experiment_id": experiment_id,
         "output_dir": str(root),
         "resources": {
             "manifest": _resource_uri(experiment_id, "manifest"),
-            **{name: _resource_uri(experiment_id, name) for name in _ARTIFACTS},
+            **{name: _resource_uri(experiment_id, name) for name in available},
         },
     }
 
@@ -151,6 +164,11 @@ def _registered_root(experiment_id: str) -> Path:
             "register_experiment_artifacts first"
         )
     return root
+
+
+def registered_experiment_root(experiment_id: str) -> Path:
+    """Resolve an opaque handle for internal measurement tools."""
+    return _registered_root(experiment_id)
 
 
 def _read_bytes(experiment_id: str, name: str) -> bytes:
@@ -200,7 +218,11 @@ def experiment_manifest(experiment_id: str) -> dict[str, Any]:
         filename: (name, mime_type)
         for name, (filename, mime_type, _) in _ARTIFACTS.items()
     }
-    for filename in _REQUIRED_FILES:
+    filenames = [*_REQUIRED_FILES]
+    for filename, _, _ in _ARTIFACTS.values():
+        if filename not in filenames and (root / filename).is_file():
+            filenames.append(filename)
+    for filename in filenames:
         path = _safe_artifact(root, filename)
         logical = logical_by_filename.get(filename)
         artifacts.append(

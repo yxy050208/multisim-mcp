@@ -46,6 +46,50 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 运行在隔离 worker 进程中；worker 崩溃或心跳超时不会拖垮 MCP 服务，服务重启后未完成
 任务会安全地重新排队。该能力将在完成其余路线图后随 `v1.0.0` 发布。
 
+第三阶段还加入了可计算的设计验收与批量实验：
+
+- `run_verified_circuit_experiment` 接收版本化 `ExperimentSpec`，自动测量增益、
+  带宽、截止频率、上升时间、过冲、纹波、功耗等指标，并把逐项
+  `pass` / `fail` / `unverified` 结论写入 `verification.json` 和实验报告。
+- `measure_experiment` 与 `verify_experiment_requirements` 可对已注册实验重新计算
+  指标；信号或证据缺失时只返回 `unverified`，不会猜测结果。
+- `plan_experiment_sweep`、`run_experiment_sweep`、`submit_experiment_sweep` 支持
+  参数、容差、温度与可复现 Monte Carlo 扫描。每次扫描最多 100 个运行点，长扫描
+  复用持久任务的取消、超时、崩溃恢复与输出锁。
+- 扫描输出 `summary.json`、扁平 `data.csv` 和每个运行点的原始产物，并通过
+  `multisim://sweeps/{sweep_id}/summary|data` 读取。
+
+验收请求的核心结构如下；`operator` 支持 `at_least`、`at_most`、`between` 和
+`approximately`：
+
+```json
+{
+  "spec": {
+    "schema_version": 1,
+    "title": "分压器验收",
+    "netlist": "VIN vin 0 DC 10\nR1 vin vout 1k\nR2 vout 0 1k\n.end\n",
+    "commands": "dc VIN 0 10 1",
+    "requirements": [
+      {
+        "id": "gain",
+        "metric": "gain",
+        "signal": "V(vout)",
+        "reference_signal": "V(vin)",
+        "operator": "approximately",
+        "target": 0.5,
+        "tolerance_percent": 1
+      }
+    ],
+    "theoretical_values": {"gain": 0.5}
+  },
+  "output_dir": "C:\\experiments\\divider-verified"
+}
+```
+
+扫描的 `mode` 可设为 `parameter`、`tolerance`、`temperature` 或
+`monte_carlo`。元件数值使用有限数字替换已声明的 `{{NAME}}` 占位符；建议先调用
+`plan_experiment_sweep` 检查完整展开结果，再提交真实运行。
+
 已经在 Multisim 14.3 上完成分压器、耦合电感、数字门/JK 时序以及
 函数发生器 + 示波器联合实验的真实验证。
 
@@ -58,6 +102,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 - 安全子集 SPICE 实验和 raw/CSV 解析。
 - MCP stdio、运行环境诊断和报告生成。
 - 持久实验队列、进度/取消/超时、输出锁和崩溃/无响应 worker 恢复。
+- 版本化实验指标、严格 PASS/FAIL/未验证判定，以及四类确定性批量扫描。
 
 实验性：
 

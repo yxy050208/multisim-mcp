@@ -8,7 +8,8 @@
 
 - 迁移到 MCP Python SDK 2.x；同一 stdio 服务兼容 `2026-07-28` 和旧协议客户端。
 - 将所有工具调用串行到专用 COM 线程，适配 SDK 2 的同步 handler 线程模型。
-- 增加 10 个 `multisim://experiments/...` 实验资源模板和重启后重新注册工具。
+- 增加 11 个 `multisim://experiments/...` 实验资源模板、2 个扫描资源模板和重启后
+  重新注册工具。
 - 增加创建实验、调试、比较、报告和指标验证五个中英双语 Prompt。
 - 为完整实验及资源注册结果增加明确的 output schema 和运行时结构校验。
 - 增加 32 位 Windows 可安装的加密依赖边界及现代/旧协议、资源安全测试。
@@ -16,14 +17,19 @@
 - 将异步实验隔离到独立 worker 进程，支持排队、检查点、进度、取消、总超时、
   心跳超时、崩溃检测和 MCP 重启后的安全重排队。
 - 为输出目录增加同名任务占用检查与跨进程文件租约；完整产物仍以事务方式发布。
+- 增加版本化 `ExperimentSpec`、13 类确定性测量、逐项
+  PASS/FAIL/未验证结论，以及理论值/仿真值/误差的结构化比较。
+- 增加参数、容差、温度和可复现 Monte Carlo 扫描，包含 100 次硬上限、事务式
+  汇总产物、MCP Resources 和持久 worker 支持。
 
 ### English
 
 - Migrated to MCP Python SDK 2.x with one stdio server serving both the
   `2026-07-28` and legacy protocol eras.
 - Serialized every tool call onto a dedicated COM-initialized worker thread.
-- Added ten experiment resource templates, re-registration, five bilingual
-  prompts, and validated structured results for the high-level workflow.
+- Added eleven experiment resource templates, two sweep resource templates,
+  re-registration, five bilingual prompts, and validated structured results
+  for the high-level workflow.
 - Added a 32-bit Windows-compatible cryptography constraint and dual-era,
   resource-security, and structured-output tests.
 - Added a durable experiment-job state machine with queueing, progress,
@@ -31,6 +37,10 @@
   resource.
 - Isolated asynchronous experiments in restartable subprocesses and added
   cross-process output leases plus structured crash/hang diagnostics.
+- Added versioned design requirements, deterministic measurements, strict
+  pass/fail/unverified verdicts, and theory-versus-simulation errors.
+- Added parameter, tolerance, temperature, and seeded Monte Carlo sweeps with
+  a 100-run cap, transactional summaries, resources, and durable jobs.
 
 ## [0.1.0-alpha.3] - 2026-08-09
 

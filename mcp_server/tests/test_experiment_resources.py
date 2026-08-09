@@ -70,6 +70,24 @@ class ExperimentResourceRegistryTest(unittest.TestCase):
             )
             self.assertNotIn(str(root), first["resources"]["report"])
 
+    def test_verification_is_optional_and_registered_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_experiment(root)
+            without = register_experiment(str(root))
+            self.assertNotIn("verification", without["resources"])
+            (root / "verification.json").write_text(
+                '{"schema_version": 1, "overall_status": "pass"}\n',
+                encoding="utf-8",
+            )
+            with_verification = register_experiment(str(root))
+            self.assertIn("verification", with_verification["resources"])
+            manifest = experiment_manifest(with_verification["experiment_id"])
+            self.assertIn(
+                "verification.json",
+                {item["filename"] for item in manifest["artifacts"]},
+            )
+
     def test_manifest_hashes_and_allowlisted_reads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

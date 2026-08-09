@@ -43,6 +43,22 @@ down the MCP frontend, and interrupted jobs are safely requeued after restart.
 This capability will ship publicly with `v1.0.0` after the remaining roadmap
 gates are complete.
 
+Phase three adds computable design verification and batch experiments:
+
+- `run_verified_circuit_experiment` accepts a versioned `ExperimentSpec`,
+  measures gain, bandwidth, cutoff, rise time, overshoot, ripple, and power,
+  then persists per-requirement `pass`, `fail`, or `unverified` evidence in
+  `verification.json` and the Markdown report.
+- `measure_experiment` and `verify_experiment_requirements` recompute metrics
+  for registered experiments. Missing signals or evidence remain `unverified`;
+  the server does not infer a result.
+- `plan_experiment_sweep`, `run_experiment_sweep`, and
+  `submit_experiment_sweep` support parameter, tolerance, temperature, and
+  seeded Monte Carlo sweeps. A hard limit of 100 runs applies, and durable
+  sweeps reuse cancellation, timeouts, worker recovery, and output leases.
+- Sweeps export `summary.json`, flat `data.csv`, and per-run raw artifacts via
+  `multisim://sweeps/{sweep_id}/summary|data`.
+
 Real Multisim 14.3 regressions cover resistor dividers, coupled inductors,
 digital truth tables, JK timing, and a combined function-generator/oscilloscope
 experiment.
@@ -57,6 +73,8 @@ Stable:
 - safe SPICE subset execution and raw/CSV/SVG/report generation.
 - durable experiment queueing, progress/cancellation/timeouts, output leases,
   and crash/hang worker recovery.
+- versioned measurements, strict requirement verdicts, and four deterministic
+  sweep modes.
 
 Experimental but verified:
 

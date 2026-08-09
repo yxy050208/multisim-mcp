@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import functools
+import json
 import math
 import os
 import html
@@ -21,11 +23,23 @@ from multisim_mcp import __version__
 from multisim_mcp.experiment_resources import (
     ExperimentResourceIndex,
     ExperimentResult,
+    VerifiedExperimentResult,
     experiment_manifest,
     read_binary_artifact,
     read_text_artifact,
     register_experiment,
+    registered_experiment_root,
 )
+from multisim_mcp.design_verification import (
+    DesignRequirement,
+    ExperimentSpec,
+    MeasurementRequest,
+    measure_many,
+    validate_experiment_spec,
+    validate_measurement_requests,
+    verify_requirements,
+)
+from multisim_mcp.experiment_sweep import plan_experiment_sweep as expand_sweep
 from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
@@ -50,6 +64,11 @@ from multisim_mcp.schematic_builder import (
     template_search_paths,
 )
 from multisim_mcp.spice_raw import parse_raw, plot_svg, summarize_columns, write_csv
+from multisim_mcp.sweep_resources import (
+    read_sweep_summary,
+    read_sweep_text,
+    register_sweep,
+)
 
 
 _COM_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="multisim-com")
@@ -107,7 +126,8 @@ mcp = MultisimMCPServer(
         "Generate editable Multisim circuits, run validated experiments, and "
         "read completed experiment artifacts through multisim:// resources. "
         "Use submit_circuit_experiment for resilient long runs and "
-        "run_circuit_experiment for synchronous compatibility."
+        "run_verified_circuit_experiment for explicit design verdicts. Preview "
+        "batch work with plan_experiment_sweep, then submit_experiment_sweep."
     ),
 )
 client = MultisimClient()
@@ -233,6 +253,39 @@ def experiment_commands_resource(experiment_id: str) -> str:
 )
 def experiment_log_resource(experiment_id: str) -> str:
     return read_text_artifact(experiment_id, "log")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/verification",
+    name="experiment_verification",
+    title="Design verification results",
+    description="Machine-readable PASS, FAIL, and unverified requirement verdicts.",
+    mime_type="application/json",
+)
+def experiment_verification_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "verification")
+
+
+@mcp.resource(
+    "multisim://sweeps/{sweep_id}/summary",
+    name="experiment_sweep_summary",
+    title="Experiment sweep summary",
+    description="Sweep plan, variables, measurements, and per-run status.",
+    mime_type="application/json",
+)
+def experiment_sweep_summary_resource(sweep_id: str) -> dict[str, Any]:
+    return read_sweep_summary(sweep_id)
+
+
+@mcp.resource(
+    "multisim://sweeps/{sweep_id}/data",
+    name="experiment_sweep_data",
+    title="Experiment sweep data",
+    description="Flat CSV table of sweep variables and measured metrics.",
+    mime_type="text/csv",
+)
+def experiment_sweep_data_resource(sweep_id: str) -> str:
+    return read_sweep_text(sweep_id, "data")
 
 
 @mcp.resource(
@@ -423,6 +476,46 @@ def register_experiment_artifacts(output_dir: str) -> ExperimentResourceIndex:
 
 
 @mcp.tool(com_serialized=False)
+def register_sweep_artifacts(output_dir: str) -> dict[str, Any]:
+    """Register a completed sweep directory and return opaque MCP Resources."""
+    return register_sweep(output_dir)
+
+
+@mcp.tool(com_serialized=False)
+def measure_experiment(
+    experiment_id: str, measurements: list[MeasurementRequest]
+) -> dict[str, Any]:
+    """Compute explicit metrics from a registered experiment's raw data."""
+    normalized = validate_measurement_requests(measurements)
+    root = registered_experiment_root(experiment_id)
+    return {
+        "schema_version": 1,
+        "experiment_id": experiment_id,
+        "measurements": measure_many(parse_raw(str(root / "result.raw")), normalized),
+    }
+
+
+@mcp.tool(com_serialized=False)
+def verify_experiment_requirements(
+    experiment_id: str,
+    requirements: list[DesignRequirement],
+    theoretical_values: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Evaluate explicit design requirements; unsupported evidence stays unverified."""
+    root = registered_experiment_root(experiment_id)
+    result = verify_requirements(
+        parse_raw(str(root / "result.raw")), requirements, theoretical_values
+    )
+    return {**result, "experiment_id": experiment_id}
+
+
+@mcp.tool(com_serialized=False)
+def plan_experiment_sweep(spec: dict[str, Any]) -> dict[str, Any]:
+    """Validate and preview parameter, tolerance, temperature, or Monte Carlo runs."""
+    return expand_sweep(spec)
+
+
+@mcp.tool(com_serialized=False)
 def submit_circuit_experiment(
     netlist: str,
     commands: str,
@@ -433,6 +526,8 @@ def submit_circuit_experiment(
     overwrite: bool = False,
     job_timeout: float = 600.0,
     heartbeat_timeout: float = 180.0,
+    requirements: list[DesignRequirement] | None = None,
+    theoretical_values: dict[str, float] | None = None,
 ) -> JobSubmission:
     """Queue a durable, cancellable experiment in an isolated worker process.
 
@@ -461,8 +556,23 @@ def submit_circuit_experiment(
         raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
     if job_timeout <= timeout:
         raise ValueError("job_timeout must be greater than the simulation timeout")
+    verification: dict[str, Any] | None = None
+    if requirements is not None:
+        verification = validate_experiment_spec(
+            {
+                "schema_version": 1,
+                "title": title,
+                "netlist": netlist,
+                "commands": "\n".join(accepted),
+                "requirements": requirements,
+                "theoretical_values": theoretical_values or {},
+            }
+        )
+    elif theoretical_values:
+        raise ValueError("theoretical_values requires requirements")
     return _job_manager().submit(
         {
+            "job_kind": "experiment",
             "netlist": netlist,
             "commands": "\n".join(accepted),
             "output_dir": str(output_path),
@@ -472,6 +582,14 @@ def submit_circuit_experiment(
             "overwrite": overwrite,
             "job_timeout": job_timeout,
             "heartbeat_timeout": heartbeat_timeout,
+            **(
+                {
+                    "requirements": verification["requirements"],
+                    "theoretical_values": verification["theoretical_values"],
+                }
+                if verification is not None
+                else {}
+            ),
         }
     )
 
@@ -831,6 +949,16 @@ def _run_spice_netlist_impl(
     with open(command_path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(kept) + "\n")
 
+    try:
+        client.circuit
+    except RuntimeError as exc:
+        if str(exc) != "No circuit is open":
+            raise
+        # Multisim exposes DoCommandLine on a circuit object even though the
+        # command file immediately sources the authoritative SPICE netlist.
+        # A blank document is therefore required for standalone simulations
+        # and sweep workers that did not first build/open a schematic.
+        client.new_circuit()
     result = client.run_command_file(
         command_path,
         log_path,
@@ -1068,6 +1196,7 @@ def _write_experiment_report(
     schematic: dict,
     simulation: dict,
     chart_path: str | None,
+    verification: dict[str, Any] | None = None,
 ) -> None:
     fence_runs = [len(item) for item in re.findall(r"`+", netlist)]
     fence = "`" * max(3, max(fence_runs, default=0) + 1)
@@ -1136,6 +1265,37 @@ def _write_experiment_report(
                     **{**item, "column": _markdown_text(item.get("column", ""))}
                 )
             )
+    if verification is not None:
+        counts = verification.get("counts", {})
+        lines.extend(
+            [
+                "",
+                "## Design requirement verification",
+                "",
+                f"- Overall status: `{_markdown_text(verification.get('overall_status', 'unverified'))}`",
+                f"- PASS: `{int(counts.get('pass', 0))}`",
+                f"- FAIL: `{int(counts.get('fail', 0))}`",
+                f"- Unverified: `{int(counts.get('unverified', 0))}`",
+                "",
+                "| requirement | metric | value | unit | verdict | theory error |",
+                "| --- | --- | ---: | --- | --- | ---: |",
+            ]
+        )
+        for item in verification.get("requirements", []):
+            measurement = item.get("measurement") or {}
+            value = measurement.get("value")
+            comparison = item.get("comparison") or {}
+            error = comparison.get("relative_error_percent")
+            lines.append(
+                "| {identifier} | {metric} | {value} | {unit} | {status} | {error} |".format(
+                    identifier=_markdown_text(item.get("id", "")),
+                    metric=_markdown_text(item.get("metric", "")),
+                    value=f"{value:.8g}" if isinstance(value, (int, float)) else "—",
+                    unit=_markdown_text(measurement.get("unit", "")),
+                    status=_markdown_text(item.get("status", "unverified")),
+                    error=f"{error:.6g}%" if isinstance(error, (int, float)) else "—",
+                )
+            )
     lines.extend(
         [
             "",
@@ -1165,7 +1325,9 @@ def _run_circuit_experiment_unlocked(
     overwrite: bool = False,
     checkpoint: Callable[[str, int, str], None] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
-) -> ExperimentResult:
+    requirements: list[DesignRequirement] | None = None,
+    theoretical_values: dict[str, float] | None = None,
+) -> ExperimentResult | VerifiedExperimentResult:
     """Create a schematic, run a safe Multisim analysis, and export a report.
 
     This is the recommended high-level workflow for agents. The schematic and
@@ -1194,6 +1356,7 @@ def _run_circuit_experiment_unlocked(
         "circuit.cir",
         "plot.svg",
         "report.md",
+        *(("verification.json",) if requirements is not None else ()),
     )
     destinations = {name: root / name for name in manifest_names}
     for path in destinations.values():
@@ -1201,6 +1364,16 @@ def _run_circuit_experiment_unlocked(
             raise ValueError(f"Artifact destination is not a regular file: {path}")
         if path.exists() and not overwrite:
             raise FileExistsError(f"Refusing to overwrite existing artifact: {path}")
+    stale_verification = root / "verification.json"
+    if requirements is None and stale_verification.exists():
+        if not stale_verification.is_file():
+            raise ValueError(
+                f"Artifact destination is not a regular file: {stale_verification}"
+            )
+        if not overwrite:
+            raise FileExistsError(
+                f"Refusing to retain stale verification artifact: {stale_verification}"
+            )
 
     stage = root.parent / f".{root.name}.multisim-mcp-{uuid.uuid4().hex}"
     stage.mkdir(parents=False, exist_ok=False)
@@ -1268,6 +1441,17 @@ def _run_circuit_experiment_unlocked(
             "csv": "data.csv",
             "output_dir": str(root),
         }
+        verification: dict[str, Any] | None = None
+        if requirements is not None:
+            notify("verification", 68, "Evaluating explicit design requirements")
+            verification = verify_requirements(
+                parsed, requirements, theoretical_values
+            )
+            (stage / "verification.json").write_text(
+                json.dumps(verification, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
         _write_experiment_report(
             report_path,
             title,
@@ -1276,6 +1460,7 @@ def _run_circuit_experiment_unlocked(
             report_schematic,
             report_simulation,
             "plot.svg",
+            verification,
         )
 
         missing = [
@@ -1300,12 +1485,20 @@ def _run_circuit_experiment_unlocked(
                 backup = backup_dir / name
                 shutil.copy2(destination, backup)
                 backups[name] = backup
+        if requirements is None and stale_verification.is_file():
+            stale_backup = backup_dir / "verification.json"
+            shutil.copy2(stale_verification, stale_backup)
+            backups["verification.json"] = stale_backup
 
         published: list[str] = []
+        stale_removed = False
         try:
             for name, destination in destinations.items():
                 os.replace(prepared[name], destination)
                 published.append(name)
+            if requirements is None and stale_verification.is_file():
+                stale_verification.unlink()
+                stale_removed = True
         except Exception:
             for name in reversed(published):
                 destination = destinations[name]
@@ -1314,6 +1507,9 @@ def _run_circuit_experiment_unlocked(
                     os.replace(backup, destination)
                 elif destination.exists():
                     destination.unlink()
+            stale_backup = backups.get("verification.json")
+            if stale_removed and stale_backup and stale_backup.exists():
+                os.replace(stale_backup, stale_verification)
             raise
         finally:
             for temporary in prepared.values():
@@ -1348,7 +1544,7 @@ def _run_circuit_experiment_unlocked(
         simulation["output_dir"] = str(root)
         notify("register", 97, "Registering safe experiment resource handles")
         registered = register_experiment(str(root))
-        result: ExperimentResult = {
+        result: dict[str, Any] = {
             "success": True,
             "experiment_id": registered["experiment_id"],
             "resources": registered["resources"],
@@ -1358,8 +1554,11 @@ def _run_circuit_experiment_unlocked(
             "plot": str(root / "plot.svg"),
             "output_dir": str(root),
         }
+        if verification is not None:
+            result["verification"] = verification
+            result["verification_path"] = str(root / "verification.json")
         notify("complete", 100, "Experiment completed")
-        return result
+        return result  # type: ignore[return-value]
     finally:
         shutil.rmtree(stage, ignore_errors=True)
 
@@ -1375,7 +1574,9 @@ def _run_circuit_experiment_impl(
     checkpoint: Callable[[str, int, str], None] | None = None,
     cancel_requested: Callable[[], bool] | None = None,
     owner: str | None = None,
-) -> ExperimentResult:
+    requirements: list[DesignRequirement] | None = None,
+    theoretical_values: dict[str, float] | None = None,
+) -> ExperimentResult | VerifiedExperimentResult:
     """Run one transactional experiment while holding its cross-process lease."""
     if not output_dir.strip():
         raise ValueError("output_dir must not be empty")
@@ -1394,6 +1595,8 @@ def _run_circuit_experiment_impl(
             overwrite,
             checkpoint,
             cancel_requested,
+            requirements,
+            theoretical_values,
         )
 
 
@@ -1421,6 +1624,236 @@ def run_circuit_experiment(
         timeout,
         max_points,
         overwrite,
+    )
+
+
+@mcp.tool()
+def run_verified_circuit_experiment(
+    spec: ExperimentSpec,
+    output_dir: str,
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+) -> VerifiedExperimentResult:
+    """Run an ExperimentSpec and persist evidence-backed requirement verdicts."""
+    normalized = validate_experiment_spec(spec)
+    result = _run_circuit_experiment_impl(
+        normalized["netlist"],
+        normalized["commands"],
+        output_dir,
+        normalized["title"],
+        timeout,
+        max_points,
+        overwrite,
+        requirements=normalized["requirements"],
+        theoretical_values=normalized["theoretical_values"],
+    )
+    return result  # type: ignore[return-value]
+
+
+def _run_experiment_sweep_impl(
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_run: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+    checkpoint: Callable[[str, int, str], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Execute a validated sweep as one all-or-nothing artifact transaction."""
+
+    def notify(stage_name: str, progress: int, message: str) -> None:
+        if checkpoint is not None:
+            checkpoint(stage_name, progress, message)
+        if cancel_requested is not None and cancel_requested():
+            raise InterruptedError("Sweep cancellation requested")
+
+    if not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    if not math.isfinite(timeout_per_run) or not 0 < timeout_per_run <= 3600:
+        raise ValueError("timeout_per_run must be between 0 and 3600 seconds")
+    if max_points < 1 or max_points > 100_000:
+        raise ValueError("max_points must be between 1 and 100000")
+    root = Path(output_dir).expanduser().resolve()
+    if root == Path(root.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    plan = expand_sweep(spec)
+    lease_owner = owner or f"sweep-{uuid.uuid4().hex}"
+    with output_lease(str(root), lease_owner):
+        if root.exists() and not root.is_dir():
+            raise ValueError(f"Sweep output path is not a directory: {root}")
+        if root.exists() and any(root.iterdir()) and not overwrite:
+            raise FileExistsError(f"Refusing to overwrite non-empty sweep directory: {root}")
+        root.parent.mkdir(parents=True, exist_ok=True)
+        stage = root.parent / f".{root.name}.multisim-sweep-{uuid.uuid4().hex}"
+        stage.mkdir(parents=False, exist_ok=False)
+        published = False
+        try:
+            notify("sweep_preflight", 3, f"Prepared {plan['run_count']} validated runs")
+            run_results: list[dict[str, Any]] = []
+            total = int(plan["run_count"])
+            for position, run in enumerate(plan["runs"], start=1):
+                progress = 5 + int((position - 1) / total * 78)
+                notify(
+                    "sweep_run",
+                    progress,
+                    f"Running {run['run_id']} ({position}/{total})",
+                )
+                run_dir = stage / "runs" / str(run["run_id"])
+                simulation = _run_spice_netlist_impl(
+                    str(run["netlist"]),
+                    str(run["commands"]),
+                    output_dir=str(run_dir),
+                    timeout=timeout_per_run,
+                    max_points=max_points,
+                    unsafe_commands=False,
+                    overwrite=False,
+                    cancel_requested=cancel_requested,
+                    heartbeat=lambda p=position: notify(
+                        "sweep_run", progress, f"Waiting for run {p}/{total}"
+                    ),
+                )
+                if not simulation.get("success"):
+                    raise RuntimeError(f"Sweep run {run['run_id']} did not succeed")
+                measured = measure_many(
+                    parse_raw(str(simulation["raw"])), plan["measurements"]
+                )
+                run_results.append(
+                    {
+                        "run_id": run["run_id"],
+                        "index": run["index"],
+                        "status": (
+                            "measured"
+                            if all(item["status"] == "measured" for item in measured)
+                            else "unverified"
+                        ),
+                        "variables": run["variables"],
+                        "measurements": measured,
+                        "artifacts_dir": f"runs/{run['run_id']}",
+                    }
+                )
+            notify("sweep_summary", 86, "Writing sweep summary and flat data table")
+            summary = {
+                "schema_version": 1,
+                "result_type": "sweep",
+                "title": plan["title"],
+                "mode": plan["mode"],
+                "seed": plan["seed"],
+                "run_count": total,
+                "measurement_ids": [item["id"] for item in plan["measurements"]],
+                "runs": run_results,
+                "reproducibility": {
+                    "spec": spec,
+                    "timeout_per_run": timeout_per_run,
+                    "max_points": max_points,
+                },
+            }
+            (stage / "summary.json").write_text(
+                json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            variable_names = sorted(
+                {name for run in run_results for name in run["variables"]}
+            )
+            measurement_ids = [item["id"] for item in plan["measurements"]]
+            with (stage / "data.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["run_id", "status", *variable_names, *measurement_ids])
+                for run in run_results:
+                    values = {item["id"]: item.get("value") for item in run["measurements"]}
+                    writer.writerow(
+                        [
+                            run["run_id"],
+                            run["status"],
+                            *(run["variables"].get(name, "") for name in variable_names),
+                            *(values.get(name, "") for name in measurement_ids),
+                        ]
+                    )
+            notify("sweep_publish", 94, "Publishing the complete sweep transaction")
+            backup = root.parent / f".{root.name}.backup-{uuid.uuid4().hex}"
+            had_root = root.exists()
+            if had_root:
+                os.replace(root, backup)
+            try:
+                os.replace(stage, root)
+                published = True
+            except Exception:
+                if had_root and backup.exists():
+                    os.replace(backup, root)
+                raise
+            if backup.exists():
+                shutil.rmtree(backup)
+            registered = register_sweep(str(root))
+            notify("complete", 100, "Sweep completed")
+            return {
+                "success": True,
+                "result_type": "sweep",
+                "sweep_id": registered["sweep_id"],
+                "resources": registered["resources"],
+                "summary": str(root / "summary.json"),
+                "data": str(root / "data.csv"),
+                "output_dir": str(root),
+                "run_count": total,
+            }
+        finally:
+            if not published:
+                shutil.rmtree(stage, ignore_errors=True)
+
+
+@mcp.tool()
+def run_experiment_sweep(
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_run: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Run a transactional parameter, tolerance, temperature, or Monte Carlo sweep."""
+    return _run_experiment_sweep_impl(
+        spec, output_dir, timeout_per_run, max_points, overwrite
+    )
+
+
+@mcp.tool(com_serialized=False)
+def submit_experiment_sweep(
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_run: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+    job_timeout: float = 3600.0,
+    heartbeat_timeout: float = 180.0,
+) -> JobSubmission:
+    """Queue a durable sweep in the same isolated, cancellable worker system."""
+    plan = expand_sweep(spec)
+    if not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    output_path = Path(output_dir).expanduser().resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    if not math.isfinite(timeout_per_run) or not 0 < timeout_per_run <= 3600:
+        raise ValueError("timeout_per_run must be between 0 and 3600 seconds")
+    if max_points < 1 or max_points > 100_000:
+        raise ValueError("max_points must be between 1 and 100000")
+    if not math.isfinite(job_timeout) or not 1 <= job_timeout <= 86_400:
+        raise ValueError("job_timeout must be between 1 and 86400 seconds")
+    if job_timeout <= timeout_per_run:
+        raise ValueError("job_timeout must exceed timeout_per_run")
+    if not math.isfinite(heartbeat_timeout) or not 10 <= heartbeat_timeout <= 900:
+        raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
+    return _job_manager().submit(
+        {
+            "job_kind": "sweep",
+            "sweep_spec": spec,
+            "output_dir": str(output_path),
+            "timeout_per_run": timeout_per_run,
+            "max_points": max_points,
+            "overwrite": overwrite,
+            "job_timeout": job_timeout,
+            "heartbeat_timeout": heartbeat_timeout,
+            "run_count": plan["run_count"],
+        }
     )
 
 

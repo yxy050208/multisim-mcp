@@ -72,20 +72,37 @@ def main() -> int:
 
     try:
         # Importing here keeps protocol introspection independent from worker startup.
-        from multisim_mcp.server import _run_circuit_experiment_impl
-
-        result = _run_circuit_experiment_impl(
-            netlist=str(spec["netlist"]),
-            commands=str(spec["commands"]),
-            output_dir=str(spec["output_dir"]),
-            title=str(spec.get("title", "Multisim experiment")),
-            timeout=float(spec.get("timeout", 120.0)),
-            max_points=int(spec.get("max_points", 2000)),
-            overwrite=bool(spec.get("overwrite", False)),
-            checkpoint=checkpoint,
-            cancel_requested=cancel_path.exists,
-            owner=str(request["job_id"]),
+        from multisim_mcp.server import (
+            _run_circuit_experiment_impl,
+            _run_experiment_sweep_impl,
         )
+
+        if spec.get("job_kind") == "sweep":
+            result = _run_experiment_sweep_impl(
+                spec=dict(spec["sweep_spec"]),
+                output_dir=str(spec["output_dir"]),
+                timeout_per_run=float(spec.get("timeout_per_run", 120.0)),
+                max_points=int(spec.get("max_points", 2000)),
+                overwrite=bool(spec.get("overwrite", False)),
+                checkpoint=checkpoint,
+                cancel_requested=cancel_path.exists,
+                owner=str(request["job_id"]),
+            )
+        else:
+            result = _run_circuit_experiment_impl(
+                netlist=str(spec["netlist"]),
+                commands=str(spec["commands"]),
+                output_dir=str(spec["output_dir"]),
+                title=str(spec.get("title", "Multisim experiment")),
+                timeout=float(spec.get("timeout", 120.0)),
+                max_points=int(spec.get("max_points", 2000)),
+                overwrite=bool(spec.get("overwrite", False)),
+                checkpoint=checkpoint,
+                cancel_requested=cancel_path.exists,
+                owner=str(request["job_id"]),
+                requirements=spec.get("requirements"),
+                theoretical_values=spec.get("theoretical_values"),
+            )
         _atomic_json(result_path, {"success": True, "result": result})
         return 0
     except InterruptedError as exc:

@@ -55,6 +55,32 @@ time.sleep(0.4)
 marker.unlink(missing_ok=True)
 """ + SUCCESS_WORKER
 
+SUCCESS_SWEEP_WORKER = r"""
+import json, sys
+from pathlib import Path
+request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+root = Path(request['spec']['output_dir'])
+root.mkdir(parents=True, exist_ok=True)
+(root / 'summary.json').write_text(
+    json.dumps({'schema_version': 1, 'result_type': 'sweep', 'run_count': 2}),
+    encoding='utf-8',
+)
+(root / 'data.csv').write_text('run_id,status\nrun-0001,measured\n', encoding='utf-8')
+result = {
+    'success': True,
+    'result_type': 'sweep',
+    'sweep_id': 'worker-placeholder',
+    'resources': {},
+    'summary': str(root / 'summary.json'),
+    'data': str(root / 'data.csv'),
+    'output_dir': str(root),
+    'run_count': 2,
+}
+Path(request['result_path']).write_text(
+    json.dumps({'success': True, 'result': result}), encoding='utf-8'
+)
+"""
+
 
 def _spec(output_dir: str, **overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
@@ -83,6 +109,17 @@ def _wait_terminal(manager: ExperimentJobManager, job_id: str, seconds: float = 
 
 
 class DurableJobStateTest(unittest.TestCase):
+    def test_default_worker_inherits_frontend_import_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = ExperimentJobManager(Path(tmp) / "state", start=False)
+            try:
+                self.assertEqual(manager._worker_command[:2], [sys.executable, "-c"])
+                bootstrap = manager._worker_command[2]
+                self.assertIn("sys.path[:0]", bootstrap)
+                self.assertIn("multisim_mcp.job_worker", bootstrap)
+            finally:
+                manager.shutdown()
+
     def test_submit_hides_spec_rejects_duplicate_and_cancels_queue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -138,6 +175,35 @@ class DurableJobStateTest(unittest.TestCase):
 
 
 class WorkerRecoveryTest(unittest.TestCase):
+    def test_sweep_worker_registers_and_restores_sweep_resources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            manager = ExperimentJobManager(
+                state, worker_command=[sys.executable, "-c", SUCCESS_SWEEP_WORKER]
+            )
+            try:
+                submitted = manager.submit(
+                    _spec(
+                        str(Path(tmp) / "sweep"),
+                        job_kind="sweep",
+                        sweep_spec={"schema_version": 1},
+                    )
+                )
+                complete = _wait_terminal(manager, submitted["job_id"])
+                self.assertEqual(complete["state"], "succeeded")
+                self.assertRegex(complete["result"]["sweep_id"], r"^sweep-[0-9a-f]{24}$")
+                self.assertIn("summary", complete["result"]["resources"])
+            finally:
+                manager.shutdown()
+            restored = ExperimentJobManager(state, start=False)
+            try:
+                self.assertEqual(
+                    restored.get(submitted["job_id"])["result"]["sweep_id"],
+                    complete["result"]["sweep_id"],
+                )
+            finally:
+                restored.shutdown()
+
     def test_two_managers_share_one_global_worker_lease(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state"

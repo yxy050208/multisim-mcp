@@ -222,10 +222,20 @@ class ExperimentJobManager:
         self._stop = threading.Event()
         self._records: dict[str, dict[str, Any]] = {}
         self._processes: dict[str, subprocess.Popen[str]] = {}
+        # Embedded/portable Windows Python builds may ignore PYTHONPATH via a
+        # ``._pth`` file. Bootstrap the isolated worker with the exact import
+        # roots of the already-running MCP frontend so it uses the same SDK,
+        # pywin32, and project version instead of an older global installation.
+        worker_paths = list(dict.fromkeys(item for item in sys.path if item))
+        worker_bootstrap = (
+            "import runpy,sys;"
+            f"sys.path[:0]={worker_paths!r};"
+            "runpy.run_module('multisim_mcp.job_worker',run_name='__main__')"
+        )
         self._worker_command = worker_command or [
             sys.executable,
-            "-m",
-            "multisim_mcp.job_worker",
+            "-c",
+            worker_bootstrap,
         ]
         self._load_records()
         self._thread: threading.Thread | None = None
@@ -264,11 +274,18 @@ class ExperimentJobManager:
                 self._records[job_id] = record
                 if state == "succeeded" and Path(str(record.get("output_dir", ""))).is_dir():
                     try:
-                        from multisim_mcp.experiment_resources import register_experiment
+                        if record.get("spec", {}).get("job_kind") == "sweep":
+                            from multisim_mcp.sweep_resources import register_sweep
 
-                        registered = register_experiment(str(record["output_dir"]))
+                            registered = register_sweep(str(record["output_dir"]))
+                            id_key = "sweep_id"
+                        else:
+                            from multisim_mcp.experiment_resources import register_experiment
+
+                            registered = register_experiment(str(record["output_dir"]))
+                            id_key = "experiment_id"
                         if isinstance(record.get("result"), dict):
-                            record["result"]["experiment_id"] = registered["experiment_id"]
+                            record["result"][id_key] = registered[id_key]
                             record["result"]["resources"] = registered["resources"]
                     except (OSError, ValueError):
                         pass
@@ -684,10 +701,17 @@ class ExperimentJobManager:
                     result = worker_result.get("result")
                     if isinstance(result, dict):
                         try:
-                            from multisim_mcp.experiment_resources import register_experiment
+                            if spec.get("job_kind") == "sweep":
+                                from multisim_mcp.sweep_resources import register_sweep
 
-                            registered = register_experiment(str(result["output_dir"]))
-                            result["experiment_id"] = registered["experiment_id"]
+                                registered = register_sweep(str(result["output_dir"]))
+                                id_key = "sweep_id"
+                            else:
+                                from multisim_mcp.experiment_resources import register_experiment
+
+                                registered = register_experiment(str(result["output_dir"]))
+                                id_key = "experiment_id"
+                            result[id_key] = registered[id_key]
                             result["resources"] = registered["resources"]
                         except (KeyError, OSError, ValueError) as exc:
                             self._finish_failure(
@@ -705,7 +729,11 @@ class ExperimentJobManager:
                             state="succeeded",
                             stage="complete",
                             progress=100,
-                            message="Experiment completed",
+                            message=(
+                                "Sweep completed"
+                                if spec.get("job_kind") == "sweep"
+                                else "Experiment completed"
+                            ),
                             updated_at=_utc_now(),
                             finished_at=_utc_now(),
                             result=result,
