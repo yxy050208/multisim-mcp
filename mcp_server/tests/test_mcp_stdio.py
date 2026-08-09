@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import sys
 import unittest
+from pathlib import Path
 
+import multisim_mcp
 from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import get_default_environment, stdio_client
 
 
 class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
     async def test_initialize_and_list_tools(self) -> None:
+        package_root = Path(multisim_mcp.__file__).resolve().parent.parent
+        environment = get_default_environment()
+        environment["PYTHONPATH"] = str(package_root)
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "multisim_mcp.server"],
+            env=environment,
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:

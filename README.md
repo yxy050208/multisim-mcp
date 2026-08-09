@@ -7,8 +7,9 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前版本定位为 `v0.1.0-alpha.2`。项目非 NI 官方产品，需要本机安装并授权
-> Multisim 14+；当前 COM 运行时使用 32 位 Python。
+> 当前源码为 `v0.1.0-alpha.3` 发布候选；最新公开发行版仍为
+> `v0.1.0-alpha.2`。项目非 NI 官方产品，需要本机安装并授权 Multisim 14+；
+> 当前 COM 运行时使用 32 位 Python。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
@@ -89,7 +90,36 @@ cd mcp_server
 .\run_server.ps1
 ```
 
-MCP 客户端配置：
+`v0.1.0-alpha.3` 源码提供安装诊断和配置生成命令。默认情况下它们不会启动
+Multisim，也不会修改现有客户端配置：
+
+```powershell
+# 人类可读诊断；完整工作流未就绪时给出逐项修复建议
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang zh
+
+# 可选：显式启动/连接 Multisim，验证许可证和 COM 激活
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang zh --connect
+
+# 便于 Agent/脚本解析的稳定 JSON；--strict 可用于 CI
+C:\path\to\python32\Scripts\multisim-mcp.exe --json doctor
+
+# 输出 Claude Desktop JSON 片段
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client claude-desktop `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack
+
+# 输出 Codex config.toml 片段
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client codex `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack
+```
+
+配置生成器默认只打印可复制片段；`--output` 写入新文件，除非再传入 `--force`，
+否则不会覆盖已有文件。它不会自动合并 Claude Desktop 或 Codex 的现有配置。
+
+手工 MCP 客户端配置：
 
 ```json
 {

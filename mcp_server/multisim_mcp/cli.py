@@ -1,0 +1,684 @@
+"""Command-line diagnostics and MCP client configuration helpers."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import importlib
+import json
+import locale
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any, Sequence
+
+from multisim_mcp import __version__
+
+SCHEMA_VERSION = 1
+REQUIRED_TEMPLATES = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
+CLIENTS = ("claude-desktop", "codex", "generic")
+_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _load_module(name: str) -> Any:
+    """Keep third-party import chatter away from stdout protocols."""
+    with contextlib.redirect_stdout(sys.stderr):
+        return importlib.import_module(name)
+
+
+def _preferred_language(requested: str) -> str:
+    if requested in {"zh", "en"}:
+        return requested
+    language = locale.getlocale()[0] or ""
+    return "zh" if language.lower().startswith("zh") else "en"
+
+
+def _message(language: str, zh: str, en: str) -> str:
+    return zh if language == "zh" else en
+
+
+def _check(
+    check_id: str,
+    status: str,
+    message: str,
+    repair: str | None = None,
+    **details: Any,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "id": check_id,
+        "status": status,
+        "message": message,
+    }
+    if repair:
+        result["repair"] = repair
+    result.update(details)
+    return result
+
+
+def _com_registration() -> dict[str, Any]:
+    """Inspect the 32-bit COM registration without activating Multisim."""
+    if os.name != "nt":
+        return {"registered": False, "status": "skipped", "clsid": None}
+    prog_id = _load_module("multisim_mcp.multisim_client").PROG_ID
+    try:
+        import winreg
+    except ImportError:
+        return {
+            "registered": False,
+            "status": "unknown",
+            "clsid": None,
+            "error": "winreg is unavailable",
+        }
+
+    access_modes = [winreg.KEY_READ]
+    wow64_32 = getattr(winreg, "KEY_WOW64_32KEY", 0)
+    if wow64_32:
+        access_modes.insert(0, winreg.KEY_READ | wow64_32)
+    errors: list[str] = []
+    for access in access_modes:
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CLASSES_ROOT,
+                rf"{prog_id}\CLSID",
+                0,
+                access,
+            ) as key:
+                clsid = str(winreg.QueryValue(key, None)).strip()
+            return {
+                "registered": bool(clsid),
+                "status": "registered" if clsid else "missing",
+                "clsid": clsid or None,
+            }
+        except OSError as exc:
+            errors.append(str(exc))
+    return {
+        "registered": False,
+        "status": "missing",
+        "clsid": None,
+        "error": errors[-1] if errors else "COM registration was not found",
+    }
+
+
+def _codec_diagnostics() -> dict[str, Any]:
+    codec_class = _load_module("multisim_mcp.multisim_client").Ms14Codec
+    tools: dict[str, Any] = {}
+    for tool in ("ewd", "ewe"):
+        try:
+            command = codec_class._base_cmd(tool)
+            tools[tool] = {"available": True, "command": command}
+        except Exception as exc:
+            tools[tool] = {"available": False, "error": str(exc)}
+    return {
+        "ready": all(item["available"] for item in tools.values()),
+        "tools": tools,
+    }
+
+
+def _activation_diagnostics() -> dict[str, Any]:
+    """Explicitly probe COM while preserving a pre-existing connection."""
+    client_class = _load_module("multisim_mcp.multisim_client").MultisimClient
+    client = client_class()
+    app: Any = None
+    was_connected = False
+    try:
+        app = client._ensure_app()
+        was_connected = bool(app.IsConnected)
+        details = client.connect()
+        return {"checked": True, "ready": True, "details": details}
+    except Exception as exc:
+        return {"checked": True, "ready": False, "error": str(exc)}
+    finally:
+        if app is not None and not was_connected:
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+
+
+def collect_doctor_report(
+    language: str = "auto", connect: bool = False
+) -> dict[str, Any]:
+    """Collect side-effect-free setup diagnostics for people and agents."""
+    language = _preferred_language(language)
+    client_module = _load_module("multisim_mcp.multisim_client")
+    runtime = client_module.runtime_diagnostics()
+    prog_id = client_module.PROG_ID
+    checks: list[dict[str, Any]] = []
+
+    checks.append(
+        _check(
+            "python.version",
+            "pass" if sys.version_info >= (3, 10) else "fail",
+            _message(
+                language,
+                f"Python {runtime['python']}（要求 3.10 或更高版本）",
+                f"Python {runtime['python']} (3.10 or newer required)",
+            ),
+            (
+                None
+                if sys.version_info >= (3, 10)
+                else _message(language, "安装 Python 3.10+。", "Install Python 3.10+.")
+            ),
+        )
+    )
+    checks.append(
+        _check(
+            "platform.windows",
+            "pass" if runtime["windows"] else "fail",
+            _message(
+                language,
+                (
+                    "当前系统是 Windows。"
+                    if runtime["windows"]
+                    else "当前系统不是 Windows。"
+                ),
+                (
+                    "Windows detected."
+                    if runtime["windows"]
+                    else "Windows was not detected."
+                ),
+            ),
+            (
+                None
+                if runtime["windows"]
+                else _message(
+                    language,
+                    "真实 Multisim 自动化必须在 Windows 上运行；当前环境只能发现 MCP 工具。",
+                    "Run real Multisim automation on Windows; this environment supports MCP introspection only.",
+                )
+            ),
+        )
+    )
+    bits_ok = runtime["python_bits"] == runtime["required_python_bits"]
+    checks.append(
+        _check(
+            "python.architecture",
+            "pass" if bits_ok else "fail",
+            _message(
+                language,
+                f"当前 Python 为 {runtime['python_bits']} 位；Multisim COM 需要 32 位。",
+                f"Python is {runtime['python_bits']}-bit; Multisim COM requires 32-bit Python.",
+            ),
+            (
+                None
+                if bits_ok
+                else _message(
+                    language,
+                    "使用 32 位 Python 重新安装 multisim-mcp。",
+                    "Reinstall multisim-mcp with a 32-bit Python interpreter.",
+                )
+            ),
+            executable=runtime["python_executable"],
+        )
+    )
+    pywin32_ok = bool(runtime["pywin32_available"])
+    checks.append(
+        _check(
+            "python.pywin32",
+            "pass" if pywin32_ok else "fail",
+            _message(
+                language,
+                (
+                    "pywin32 已安装。"
+                    if pywin32_ok
+                    else "当前解释器中没有可用的 pywin32。"
+                ),
+                (
+                    "pywin32 is available."
+                    if pywin32_ok
+                    else "pywin32 is unavailable in this interpreter."
+                ),
+            ),
+            (
+                None
+                if pywin32_ok
+                else _message(
+                    language,
+                    "在同一个 32 位 Python 环境中重新安装 multisim-mcp。",
+                    "Reinstall multisim-mcp in the same 32-bit Python environment.",
+                )
+            ),
+        )
+    )
+
+    com = _com_registration()
+    if com["status"] == "skipped":
+        com_status = "skipped"
+    elif com["registered"]:
+        com_status = "pass"
+    elif com["status"] == "unknown":
+        com_status = "warn"
+    else:
+        com_status = "fail"
+    checks.append(
+        _check(
+            "multisim.com_registration",
+            com_status,
+            _message(
+                language,
+                (
+                    "已找到 Multisim COM 注册。"
+                    if com["registered"]
+                    else (
+                        "非 Windows 环境，已跳过 Multisim COM 注册检查。"
+                        if com_status == "skipped"
+                        else "未找到 Multisim COM 注册。"
+                    )
+                ),
+                (
+                    "Multisim COM registration was found."
+                    if com["registered"]
+                    else (
+                        "The Multisim COM registration check was skipped outside Windows."
+                        if com_status == "skipped"
+                        else "Multisim COM registration was not found."
+                    )
+                ),
+            ),
+            (
+                None
+                if com["registered"] or com_status == "skipped"
+                else _message(
+                    language,
+                    "确认已安装并授权 Multisim 14+，然后从当前 Windows 用户启动一次 Multisim。",
+                    "Verify that licensed Multisim 14+ is installed, then start it once as the current Windows user.",
+                )
+            ),
+            prog_id=prog_id,
+            clsid=com.get("clsid"),
+            registry_status=com["status"],
+        )
+    )
+
+    automation_ready = bool(runtime["runtime_compatible"] and com["registered"])
+    if connect and automation_ready:
+        activation = _activation_diagnostics()
+        activation_status = "pass" if activation["ready"] else "fail"
+        activation_message = _message(
+            language,
+            (
+                "Multisim COM 激活和连接成功。"
+                if activation["ready"]
+                else "Multisim COM 激活或连接失败。"
+            ),
+            (
+                "Multisim COM activation and connection succeeded."
+                if activation["ready"]
+                else "Multisim COM activation or connection failed."
+            ),
+        )
+        activation_repair = (
+            None
+            if activation["ready"]
+            else _message(
+                language,
+                "启动并激活已授权的 Multisim，然后重新运行 doctor --connect。",
+                "Start and activate licensed Multisim, then rerun doctor --connect.",
+            )
+        )
+    else:
+        activation = {"checked": False, "ready": None}
+        activation_status = "skipped"
+        activation_message = _message(
+            language,
+            (
+                "未执行 Multisim 启动检查；传入 --connect 可显式验证。"
+                if automation_ready
+                else "运行时前置检查未通过，已跳过 Multisim 启动检查。"
+            ),
+            (
+                "The Multisim launch check was not run; pass --connect to verify it."
+                if automation_ready
+                else "The Multisim launch check was skipped because runtime prerequisites failed."
+            ),
+        )
+        activation_repair = None
+    checks.append(
+        _check(
+            "multisim.activation",
+            activation_status,
+            activation_message,
+            activation_repair,
+            checked=activation["checked"],
+            ready=activation["ready"],
+            details=activation.get("details"),
+            error=activation.get("error"),
+        )
+    )
+
+    paths = _load_module("multisim_mcp.schematic_builder").template_search_paths()
+    missing_templates = [
+        name
+        for name in REQUIRED_TEMPLATES
+        if not any((path / name).is_file() for path in paths)
+    ]
+    templates_ready = not missing_templates
+    checks.append(
+        _check(
+            "schematic.template_pack",
+            "pass" if templates_ready else "fail",
+            _message(
+                language,
+                "原理图模板包可用。" if templates_ready else "原理图模板包不完整。",
+                (
+                    "The schematic template pack is ready."
+                    if templates_ready
+                    else "The schematic template pack is incomplete."
+                ),
+            ),
+            (
+                None
+                if templates_ready
+                else _message(
+                    language,
+                    "运行 tools/bootstrap_local_component_pack.py，并设置 MULTISIM_MCP_TEMPLATE_DIR。",
+                    "Run tools/bootstrap_local_component_pack.py and set MULTISIM_MCP_TEMPLATE_DIR.",
+                )
+            ),
+            search_paths=[str(path) for path in paths],
+            missing=missing_templates,
+        )
+    )
+
+    codec = _codec_diagnostics()
+    checks.append(
+        _check(
+            "schematic.codec",
+            "pass" if codec["ready"] else "fail",
+            _message(
+                language,
+                ".ms14 编解码器可用。" if codec["ready"] else ".ms14 编解码器不完整。",
+                (
+                    "The .ms14 codecs are available."
+                    if codec["ready"]
+                    else "The .ms14 codecs are incomplete."
+                ),
+            ),
+            (
+                None
+                if codec["ready"]
+                else _message(
+                    language,
+                    "安装 electronics-workbench-decoder@0.2.0，并确保 ewd/ewe 与 node 可用。",
+                    "Install electronics-workbench-decoder@0.2.0 and make ewd/ewe plus node available.",
+                )
+            ),
+            tools=codec["tools"],
+        )
+    )
+
+    full_workflow_ready = bool(
+        automation_ready
+        and templates_ready
+        and codec["ready"]
+        and activation["ready"] is not False
+    )
+    summary = _message(
+        language,
+        (
+            (
+                "Multisim COM 实际连接以及完整原理图与实验工作流已就绪。"
+                if activation["ready"]
+                else "静态前置检查已通过；运行 doctor --connect 可继续验证 Multisim 实际连接。"
+            )
+            if full_workflow_ready
+            else "MCP 工具发现可用，但完整 Multisim 工作流仍有未通过的检查。"
+        ),
+        (
+            (
+                "The real Multisim COM connection and complete experiment workflow are ready."
+                if activation["ready"]
+                else "Static prerequisites passed; run doctor --connect to verify the real Multisim connection."
+            )
+            if full_workflow_ready
+            else (
+                "MCP introspection is available, but the complete Multisim "
+                "workflow still has failing checks."
+            )
+        ),
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "command": "doctor",
+        "success": True,
+        "language": language,
+        "introspection_ready": True,
+        "automation_ready": automation_ready,
+        "activation_checked": activation["checked"],
+        "activation_ready": activation["ready"],
+        "full_workflow_ready": full_workflow_ready,
+        "summary": summary,
+        "runtime": runtime,
+        "checks": checks,
+    }
+
+
+def _server_spec(
+    python_executable: str,
+    template_dir: str | None,
+    work_dir: str | None,
+) -> dict[str, Any]:
+    def normalize(value: str) -> str:
+        return os.path.abspath(os.path.expanduser(value))
+
+    environment: dict[str, str] = {}
+    if template_dir:
+        environment["MULTISIM_MCP_TEMPLATE_DIR"] = normalize(template_dir)
+    if work_dir:
+        resolved_work_dir = normalize(work_dir)
+        if " " in resolved_work_dir:
+            raise ValueError("work directory must not contain spaces")
+        environment["MULTISIM_MCP_WORKDIR"] = resolved_work_dir
+    result: dict[str, Any] = {
+        "command": normalize(python_executable),
+        "args": ["-m", "multisim_mcp.server"],
+    }
+    if environment:
+        result["env"] = environment
+    return result
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def render_client_config(
+    client: str,
+    server_name: str = "multisim",
+    python_executable: str | None = None,
+    template_dir: str | None = None,
+    work_dir: str | None = None,
+) -> str:
+    """Render a copy-pasteable MCP client configuration fragment."""
+    if client not in CLIENTS:
+        raise ValueError(f"unsupported client: {client}")
+    if not _SERVER_NAME_RE.fullmatch(server_name):
+        raise ValueError(
+            "server name may contain only letters, digits, dot, underscore, and hyphen"
+        )
+    spec = _server_spec(python_executable or sys.executable, template_dir, work_dir)
+    if client == "codex":
+        lines = [
+            f"[mcp_servers.{server_name}]",
+            f"command = {_toml_string(spec['command'])}",
+            "args = [" + ", ".join(_toml_string(item) for item in spec["args"]) + "]",
+        ]
+        if spec.get("env"):
+            lines.append("")
+            lines.append(f"[mcp_servers.{server_name}.env]")
+            lines.extend(
+                f"{key} = {_toml_string(value)}"
+                for key, value in sorted(spec["env"].items())
+            )
+        return "\n".join(lines) + "\n"
+    payload: dict[str, Any]
+    if client == "claude-desktop":
+        payload = {"mcpServers": {server_name: spec}}
+    else:
+        payload = spec
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _write_config(path: str, content: str, force: bool) -> Path:
+    output = Path(path).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    mode = "w" if force else "x"
+    try:
+        with output.open(mode, encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+    except FileExistsError as exc:
+        raise FileExistsError(
+            f"output already exists; pass --force to replace it: {output}"
+        ) from exc
+    return output
+
+
+def _print_doctor_human(report: dict[str, Any]) -> None:
+    symbols = {"pass": "OK", "fail": "FAIL", "warn": "WARN", "skipped": "SKIP"}
+    print(report["summary"])
+    for check in report["checks"]:
+        print(f"[{symbols[check['status']]}] {check['message']}")
+        if check.get("repair"):
+            print(f"       -> {check['repair']}")
+
+
+def _run_server() -> None:
+    _load_module("multisim_mcp.server").main()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="multisim-mcp",
+        description="NI Multisim MCP server, diagnostics, and client configuration",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    parser.add_argument(
+        "--json", dest="json_global", action="store_true", help="emit stable JSON"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    subparsers.add_parser("serve", help="start the MCP stdio server")
+
+    doctor = subparsers.add_parser("doctor", help="diagnose local Multisim MCP setup")
+    doctor.add_argument(
+        "--json", dest="json_command", action="store_true", help="emit stable JSON"
+    )
+    doctor.add_argument("--lang", choices=("auto", "zh", "en"), default="auto")
+    doctor.add_argument(
+        "--connect",
+        action="store_true",
+        help="explicitly activate and connect to Multisim, then restore prior state",
+    )
+    doctor.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit non-zero unless the complete Multisim workflow is ready",
+    )
+
+    config = subparsers.add_parser(
+        "config", help="generate an MCP client configuration fragment"
+    )
+    config.add_argument("--client", choices=CLIENTS, required=True)
+    config.add_argument("--name", default="multisim", help="MCP server name")
+    config.add_argument(
+        "--python", default=sys.executable, help="32-bit Python executable"
+    )
+    config.add_argument("--template-dir", help="local component template pack")
+    config.add_argument(
+        "--work-dir", help="space-free Multisim experiment work directory"
+    )
+    config.add_argument("--output", help="write the fragment to this file")
+    config.add_argument(
+        "--force", action="store_true", help="replace an existing output file"
+    )
+    config.add_argument(
+        "--json",
+        dest="json_command",
+        action="store_true",
+        help="emit a JSON result envelope",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if not arguments:
+        _run_server()
+        return 0
+    parser = build_parser()
+    args = parser.parse_args(arguments)
+    json_output = bool(
+        getattr(args, "json_global", False) or getattr(args, "json_command", False)
+    )
+
+    if args.command == "serve":
+        _run_server()
+        return 0
+    if args.command is None:
+        parser.print_help()
+        return 2
+    if args.command == "doctor":
+        report = collect_doctor_report(args.lang, connect=args.connect)
+        if json_output:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            _print_doctor_human(report)
+        return 1 if args.strict and not report["full_workflow_ready"] else 0
+    if args.command == "config":
+        try:
+            content = render_client_config(
+                args.client,
+                server_name=args.name,
+                python_executable=args.python,
+                template_dir=args.template_dir,
+                work_dir=args.work_dir,
+            )
+            output = (
+                _write_config(args.output, content, args.force) if args.output else None
+            )
+        except (OSError, ValueError) as exc:
+            if json_output:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": SCHEMA_VERSION,
+                            "command": "config",
+                            "success": False,
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                parser.error(str(exc))
+            return 2
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "command": "config",
+                        "success": True,
+                        "client": args.client,
+                        "server_name": args.name,
+                        "output": str(output) if output else None,
+                        "content": content,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        elif output:
+            print(output)
+        else:
+            print(content, end="")
+        return 0
+    parser.error(f"unsupported command: {args.command}")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

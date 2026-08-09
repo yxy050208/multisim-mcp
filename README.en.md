@@ -8,9 +8,10 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> Current target: `v0.1.0-alpha.2`. This project is not affiliated with or
-> endorsed by NI. A locally installed and licensed Multisim 14+ environment is
-> required. The current COM worker uses 32-bit Python.
+> Source release candidate: `v0.1.0-alpha.3`; the latest public release remains
+> `v0.1.0-alpha.2`. This project is not affiliated with or endorsed by NI. A
+> locally installed and licensed Multisim 14+ environment is required. The
+> current COM worker uses 32-bit Python.
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
@@ -95,7 +96,33 @@ npm install --global electronics-workbench-decoder@0.2.0
 .\run_server.ps1
 ```
 
-MCP client configuration:
+The `v0.1.0-alpha.3` source includes diagnostic and configuration commands.
+By default, they do not start Multisim or modify an existing client
+configuration:
+
+```powershell
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang en
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang en --connect
+C:\path\to\python32\Scripts\multisim-mcp.exe --json doctor
+
+# Print a Claude Desktop JSON fragment.
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client claude-desktop `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack
+
+# Print a Codex config.toml fragment.
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client codex `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack
+```
+
+The generator prints a copy-pasteable fragment by default. `--output` writes a
+new file and refuses to replace one unless `--force` is also present. It never
+merges into a live Claude Desktop or Codex configuration automatically.
+
+Manual MCP client configuration:
 
 ```json
 {

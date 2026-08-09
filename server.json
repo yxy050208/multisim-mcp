@@ -7,13 +7,13 @@
     "url": "https://github.com/yxy050208/multisim-mcp",
     "source": "github"
   },
-  "version": "0.1.0a2",
+  "version": "0.1.0a3",
   "websiteUrl": "https://github.com/yxy050208/multisim-mcp",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "multisim-mcp",
-      "version": "0.1.0a2",
+      "version": "0.1.0a3",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

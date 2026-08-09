@@ -70,13 +70,64 @@ build a local component pack from your own licensed installation as described
 below and set `MULTISIM_MCP_TEMPLATE_DIR`. Other Automation API tools can still
 be installed without that pack.
 
-Start the server:
+Diagnose the installation before starting the server:
+
+```powershell
+# Human-readable output (Chinese or English)
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang zh
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --lang en
+
+# Explicitly start/connect to Multisim and verify licensing plus COM activation.
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --connect
+
+# Stable JSON for agents and CI. Add --strict to require the full workflow.
+C:\path\to\python32\Scripts\multisim-mcp.exe --json doctor
+C:\path\to\python32\Scripts\multisim-mcp.exe doctor --json --strict
+```
+
+`doctor` is side-effect free by default: it does not activate Multisim. It checks the
+Python version and architecture, pywin32, the 32-bit COM registration, the
+local template pack, and the pinned `.ms14` codecs. A normal diagnostic run
+returns exit code zero even when setup is incomplete so an agent can parse all
+checks. `--strict` returns non-zero unless the complete workflow is ready.
+`--connect` is the explicit opt-in that may start Multisim; it restores a
+previously disconnected COM state after the probe and does not disturb an
+already connected instance.
+
+Start the server. Calling `multisim-mcp` without a subcommand remains backward
+compatible; `serve` is the explicit equivalent:
 
 ```powershell
 .\run_server.ps1
+C:\path\to\python32\Scripts\multisim-mcp.exe serve
 ```
 
-MCP client configuration:
+Generate a client configuration fragment:
+
+```powershell
+# Claude Desktop JSON
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client claude-desktop `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack `
+  --work-dir C:\msre_exp
+
+# Codex config.toml
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client codex `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack
+
+# Unwrapped command/args/env JSON for another stdio client
+C:\path\to\python32\Scripts\multisim-mcp.exe config --client generic
+```
+
+The generator previews content on stdout. `--output <new-file>` writes a
+fragment, refuses to overwrite by default, and accepts `--force` only when the
+caller explicitly wants replacement. It does not merge into a live client
+configuration.
+
+Manual MCP client configuration:
 
 ```json
 {
@@ -90,6 +141,31 @@ MCP client configuration:
 ```
 
 Call `runtime_status` first when diagnosing installation problems.
+
+### CLI JSON contract
+
+`multisim-mcp --json doctor` emits one JSON object with
+`schema_version`, `success`, readiness booleans (including activation state),
+runtime facts, and a stable
+`checks[]` array. Each check has a stable `id`, `status`, and `message`; failed
+checks may include `repair`. Missing setup is reported as data rather than a
+JSON error.
+
+`multisim-mcp config ... --json` emits a result envelope containing the client,
+server name, optional output path, and generated content. Invalid input or an
+overwrite refusal uses this error shape and exit code 2:
+
+```json
+{
+  "schema_version": 1,
+  "command": "config",
+  "success": false,
+  "error": {"type": "ValueError", "message": "..."}
+}
+```
+
+JSON stdout never contains progress text or credentials. Import-time COM cache
+diagnostics are redirected to stderr.
 
 ### User-local component packs
 

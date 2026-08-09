@@ -43,6 +43,21 @@ jobs:
           $wheel = Get-ChildItem mcp_server/dist/*.whl | Select-Object -First 1
           python -m pip install $wheel.FullName
           python -m pip check
+      - name: Smoke-test installed CLI
+        shell: pwsh
+        run: |
+          multisim-mcp --help
+          multisim-mcp --json doctor | Out-File -Encoding utf8 doctor.json
+          @'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("doctor.json").read_text(encoding="utf-8-sig"))
+          assert result["command"] == "doctor"
+          assert result["success"] is True
+          assert result["introspection_ready"] is True
+          '@ | python -
+          multisim-mcp config --client generic --python $((Get-Command python).Source)
       - name: Compile installed sources
         run: python -m compileall mcp_server
       - name: Run COM-free tests against installed wheel

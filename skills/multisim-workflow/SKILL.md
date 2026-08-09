@@ -1,13 +1,40 @@
 ---
 name: multisim-circuit-workflow
-description: Generate, simulate, and report on NI Multisim circuits through the Multisim MCP server. Use when the user asks for Multisim, circuit simulation, schematic generation, waveform analysis, or an electronic design report.
+description: Diagnose, configure, generate, simulate, and report on NI Multisim circuits through the Multisim MCP server. Use when the user asks to install or configure Multisim MCP, generate a Multisim schematic, run circuit simulation, analyze waveforms, or produce an electronic design report.
 ---
 
 # Multisim Circuit Workflow
 
 Use the `multisim` MCP tools in this order. Do not skip pre-validation.
 
-Call `runtime_status` before the first experiment on a new installation. Prefer
+## 0. Verify the installation
+
+When the installed CLI is accessible, start with:
+
+```powershell
+Get-Command multisim-mcp
+multisim-mcp --json doctor
+```
+
+Read `full_workflow_ready` and each stable `checks[].id`. Apply the provided
+`repair` instructions instead of repeatedly attempting COM activation. Use
+`doctor --json --strict` only in CI or when a non-zero incomplete-setup status
+is useful. Run `doctor --json --connect` only when the user wants a real COM
+and license probe; it may start Multisim.
+
+Preview client configuration when requested:
+
+```powershell
+multisim-mcp config --client claude-desktop --python C:\Python32\python.exe
+multisim-mcp config --client codex --python C:\Python32\python.exe
+multisim-mcp config --client generic --python C:\Python32\python.exe
+```
+
+Do not write over a live client configuration. Generate a fragment, inspect it,
+and merge it manually. Keep the MCP server local over stdio.
+
+After the client connects, call `runtime_status` before the first experiment on
+a new installation. Prefer
 the high-level `run_circuit_experiment` tool whenever the requested schematic
 uses its supported component subset; it keeps the generated design, Multisim
 simulation, exported data, plot, and report tied to one source netlist.

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from multisim_mcp.multisim_client import (
@@ -47,6 +48,49 @@ class RowsToDictTest(unittest.TestCase):
         self.assertEqual(result["n_points"], 5)
         self.assertLessEqual(result["sampled_points"], 2)
         self.assertEqual(len(result["rows"][0]), len(result["rows"][1]))
+
+
+class DispatchFallbackTest(unittest.TestCase):
+    def test_corrupt_generated_wrapper_falls_back_to_dynamic_dispatch(self) -> None:
+        app = object()
+        fake_client = SimpleNamespace(
+            gencache=SimpleNamespace(
+                EnsureDispatch=lambda _prog_id: (_ for _ in ()).throw(
+                    AttributeError("CLSIDToClassMap")
+                )
+            ),
+            dynamic=SimpleNamespace(Dispatch=lambda _prog_id: app),
+        )
+        client = MultisimClient()
+        with (
+            patch("multisim_mcp.multisim_client.require_compatible_runtime"),
+            patch("multisim_mcp.multisim_client.win32_client", fake_client),
+            patch.object(client, "_ensure_com"),
+        ):
+            result = client._ensure_app()
+        self.assertIs(result, app)
+
+    def test_dynamic_dispatch_failure_preserves_both_errors(self) -> None:
+        def fail_generated(_prog_id: str) -> object:
+            raise AttributeError("CLSIDToClassMap")
+
+        def fail_dynamic(_prog_id: str) -> object:
+            raise OSError("dynamic failure")
+
+        fake_client = SimpleNamespace(
+            gencache=SimpleNamespace(EnsureDispatch=fail_generated),
+            dynamic=SimpleNamespace(Dispatch=fail_dynamic),
+        )
+        client = MultisimClient()
+        with (
+            patch("multisim_mcp.multisim_client.require_compatible_runtime"),
+            patch("multisim_mcp.multisim_client.win32_client", fake_client),
+            patch.object(client, "_ensure_com"),
+            self.assertRaisesRegex(
+                RuntimeError, "Generated-wrapper error: CLSIDToClassMap"
+            ),
+        ):
+            client._ensure_app()
 
 
 class RuntimeDiagnosticsTest(unittest.TestCase):

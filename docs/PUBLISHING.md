@@ -22,21 +22,17 @@ NI 样例、解码设计、许可材料、个人路径和来源未确认的 XML 
 English: publish the engine, tests, docs, manifest, and local extractor. Exclude
 installed samples, decoded files, extracted XML packs, binaries, and local output.
 
-## 2. 首次发布前必须填写
+## 2. 发布账户与仓库检查
 
-当前没有 Git remote，因此发布者需要在 `mcp_server/pyproject.toml` 增加真实 URL：
+项目 URL 和 `origin` 已配置为公开仓库。每次发布前仍需确认：
 
-```toml
-[project.urls]
-Homepage = "https://github.com/<OWNER>/<REPOSITORY>"
-Repository = "https://github.com/<OWNER>/<REPOSITORY>"
-Issues = "https://github.com/<OWNER>/<REPOSITORY>/issues"
-```
+- `git remote get-url origin` 指向 `yxy050208/multisim-mcp`；
+- PyPI Trusted Publishing environment 仍为 `pypi`；
+- GitHub Private vulnerability reporting 保持开启；
+- `pyproject.toml`、`server.json` 和 `multisim_mcp.__version__` 三处版本一致。
 
-同时把 `SECURITY.md` 的临时报告说明替换为 GitHub Security Advisory 地址，并在
-仓库 Settings → Security 中启用 Private vulnerability reporting。
-
-English: set real project URLs and enable GitHub private vulnerability reporting.
+English: verify the configured repository, trusted publisher, security settings,
+and synchronized package/registry versions before every release.
 
 ## 3. 本地审计
 
@@ -67,14 +63,14 @@ python -m build .\mcp_server
 
 English: public CI remains COM-free; run the real Multisim suite locally.
 
-## 5. 建议的首次提交和标签
+## 5. 发布提交和标签
 
 ```powershell
 git add <逐项审查过的路径>
 git diff --cached --check
 python tools/release_audit.py
-git commit -m "release: v0.1.0-alpha"
-git tag -a v0.1.0-alpha -m "Multisim MCP v0.1.0-alpha"
+git commit -m "release: v0.1.0-alpha.3"
+git tag -a v0.1.0-alpha.3 -m "Multisim MCP v0.1.0-alpha.3"
 ```
 
 推送、创建 GitHub Release 和上传附件应在再次检查暂存内容后手动执行。不要上传当前

@@ -121,6 +121,20 @@ class MultisimClient:
         if self._app is None:
             try:
                 self._app = win32_client.gencache.EnsureDispatch(PROG_ID)
+            except AttributeError as cache_exc:
+                # A stale/corrupt pywin32 gen_py cache can make EnsureDispatch
+                # fail before COM activation (for example, a generated module
+                # missing CLSIDToClassMap). Dynamic dispatch uses the same
+                # registered local COM server without depending on that cache.
+                try:
+                    self._app = win32_client.dynamic.Dispatch(PROG_ID)
+                except Exception as dynamic_exc:
+                    raise RuntimeError(
+                        "Could not activate the Multisim Automation API. Verify that "
+                        "Multisim is installed, licensed, and registered for this user. "
+                        f"COM ProgID: {PROG_ID}. Generated-wrapper error: {cache_exc}. "
+                        f"Dynamic-dispatch error: {dynamic_exc}"
+                    ) from dynamic_exc
             except Exception as exc:
                 raise RuntimeError(
                     "Could not activate the Multisim Automation API. Verify that "

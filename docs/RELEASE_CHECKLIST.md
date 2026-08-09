@@ -45,3 +45,15 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Publish `0.1.0a2` to PyPI and update the official MCP Registry.
 - [x] Verify GitHub Release assets match the canonical PyPI SHA-256 hashes.
 - [x] Add the Glama score badge to the awesome-mcp-servers submission.
+
+## Required before v0.1.0-alpha.3
+
+- [x] Add backward-compatible `doctor`, `serve`, and client `config` commands.
+- [x] Keep JSON/MCP stdout free of pywin32 import diagnostics.
+- [x] Verify a real 32-bit Multisim 14.3 COM connection with `doctor --connect`.
+- [x] Add dynamic Dispatch fallback for a corrupt pywin32 generated-wrapper cache.
+- [x] Run the real generated divider workflow and verify a 0.5 output ratio.
+- [x] Pass 63 COM-free tests, skill validation, code-only wheel JSON, and stdio checks.
+- [ ] Publish `0.1.0a3` to PyPI through Trusted Publishing.
+- [ ] Publish the matching official MCP Registry metadata.
+- [ ] Create and push the annotated `v0.1.0-alpha.3` tag and GitHub Release.

@@ -21,10 +21,13 @@ jobs:
           python - <<'PY'
           import json
           import urllib.request
+          from pathlib import Path
 
-          with urllib.request.urlopen("https://pypi.org/pypi/multisim-mcp/0.1.0a2/json") as response:
+          version = json.loads(Path("server.json").read_text(encoding="utf-8"))["version"]
+          url = f"https://pypi.org/pypi/multisim-mcp/{version}/json"
+          with urllib.request.urlopen(url) as response:
               package = json.load(response)
-          assert package["info"]["version"] == "0.1.0a2"
+          assert package["info"]["version"] == version
           assert "mcp-name: io.github.yxy050208/multisim-mcp" in package["info"]["description"]
           PY
       - name: Install verified MCP Publisher v1.8.1
