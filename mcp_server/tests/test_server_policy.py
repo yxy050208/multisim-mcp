@@ -22,6 +22,20 @@ class UnsafeToolGateTest(unittest.TestCase):
 
 
 class ArtifactPreflightTest(unittest.TestCase):
+    def test_high_level_workflow_rejects_empty_root_and_nonfinite_limits(self) -> None:
+        netlist = "V1 a 0 1\nR1 a 0 1k\n.end\n"
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            server.run_circuit_experiment(netlist, "op", "")
+        with self.assertRaisesRegex(ValueError, "filesystem root"):
+            server.run_circuit_experiment(netlist, "op", Path.cwd().anchor)
+        with self.assertRaisesRegex(ValueError, "timeout"):
+            server.submit_circuit_experiment(
+                netlist,
+                "op",
+                str(Path.cwd() / "nonfinite-test"),
+                timeout=float("nan"),
+            )
+
     def test_high_level_workflow_refuses_collision_before_multisim(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             report = Path(tmp) / "report.md"

@@ -166,8 +166,11 @@ jobs:
                   names = {tool.name for tool in tools.tools}
                   assert "runtime_status" in names
                   assert "run_circuit_experiment" in names
+                  assert "submit_circuit_experiment" in names
+                  assert "cancel_experiment_job" in names
+                  assert "retry_experiment_job" in names
                   assert len(prompts.prompts) == 5
-                  assert len(resources.resource_templates) == 10
+                  assert len(resources.resource_templates) == 11
                   print(f"{mode}: {len(names)} tools")
 
           asyncio.run(main())

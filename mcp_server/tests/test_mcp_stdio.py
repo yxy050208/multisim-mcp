@@ -58,12 +58,18 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("schematic_component_catalog", names)
             self.assertIn("create_schematic_from_netlist", names)
             self.assertIn("run_circuit_experiment", names)
+            self.assertIn("submit_circuit_experiment", names)
+            self.assertIn("get_experiment_job", names)
+            self.assertIn("list_experiment_jobs", names)
+            self.assertIn("cancel_experiment_job", names)
+            self.assertIn("retry_experiment_job", names)
             self.assertIn("register_experiment_artifacts", names)
             self.assertIn("run_spice_netlist", names)
             self.assertIn("create_circuit_experiment", prompts)
             self.assertIn("verify_design_requirements", prompts)
             self.assertIn("multisim://experiments/{experiment_id}/manifest", resources)
             self.assertIn("multisim://experiments/{experiment_id}/schematic", resources)
+            self.assertIn("multisim://jobs/{job_id}", resources)
             self.assertEqual(
                 set(output_schema["required"]),
                 {

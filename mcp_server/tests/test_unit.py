@@ -50,6 +50,37 @@ class RowsToDictTest(unittest.TestCase):
         self.assertEqual(len(result["rows"][0]), len(result["rows"][1]))
 
 
+class CommandCancellationTest(unittest.TestCase):
+    def test_checkpoint_cancellation_stops_simulation_before_return(self) -> None:
+        class Circuit:
+            SimulationState = 1
+            LastErrorMessage = ""
+            stop_calls = 0
+
+            def DoCommandLine(self, _command: str, _log: str) -> None:
+                return None
+
+            def StopSimulation(self) -> None:
+                self.stop_calls += 1
+                self.SimulationState = 0
+
+        client = MultisimClient()
+        circuit = Circuit()
+        client._circuit = circuit
+        with tempfile.TemporaryDirectory() as tmp:
+            result = client.run_command_file(
+                str(Path(tmp) / "run.txt"),
+                str(Path(tmp) / "run.log"),
+                timeout=2,
+                heartbeat=lambda: (_ for _ in ()).throw(
+                    InterruptedError("cancel")
+                ),
+            )
+        self.assertTrue(result["cancelled"])
+        self.assertFalse(result["timed_out"])
+        self.assertEqual(circuit.stop_calls, 1)
+
+
 class DispatchFallbackTest(unittest.TestCase):
     def test_corrupt_generated_wrapper_falls_back_to_dynamic_dispatch(self) -> None:
         app = object()

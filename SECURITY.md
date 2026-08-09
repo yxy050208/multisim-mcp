@@ -20,6 +20,13 @@ Safe defaults:
 - Runtime npm downloads are disabled unless
   `MULTISIM_MCP_ALLOW_NPX_DOWNLOAD=1` is explicitly enabled.
 - Existing artifacts are not overwritten without an explicit tool argument.
+- Asynchronous jobs serialize the source netlist and experiment settings under
+  `MULTISIM_MCP_JOB_DIR` (or the per-user local state directory) so they can
+  recover after restart. Treat that directory as sensitive user data; records
+  are created with restrictive permissions where the platform supports them.
+- Job output directories use sibling `.multisim-mcp.lock` leases. Do not edit or
+  delete a live lease; stale leases are reclaimed only after their owner process
+  is confirmed dead.
 
 Treat both opt-in environment variables as a reduction of the security
 boundary. Do not enable them for workflows that process untrusted prompts,

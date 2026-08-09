@@ -39,6 +39,13 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 6. 导出 raw、CSV、SVG 波形和命令日志。
 7. 生成可复现 Markdown 实验报告。
 
+对于较长实验，主分支新增 `submit_circuit_experiment` 持久任务接口。它会立即返回
+`job_id`，可通过 `get_experiment_job`、`list_experiment_jobs`、
+`cancel_experiment_job`、`retry_experiment_job` 或 `multisim://jobs/{job_id}` 查询、
+取消和重试任务。每个实验
+运行在隔离 worker 进程中；worker 崩溃或心跳超时不会拖垮 MCP 服务，服务重启后未完成
+任务会安全地重新排队。该能力将在完成其余路线图后随 `v1.0.0` 发布。
+
 已经在 Multisim 14.3 上完成分压器、耦合电感、数字门/JK 时序以及
 函数发生器 + 示波器联合实验的真实验证。
 
@@ -50,6 +57,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 - DC/AC/瞬态分析、波形输入注入、RLC 读写。
 - 安全子集 SPICE 实验和 raw/CSV 解析。
 - MCP stdio、运行环境诊断和报告生成。
+- 持久实验队列、进度/取消/超时、输出锁和崩溃/无响应 worker 恢复。
 
 实验性：
 

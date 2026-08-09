@@ -23,7 +23,7 @@ including `run_spice_netlist`. Results are written to
 report, netlist, BOM, schematic image, and saved circuit in the same
 directory.
 
-## Tool Coverage (33 Tools)
+## Tool Coverage (39 Tools)
 
 Lifecycle: `connect`, `disconnect`, `open_circuit`, `new_circuit`,
 `circuit_info`, `save_circuit`, `runtime_status`
@@ -43,7 +43,11 @@ Export and reporting: `get_circuit_image`, `report_netlist`,
 `.ms14` XML codec: `decode_ms14`, `encode_ms14`
 
 High-level generation and experiment: `create_schematic_from_netlist`,
-`run_circuit_experiment`
+`schematic_component_catalog`, `run_circuit_experiment`,
+`register_experiment_artifacts`
+
+Durable jobs: `submit_circuit_experiment`, `get_experiment_job`,
+`list_experiment_jobs`, `cancel_experiment_job`, `retry_experiment_job`
 
 ## Verified Results
 
@@ -68,6 +72,11 @@ High-level generation and experiment: `create_schematic_from_netlist`,
   opened and enumerated it in Multisim 14.3, exported a schematic PNG, ran a
   101-point DC sweep through the Multisim engine, and wrote raw, CSV, SVG, and
   Markdown report artifacts from the same source netlist.
+- The isolated durable-job path was verified with 32-bit Python and Multisim
+  14.3 on 2026-08-09: the MCP frontend returned a queued handle immediately,
+  reported schematic/simulation/complete checkpoints, produced an 11-point DC
+  sweep, registered all experiment Resources in the parent, and restored the
+  successful record and resource handles after a job-manager restart.
 - The component-family E2E regression opens and reverse-exports R/L/C/V/I,
   D/Q/M/J/Z, S/W, B/E/F/G/H, K/T/O/U, OPAMP5, generic 2–16-pin X blocks, and
   native preview logic/JK parts.

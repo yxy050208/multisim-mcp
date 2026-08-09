@@ -29,8 +29,11 @@ Stable and verified on Multisim 14.3:
 - SPICE netlist execution with safe `op`, `dc`, `ac`, and `tran` commands.
 - Netlist, BOM, schematic image, raw data, CSV, SVG, and Markdown export.
 - High-level `run_circuit_experiment` workflow.
+- Durable `submit_circuit_experiment` queue with progress, cancellation,
+  total/heartbeat timeouts, and isolated-worker recovery.
 - MCP `2026-07-28` discovery plus automatic compatibility with legacy clients.
-- Ten experiment Resources and five bilingual workflow Prompts.
+- Ten experiment artifact Resources, one job-status Resource, and five
+  bilingual workflow Prompts.
 - Validated structured output for the complete experiment workflow.
 
 Completed experiments return an opaque `experiment_id` and resource URIs such
@@ -44,11 +47,11 @@ multisim://experiments/{experiment_id}/data
 multisim://experiments/{experiment_id}/plot
 ```
 
-Handles are process-local. After restarting the server, call
-`register_experiment_artifacts` with an existing complete output directory to
-restore them. Resource reads are limited to the fixed artifact set and default
-to 16 MiB per file; set `MULTISIM_MCP_RESOURCE_MAX_BYTES` to a positive integer
-to change that limit.
+Completed durable jobs restore their handles after restarting the server. For
+other historical output directories, call `register_experiment_artifacts` to
+restore a process-local handle. Resource reads are limited to the fixed artifact
+set and default to 16 MiB per file; set
+`MULTISIM_MCP_RESOURCE_MAX_BYTES` to a positive integer to change that limit.
 
 Experimental:
 
@@ -226,13 +229,44 @@ The high-level tool accepts a SPICE netlist and a safe experiment command:
 }
 ```
 
-`run_circuit_experiment` will:
+For normal agent use, submit the same arguments with
+`submit_circuit_experiment`. It returns immediately:
+
+```json
+{
+  "success": true,
+  "job_id": "job-...",
+  "state": "queued",
+  "status_uri": "multisim://jobs/job-...",
+  "output_dir": "C:\\experiments\\divider"
+}
+```
+
+Poll `get_experiment_job` or the status Resource, and call
+`cancel_experiment_job` when needed. A failed, cancelled, or timed-out record
+can be resubmitted without copying its persisted source through
+`retry_experiment_job`. States are `queued`, `running`,
+`cancelling`, `succeeded`, `failed`, `cancelled`, or `timed_out`. A successful
+record contains the same structured result as `run_circuit_experiment`.
+`list_experiment_jobs` omits large results and supports state filtering.
+
+The synchronous `run_circuit_experiment` compatibility tool will:
 
 1. Validate the supported netlist and analysis command.
 2. Generate and encode an editable `circuit.ms14`.
 3. Open the design in Multisim and export `schematic.png`.
 4. Run the requested analysis through Multisim's engine.
 5. Export `result.raw`, `data.csv`, `plot.svg`, logs, and `report.md`.
+
+Job records are stored as atomic JSON under `%LOCALAPPDATA%\multisim-mcp\jobs`
+by default. Set `MULTISIM_MCP_JOB_DIR` to select another private local state
+directory. Records contain the source netlist and settings required for restart
+recovery, so protect and back up that directory according to the sensitivity of
+your circuit. `job_timeout` limits the whole workflow; `heartbeat_timeout`
+detects a hung Multisim/codec worker. Output publication is guarded by a
+cross-process sibling lock and remains transactional. A queue-wide lease keeps
+execution serialized even if multiple MCP frontend processes use the same job
+state directory.
 
 Use `create_schematic_from_netlist` when only an editable schematic is needed,
 or `run_spice_netlist` for netlist-only simulation.
@@ -258,6 +292,8 @@ SQUARE, or TRIANGLE), `FREQ`, `AMPLITUDE`, `OFFSET`, `DUTY`, and `RISE`.
   `MULTISIM_MCP_EWD` and `MULTISIM_MCP_EWE` to its `dist/ewd.js` and
   `dist/ewe.js` entry points; the server invokes them through `node.exe`.
 - Existing experiment artifacts are not overwritten unless `overwrite=true`.
+- Asynchronous job specifications are persisted locally for recovery; their
+  state directory must not be shared with untrusted users.
 - The server is intended for trusted local stdio clients, not public network
   exposure. See `SECURITY.md` in the repository root.
 

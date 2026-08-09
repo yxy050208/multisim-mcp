@@ -21,6 +21,7 @@ from multisim_mcp.experiment_resources import (
     read_text_artifact,
     register_experiment,
 )
+from multisim_mcp.job_engine import ExperimentJobManager
 from multisim_mcp.server import mcp
 
 TEXT_ARTIFACTS = {
@@ -156,6 +157,48 @@ class McpExperimentResourceTest(unittest.IsolatedAsyncioTestCase):
         second_payload = json.loads(second.content[0].text)
         self.assertEqual(first_payload["thread"], second_payload["thread"])
         self.assertTrue(first_payload["thread"].startswith("multisim-com"))
+
+    async def test_job_tools_and_status_resource_are_protocol_readable(self) -> None:
+        from multisim_mcp import server
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = ExperimentJobManager(Path(tmp) / "state", start=False)
+            previous = server._JOB_MANAGER
+            server._JOB_MANAGER = manager
+            try:
+                async with Client(mcp) as client:
+                    submitted = await client.call_tool(
+                        "submit_circuit_experiment",
+                        {
+                            "netlist": "V1 a 0 1\nR1 a 0 1k\n.end\n",
+                            "commands": "op",
+                            "output_dir": str(Path(tmp) / "output"),
+                            "timeout": 1,
+                            "job_timeout": 10,
+                            "heartbeat_timeout": 10,
+                        },
+                    )
+                    self.assertFalse(submitted.is_error)
+                    job_id = submitted.structured_content["job_id"]
+                    status = await client.call_tool(
+                        "get_experiment_job", {"job_id": job_id}
+                    )
+                    listing = await client.call_tool("list_experiment_jobs", {})
+                    resource = await client.read_resource(
+                        f"multisim://jobs/{job_id}"
+                    )
+                    cancelled = await client.call_tool(
+                        "cancel_experiment_job", {"job_id": job_id}
+                    )
+
+                self.assertEqual(status.structured_content["state"], "queued")
+                self.assertEqual(listing.structured_content["count"], 1)
+                self.assertIsInstance(resource.contents[0], TextResourceContents)
+                self.assertIn(job_id, resource.contents[0].text)
+                self.assertEqual(cancelled.structured_content["state"], "cancelled")
+            finally:
+                server._JOB_MANAGER = previous
+                manager.shutdown()
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 try:
     import pythoncom as _pythoncom
@@ -575,7 +575,12 @@ class MultisimClient:
         ))
 
     def run_command_file(
-        self, command_file: str, log_file: str, timeout: float = 60.0
+        self,
+        command_file: str,
+        log_file: str,
+        timeout: float = 60.0,
+        cancel_requested: Callable[[], bool] | None = None,
+        heartbeat: Callable[[], None] | None = None,
     ) -> dict:
         """Run a Nutmeg command file and wait until the engine goes idle."""
         if timeout <= 0:
@@ -586,13 +591,23 @@ class MultisimClient:
         self.circuit.DoCommandLine(command_file, log_file)
         state = int(self.circuit.SimulationState)
         deadline = time.monotonic() + timeout
+        cancelled = False
         while time.monotonic() < deadline:
             time.sleep(0.25)
+            if heartbeat is not None:
+                try:
+                    heartbeat()
+                except InterruptedError:
+                    cancelled = True
+                    break
+            if cancel_requested is not None and cancel_requested():
+                cancelled = True
+                break
             state = int(self.circuit.SimulationState)
             if state == 0:
                 break
-        timed_out = state != 0
-        if timed_out:
+        timed_out = state != 0 and not cancelled
+        if timed_out or cancelled:
             try:
                 self.circuit.StopSimulation()
                 state = int(self.circuit.SimulationState)
@@ -603,6 +618,7 @@ class MultisimClient:
             "log_file": log_file,
             "state": state,
             "timed_out": timed_out,
+            "cancelled": cancelled,
             "elapsed_seconds": round(time.monotonic() - started_at, 3),
             "last_error": clean_error(str(self.circuit.LastErrorMessage)),
             "log_exists": os.path.exists(log_file),

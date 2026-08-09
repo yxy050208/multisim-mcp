@@ -14,6 +14,9 @@
 7. The high-level MCP tool writes a reproducible Markdown report.
 8. `experiment_resources.py` registers the completed directory under an opaque
    handle and exposes allowlisted artifacts as MCP Resources.
+9. For long runs, `job_engine.py` persists a queue and launches one isolated
+   `job_worker.py` subprocess. Progress is checkpointed atomically; only a
+   complete artifact transaction is registered by the MCP parent.
 
 The source netlist is the current experiment source of truth. Generated visual
 probes are experimental, so authoritative data does not depend on probe XML.
@@ -23,6 +26,9 @@ probes are experimental, so authoritative data does not depend on probe XML.
 - `server.py`: MCP schemas, safety gates, orchestration, and artifact policy.
 - `experiment_resources.py`: opaque experiment handles, fixed artifact mapping,
   size limits, hashes, and resource reads.
+- `job_engine.py`: durable state machine, queue, process monitoring, cancellation,
+  leases, and restart recovery.
+- `job_worker.py`: one-experiment subprocess boundary and parent liveness watch.
 - `multisim_client.py`: COM and `.ms14` codec adapters.
 - `schematic_builder.py`: deterministic netlist-to-Multisim XML conversion.
 - `spice_raw.py`: dependency-free raw parsing and plotting.
@@ -36,16 +42,38 @@ async MCP wrapper around every synchronous tool and serializes the underlying
 function calls through one `multisim-com` executor thread. That thread initializes
 COM before its first call and retains ownership for the process lifetime.
 
-Prompts and artifact-only Resources do not access COM and may use the SDK's
-normal handler execution. Experiment resource handles are process-local and can
-be restored after a restart with `register_experiment_artifacts`.
+Prompts, job-control tools, and artifact-only Resources do not access COM and
+use the SDK's normal handler execution, so job status and cancellation remain
+responsive while a synchronous COM tool is busy. Completed durable jobs restore
+their experiment resource handles automatically after restart; other historical
+directories can be restored with `register_experiment_artifacts`.
 
-## Planned architecture
+## Resilient job architecture
 
-The current MCP process and its dedicated COM thread must run under 32-bit
-Python. A future release should move COM ownership to a dedicated 32-bit STA
-worker process and keep the MCP frontend in
-a normal 64-bit runtime. A local named-pipe or loopback protocol would provide:
+Synchronous compatibility tools still use the MCP process's dedicated COM
+thread. `submit_circuit_experiment` instead runs the complete workflow in a
+fresh subprocess using the same 32-bit Python interpreter. The parent persists
+the specification and public state as atomic JSON, monitors worker heartbeats,
+and terminates only the isolated worker on cancellation, overall timeout,
+heartbeat timeout, or crash. A parent-liveness watcher prevents orphan workers.
+
+Each output directory has both an active-job reservation and a sibling lock
+lease. A queue-wide worker lease also preserves single-worker execution when
+multiple MCP frontend processes share the same state directory. Artifacts are
+built in a unique staging directory and atomically
+published only after the full ten-file set is verified. An interrupted
+`running`/`cancelling` record is recovered as `queued` when the MCP server
+restarts; the new attempt rebuilds from the source specification instead of
+trusting partial files.
+
+The current MCP frontend and worker both use 32-bit Python. A later packaging
+improvement can keep the frontend in 64-bit Python and retain only the job worker
+as 32-bit. The state machine intentionally does not depend on transport types;
+MCP SDK 2.0 exposes Tasks protocol types but not high-level server/client task
+handlers, so a future official Tasks adapter can map existing job IDs and states
+without a storage migration.
+
+This process boundary provides:
 
 - COM thread affinity and serialized circuit ownership.
 - responsive MCP cancellation and timeout handling;

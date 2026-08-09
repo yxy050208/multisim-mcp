@@ -13,7 +13,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 
@@ -30,6 +30,11 @@ from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
     runtime_diagnostics,
+)
+from multisim_mcp.job_engine import (
+    ExperimentJobManager,
+    JobSubmission,
+    output_lease,
 )
 from multisim_mcp.safety import (
     UNSAFE_COMMANDS_ENV,
@@ -69,9 +74,14 @@ class MultisimMCPServer(MCPServer):
     """MCPServer that serializes tool calls onto Multisim's COM apartment."""
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any) -> Any:
+        com_serialized = bool(decorator_kwargs.pop("com_serialized", True))
         register = super().tool(*decorator_args, **decorator_kwargs)
 
         def decorator(function: Any) -> Any:
+            if not com_serialized:
+                register(function)
+                return function
+
             @functools.wraps(function)
             async def serialized(*args: Any, **kwargs: Any) -> Any:
                 loop = asyncio.get_running_loop()
@@ -96,11 +106,23 @@ mcp = MultisimMCPServer(
     instructions=(
         "Generate editable Multisim circuits, run validated experiments, and "
         "read completed experiment artifacts through multisim:// resources. "
-        "Use run_circuit_experiment for the complete workflow."
+        "Use submit_circuit_experiment for resilient long runs and "
+        "run_circuit_experiment for synchronous compatibility."
     ),
 )
 client = MultisimClient()
 codec = Ms14Codec()
+_JOB_MANAGER: ExperimentJobManager | None = None
+_JOB_MANAGER_LOCK = threading.Lock()
+
+
+def _job_manager() -> ExperimentJobManager:
+    """Create the durable scheduler lazily, keeping introspection side-effect free."""
+    global _JOB_MANAGER
+    with _JOB_MANAGER_LOCK:
+        if _JOB_MANAGER is None:
+            _JOB_MANAGER = ExperimentJobManager()
+        return _JOB_MANAGER
 
 
 @mcp.resource(
@@ -211,6 +233,17 @@ def experiment_commands_resource(experiment_id: str) -> str:
 )
 def experiment_log_resource(experiment_id: str) -> str:
     return read_text_artifact(experiment_id, "log")
+
+
+@mcp.resource(
+    "multisim://jobs/{job_id}",
+    name="experiment_job_status",
+    title="Experiment job status",
+    description="Durable state, progress, diagnostics, and result of an experiment job.",
+    mime_type="application/json",
+)
+def experiment_job_status_resource(job_id: str) -> dict[str, object]:
+    return _job_manager().get(job_id)
 
 
 def _prompt_instructions(zh: str, en: str, language: str) -> str:
@@ -387,6 +420,84 @@ def register_experiment_artifacts(output_dir: str) -> ExperimentResourceIndex:
     Only the fixed high-level experiment artifact set is exposed.
     """
     return register_experiment(output_dir)
+
+
+@mcp.tool(com_serialized=False)
+def submit_circuit_experiment(
+    netlist: str,
+    commands: str,
+    output_dir: str,
+    title: str = "Multisim experiment",
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+    job_timeout: float = 600.0,
+    heartbeat_timeout: float = 180.0,
+) -> JobSubmission:
+    """Queue a durable, cancellable experiment in an isolated worker process.
+
+    Prefer this tool for long experiments. Poll ``multisim://jobs/{job_id}`` or
+    call ``get_experiment_job``. Completed jobs return the same experiment
+    result and resource handles as ``run_circuit_experiment``.
+    """
+    if not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    output_path = Path(output_dir).expanduser().resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    validate_spice_netlist(netlist)
+    accepted = validate_analysis_commands(commands)
+    if not math.isfinite(timeout) or timeout <= 0 or timeout > 3600:
+        raise ValueError("timeout must be between 0 and 3600 seconds")
+    if max_points <= 0 or max_points > 100_000:
+        raise ValueError("max_points must be between 1 and 100000")
+    if not math.isfinite(job_timeout) or job_timeout < 1 or job_timeout > 7200:
+        raise ValueError("job_timeout must be between 1 and 7200 seconds")
+    if (
+        not math.isfinite(heartbeat_timeout)
+        or heartbeat_timeout < 10
+        or heartbeat_timeout > 900
+    ):
+        raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
+    if job_timeout <= timeout:
+        raise ValueError("job_timeout must be greater than the simulation timeout")
+    return _job_manager().submit(
+        {
+            "netlist": netlist,
+            "commands": "\n".join(accepted),
+            "output_dir": str(output_path),
+            "title": title,
+            "timeout": timeout,
+            "max_points": max_points,
+            "overwrite": overwrite,
+            "job_timeout": job_timeout,
+            "heartbeat_timeout": heartbeat_timeout,
+        }
+    )
+
+
+@mcp.tool(com_serialized=False)
+def get_experiment_job(job_id: str) -> dict[str, Any]:
+    """Return durable progress, failure diagnostics, or the completed result."""
+    return _job_manager().get(job_id)
+
+
+@mcp.tool(com_serialized=False)
+def list_experiment_jobs(state: str = "", limit: int = 50) -> dict[str, Any]:
+    """List recent durable jobs without returning their potentially large results."""
+    return _job_manager().list(state, limit)
+
+
+@mcp.tool(com_serialized=False)
+def cancel_experiment_job(job_id: str) -> dict[str, Any]:
+    """Cancel a queued job or safely stop its isolated worker process."""
+    return _job_manager().cancel(job_id)
+
+
+@mcp.tool(com_serialized=False)
+def retry_experiment_job(job_id: str) -> JobSubmission:
+    """Queue a fresh attempt using a failed, cancelled, or timed-out job spec."""
+    return _job_manager().retry(job_id)
 
 
 @mcp.tool()
@@ -674,12 +785,14 @@ def _run_spice_netlist_impl(
     max_points: int = 2000,
     unsafe_commands: bool = False,
     overwrite: bool = False,
+    cancel_requested: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> dict:
     if not netlist.strip():
         raise ValueError("netlist must not be empty")
     if len(netlist.encode("utf-8")) > 2_000_000:
         raise ValueError("netlist exceeds the 2 MB safety limit")
-    if timeout <= 0 or timeout > 3600:
+    if not math.isfinite(timeout) or timeout <= 0 or timeout > 3600:
         raise ValueError("timeout must be between 0 and 3600 seconds")
     if max_points <= 0 or max_points > 100_000:
         raise ValueError("max_points must be between 1 and 100000")
@@ -718,7 +831,15 @@ def _run_spice_netlist_impl(
     with open(command_path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(kept) + "\n")
 
-    result = client.run_command_file(command_path, log_path, timeout)
+    result = client.run_command_file(
+        command_path,
+        log_path,
+        timeout,
+        cancel_requested=cancel_requested,
+        heartbeat=heartbeat,
+    )
+    if result.get("cancelled"):
+        raise InterruptedError("Experiment cancellation requested")
     parsed = None
     if os.path.exists(raw_path) and os.path.getsize(raw_path) > 0:
         parsed = parse_raw(raw_path)
@@ -1034,8 +1155,7 @@ def _write_experiment_report(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-@mcp.tool()
-def run_circuit_experiment(
+def _run_circuit_experiment_unlocked(
     netlist: str,
     commands: str,
     output_dir: str,
@@ -1043,6 +1163,8 @@ def run_circuit_experiment(
     timeout: float = 120.0,
     max_points: int = 2000,
     overwrite: bool = False,
+    checkpoint: Callable[[str, int, str], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
 ) -> ExperimentResult:
     """Create a schematic, run a safe Multisim analysis, and export a report.
 
@@ -1050,6 +1172,13 @@ def run_circuit_experiment(
     simulation share the same source netlist; simulation data comes directly
     from Multisim's engine and is exported as raw and CSV artifacts.
     """
+    def notify(stage: str, progress: int, message: str) -> None:
+        if checkpoint is not None:
+            checkpoint(stage, progress, message)
+        if cancel_requested is not None and cancel_requested():
+            raise InterruptedError("Experiment cancellation requested")
+
+    notify("preflight", 3, "Validating netlist, commands, and output destinations")
     accepted = validate_analysis_commands(commands)
     validate_spice_netlist(netlist)
     root = Path(output_dir).expanduser().resolve()
@@ -1076,6 +1205,7 @@ def run_circuit_experiment(
     stage = root.parent / f".{root.name}.multisim-mcp-{uuid.uuid4().hex}"
     stage.mkdir(parents=False, exist_ok=False)
     try:
+        notify("schematic", 10, "Building editable Multisim schematic")
         design_path = stage / "circuit.ms14"
         image_path = stage / "schematic.png"
         report_path = stage / "report.md"
@@ -1089,6 +1219,7 @@ def run_circuit_experiment(
             image_path=str(image_path),
             overwrite=False,
         )
+        notify("simulation", 42, "Running validated Multisim analysis")
         simulation = _run_spice_netlist_impl(
             netlist,
             "\n".join(accepted),
@@ -1097,10 +1228,15 @@ def run_circuit_experiment(
             max_points=max_points,
             unsafe_commands=False,
             overwrite=False,
+            cancel_requested=cancel_requested,
+            heartbeat=lambda: notify(
+                "simulation", 58, "Waiting for the Multisim analysis engine"
+            ),
         )
         if not schematic.get("success") or not simulation.get("success"):
             raise RuntimeError("Multisim did not produce a successful schematic and simulation")
 
+        notify("plot_and_report", 72, "Generating plot and reproducible report")
         parsed = parse_raw(simulation["raw"])
         if not parsed["rows"] or len(parsed["columns"]) < 2:
             raise ValueError("At least two populated raw-data columns are required for a plot")
@@ -1150,6 +1286,7 @@ def run_circuit_experiment(
         if missing:
             raise RuntimeError("Incomplete experiment artifact set: " + ", ".join(missing))
 
+        notify("publish", 88, "Publishing the complete artifact transaction")
         transaction_id = uuid.uuid4().hex
         prepared: dict[str, Path] = {}
         backup_dir = stage / ".backups"
@@ -1209,8 +1346,9 @@ def run_circuit_experiment(
             simulation[key] = str(root / filename)
         simulation["artifacts"] = [str(root / name) for name in manifest_names[3:8]]
         simulation["output_dir"] = str(root)
+        notify("register", 97, "Registering safe experiment resource handles")
         registered = register_experiment(str(root))
-        return {
+        result: ExperimentResult = {
             "success": True,
             "experiment_id": registered["experiment_id"],
             "resources": registered["resources"],
@@ -1220,8 +1358,70 @@ def run_circuit_experiment(
             "plot": str(root / "plot.svg"),
             "output_dir": str(root),
         }
+        notify("complete", 100, "Experiment completed")
+        return result
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+
+
+def _run_circuit_experiment_impl(
+    netlist: str,
+    commands: str,
+    output_dir: str,
+    title: str = "Multisim experiment",
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+    checkpoint: Callable[[str, int, str], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    owner: str | None = None,
+) -> ExperimentResult:
+    """Run one transactional experiment while holding its cross-process lease."""
+    if not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    output_path = Path(output_dir).expanduser().resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    lease_owner = owner or f"sync-{uuid.uuid4().hex}"
+    with output_lease(str(output_path), lease_owner):
+        return _run_circuit_experiment_unlocked(
+            netlist,
+            commands,
+            str(output_path),
+            title,
+            timeout,
+            max_points,
+            overwrite,
+            checkpoint,
+            cancel_requested,
+        )
+
+
+@mcp.tool()
+def run_circuit_experiment(
+    netlist: str,
+    commands: str,
+    output_dir: str,
+    title: str = "Multisim experiment",
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+) -> ExperimentResult:
+    """Create a schematic, run a safe Multisim analysis, and export a report.
+
+    This synchronous compatibility tool blocks until completion. For queueing,
+    progress, cancellation, persisted state, and worker recovery, prefer
+    ``submit_circuit_experiment``.
+    """
+    return _run_circuit_experiment_impl(
+        netlist,
+        commands,
+        output_dir,
+        title,
+        timeout,
+        max_points,
+        overwrite,
+    )
 
 
 @mcp.tool()

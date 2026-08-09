@@ -33,6 +33,16 @@ release is planned as `v1.0.0`, without intermediate public versions.
 6. export raw data, CSV, SVG plots, and command logs; and
 7. generate a reproducible Markdown lab report.
 
+For longer experiments, the development branch adds the durable
+`submit_circuit_experiment` workflow. It returns a `job_id` immediately;
+`get_experiment_job`, `list_experiment_jobs`, `cancel_experiment_job`,
+`retry_experiment_job`, and `multisim://jobs/{job_id}` expose progress,
+cancellation, and safe retries. Each job runs in
+an isolated subprocess, so a worker crash or heartbeat timeout does not take
+down the MCP frontend, and interrupted jobs are safely requeued after restart.
+This capability will ship publicly with `v1.0.0` after the remaining roadmap
+gates are complete.
+
 Real Multisim 14.3 regressions cover resistor dividers, coupled inductors,
 digital truth tables, JK timing, and a combined function-generator/oscilloscope
 experiment.
@@ -45,6 +55,8 @@ Stable:
 - circuit open/save/enumeration and image/netlist/BOM export;
 - DC, AC, transient, waveform injection, and RLC read/write;
 - safe SPICE subset execution and raw/CSV/SVG/report generation.
+- durable experiment queueing, progress/cancellation/timeouts, output leases,
+  and crash/hang worker recovery.
 
 Experimental but verified:
 

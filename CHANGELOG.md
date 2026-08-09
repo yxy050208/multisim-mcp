@@ -12,6 +12,10 @@
 - 增加创建实验、调试、比较、报告和指标验证五个中英双语 Prompt。
 - 为完整实验及资源注册结果增加明确的 output schema 和运行时结构校验。
 - 增加 32 位 Windows 可安装的加密依赖边界及现代/旧协议、资源安全测试。
+- 增加持久实验任务状态机，以及提交、查询、列出、取消和安全重试任务的 MCP 工具与状态 Resource。
+- 将异步实验隔离到独立 worker 进程，支持排队、检查点、进度、取消、总超时、
+  心跳超时、崩溃检测和 MCP 重启后的安全重排队。
+- 为输出目录增加同名任务占用检查与跨进程文件租约；完整产物仍以事务方式发布。
 
 ### English
 
@@ -22,6 +26,11 @@
   prompts, and validated structured results for the high-level workflow.
 - Added a 32-bit Windows-compatible cryptography constraint and dual-era,
   resource-security, and structured-output tests.
+- Added a durable experiment-job state machine with queueing, progress,
+  cancellation, total/heartbeat timeouts, restart recovery, and a status
+  resource.
+- Isolated asynchronous experiments in restartable subprocesses and added
+  cross-process output leases plus structured crash/hang diagnostics.
 
 ## [0.1.0-alpha.3] - 2026-08-09
 

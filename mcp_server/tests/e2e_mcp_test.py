@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from mcp import Client
@@ -209,6 +210,44 @@ async def main() -> None:
             },
         )
 
+        durable_output = OUT / "durable_divider"
+        report["submit_circuit_experiment"] = await call(
+            session,
+            "submit_circuit_experiment",
+            {
+                "netlist": (
+                    "* durable-job resistor divider\n"
+                    "VIN vin 0 DC 10\n"
+                    "R1 vin vout 1k\n"
+                    "R2 vout 0 1k\n"
+                    ".end\n"
+                ),
+                "commands": "dc VIN 0 10 1",
+                "output_dir": str(durable_output),
+                "title": "Durable resistor divider",
+                "timeout": 60.0,
+                "job_timeout": 180.0,
+                "heartbeat_timeout": 30.0,
+                "max_points": 100,
+                "overwrite": True,
+            },
+        )
+        job_id = report["submit_circuit_experiment"]["job_id"]
+        deadline = time.monotonic() + 200
+        while time.monotonic() < deadline:
+            job = await call(session, "get_experiment_job", {"job_id": job_id})
+            if job["state"] in {
+                "succeeded",
+                "failed",
+                "cancelled",
+                "timed_out",
+            }:
+                break
+            await asyncio.sleep(0.25)
+        else:
+            raise AssertionError("durable experiment job polling deadline exceeded")
+        report["durable_experiment_job"] = job
+
         for key in ("run_dc", "run_ac", "run_transient"):
             if not report[key].get("ready"):
                 raise AssertionError(
@@ -220,6 +259,10 @@ async def main() -> None:
             )
         if report["run_spice_netlist"].get("n_points") != 101:
             raise AssertionError("DC sweep did not produce the expected 101 points")
+        if job["state"] != "succeeded" or not job["result"]["success"]:
+            raise AssertionError(f"durable experiment job failed: {job}")
+        if job["result"]["simulation"].get("n_points") != 11:
+            raise AssertionError("durable DC sweep did not produce 11 points")
 
         report["disconnect"] = await call(session, "disconnect")
 

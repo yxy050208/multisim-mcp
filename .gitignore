@@ -45,6 +45,11 @@ dist/
 .pytest_cache/
 release/
 
+# Durable job state and crash-recoverable output leases
+.multisim-mcp/
+multisim-mcp-jobs/
+*.multisim-mcp.lock
+
 # Editors / OS
 .idea/
 .vscode/
