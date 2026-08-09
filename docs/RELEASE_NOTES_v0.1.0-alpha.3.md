@@ -1,5 +1,9 @@
 # Multisim MCP v0.1.0-alpha.3
 
+[PyPI](https://pypi.org/project/multisim-mcp/0.1.0a3/) ·
+[官方 MCP Registry / Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
+[源代码 / Source](https://github.com/yxy050208/multisim-mcp/tree/v0.1.0-alpha.3)
+
 ## 中文（主要说明）
 
 这个版本重点降低第一次安装和接入 Multisim MCP 的难度，同时保持现有 MCP

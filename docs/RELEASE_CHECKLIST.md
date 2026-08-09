@@ -54,6 +54,6 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Add dynamic Dispatch fallback for a corrupt pywin32 generated-wrapper cache.
 - [x] Run the real generated divider workflow and verify a 0.5 output ratio.
 - [x] Pass 63 COM-free tests, skill validation, code-only wheel JSON, and stdio checks.
-- [ ] Publish `0.1.0a3` to PyPI through Trusted Publishing.
-- [ ] Publish the matching official MCP Registry metadata.
-- [ ] Create and push the annotated `v0.1.0-alpha.3` tag and GitHub Release.
+- [x] Publish `0.1.0a3` to PyPI through Trusted Publishing.
+- [x] Publish the matching official MCP Registry metadata.
+- [x] Create and push the annotated `v0.1.0-alpha.3` tag and GitHub Release.

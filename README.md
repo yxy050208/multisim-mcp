@@ -7,17 +7,16 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前源码为 `v0.1.0-alpha.3` 发布候选；最新公开发行版仍为
-> `v0.1.0-alpha.2`。项目非 NI 官方产品，需要本机安装并授权 Multisim 14+；
-> 当前 COM 运行时使用 32 位 Python。
+> 当前公开发行版为 `v0.1.0-alpha.3`。项目非 NI 官方产品，需要本机安装并授权
+> Multisim 14+；当前 COM 运行时使用 32 位 Python。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.2)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.3)
 
 ## 开源发布状态
 
-`0.1.0a2` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
+`0.1.0a3` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
 MCP Registry。由本地 NI 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
@@ -67,7 +66,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 从 PyPI 安装到 32 位 Python 环境：
 
 ```powershell
-C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a2"
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==0.1.0a3"
 C:\path\to\python32\Scripts\multisim-mcp.exe
 ```
 
