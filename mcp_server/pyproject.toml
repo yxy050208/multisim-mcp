@@ -21,8 +21,10 @@ classifiers = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.2.0,<2",
-    "pywin32>=306; sys_platform == 'win32'",
+    "mcp>=2.0.0,<3",
+    "cryptography>=48.0.1,<49; sys_platform == 'win32'",
+    "pywin32>=311; sys_platform == 'win32'",
+    "typing-extensions>=4.13",
 ]
 
 [project.urls]

@@ -2,36 +2,81 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
 
 import multisim_mcp
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import get_default_environment, stdio_client
+from mcp import Client
+from mcp.client.stdio import (
+    StdioServerParameters,
+    get_default_environment,
+    stdio_client,
+)
 
 
 class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
-    async def test_initialize_and_list_tools(self) -> None:
+    async def _connect(
+        self, mode: str
+    ) -> tuple[str, set[str], set[str], set[str], dict]:
         package_root = Path(multisim_mcp.__file__).resolve().parent.parent
         environment = get_default_environment()
-        environment["PYTHONPATH"] = str(package_root)
+        import_paths = [str(package_root), *(item for item in sys.path if item)]
+        environment["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(import_paths))
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "multisim_mcp.server"],
             env=environment,
         )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                response = await session.list_tools()
-                names = {tool.name for tool in response.tools}
+        async with Client(stdio_client(params), mode=mode) as session:
+            tools = await session.list_tools()
+            prompts = await session.list_prompts()
+            resources = await session.list_resource_templates()
+            experiment = next(
+                tool for tool in tools.tools if tool.name == "run_circuit_experiment"
+            )
+            return (
+                session.protocol_version,
+                {tool.name for tool in tools.tools},
+                {prompt.name for prompt in prompts.prompts},
+                {item.uri_template for item in resources.resource_templates},
+                experiment.output_schema,
+            )
 
-        self.assertIn("runtime_status", names)
-        self.assertIn("schematic_component_catalog", names)
-        self.assertIn("create_schematic_from_netlist", names)
-        self.assertIn("run_circuit_experiment", names)
-        self.assertIn("run_spice_netlist", names)
+    async def test_modern_and_legacy_clients_discover_full_surface(self) -> None:
+        for mode, expected_protocol in (
+            ("2026-07-28", "2026-07-28"),
+            ("legacy", "2025-11-25"),
+        ):
+            protocol, names, prompts, resources, output_schema = await self._connect(
+                mode
+            )
+            self.assertEqual(protocol, expected_protocol)
+
+            self.assertIn("runtime_status", names)
+            self.assertIn("schematic_component_catalog", names)
+            self.assertIn("create_schematic_from_netlist", names)
+            self.assertIn("run_circuit_experiment", names)
+            self.assertIn("register_experiment_artifacts", names)
+            self.assertIn("run_spice_netlist", names)
+            self.assertIn("create_circuit_experiment", prompts)
+            self.assertIn("verify_design_requirements", prompts)
+            self.assertIn("multisim://experiments/{experiment_id}/manifest", resources)
+            self.assertIn("multisim://experiments/{experiment_id}/schematic", resources)
+            self.assertEqual(
+                set(output_schema["required"]),
+                {
+                    "success",
+                    "experiment_id",
+                    "resources",
+                    "schematic",
+                    "simulation",
+                    "report",
+                    "plot",
+                    "output_dir",
+                },
+            )
 
 
 if __name__ == "__main__":

@@ -29,6 +29,26 @@ Stable and verified on Multisim 14.3:
 - SPICE netlist execution with safe `op`, `dc`, `ac`, and `tran` commands.
 - Netlist, BOM, schematic image, raw data, CSV, SVG, and Markdown export.
 - High-level `run_circuit_experiment` workflow.
+- MCP `2026-07-28` discovery plus automatic compatibility with legacy clients.
+- Ten experiment Resources and five bilingual workflow Prompts.
+- Validated structured output for the complete experiment workflow.
+
+Completed experiments return an opaque `experiment_id` and resource URIs such
+as:
+
+```text
+multisim://experiments/{experiment_id}/manifest
+multisim://experiments/{experiment_id}/report
+multisim://experiments/{experiment_id}/schematic
+multisim://experiments/{experiment_id}/data
+multisim://experiments/{experiment_id}/plot
+```
+
+Handles are process-local. After restarting the server, call
+`register_experiment_artifacts` with an existing complete output directory to
+restore them. Resource reads are limited to the fixed artifact set and default
+to 16 MiB per file; set `MULTISIM_MCP_RESOURCE_MAX_BYTES` to a positive integer
+to change that limit.
 
 Experimental:
 
@@ -54,6 +74,12 @@ Requirements:
 - Windows and a licensed Multisim 14+ installation.
 - 32-bit Python 3.10+.
 - Node.js 18+ only for `.ms14` XML conversion.
+
+The Windows dependency set deliberately uses `cryptography>=48.0.1,<49`.
+`48.0.1` is the newest release line currently providing an official win32
+wheel; newer releases would otherwise make 32-bit installation attempt an
+unsupported local Rust build. This boundary should be reviewed whenever a new
+win32 wheel becomes available.
 
 Install the Python package once; the server launcher never installs packages or
 writes setup logs to MCP stdout:

@@ -2,6 +2,27 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
+## [Unreleased - toward 1.0.0]
+
+### 中文
+
+- 迁移到 MCP Python SDK 2.x；同一 stdio 服务兼容 `2026-07-28` 和旧协议客户端。
+- 将所有工具调用串行到专用 COM 线程，适配 SDK 2 的同步 handler 线程模型。
+- 增加 10 个 `multisim://experiments/...` 实验资源模板和重启后重新注册工具。
+- 增加创建实验、调试、比较、报告和指标验证五个中英双语 Prompt。
+- 为完整实验及资源注册结果增加明确的 output schema 和运行时结构校验。
+- 增加 32 位 Windows 可安装的加密依赖边界及现代/旧协议、资源安全测试。
+
+### English
+
+- Migrated to MCP Python SDK 2.x with one stdio server serving both the
+  `2026-07-28` and legacy protocol eras.
+- Serialized every tool call onto a dedicated COM-initialized worker thread.
+- Added ten experiment resource templates, re-registration, five bilingual
+  prompts, and validated structured results for the high-level workflow.
+- Added a 32-bit Windows-compatible cryptography constraint and dual-era,
+  resource-security, and structured-output tests.
+
 ## [0.1.0-alpha.3] - 2026-08-09
 
 ### 中文

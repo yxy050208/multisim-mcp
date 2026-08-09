@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import math
 import os
 import html
 import re
 import shutil
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
+from multisim_mcp import __version__
+from multisim_mcp.experiment_resources import (
+    ExperimentResourceIndex,
+    ExperimentResult,
+    experiment_manifest,
+    read_binary_artifact,
+    read_text_artifact,
+    register_experiment,
+)
 from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
@@ -33,9 +47,311 @@ from multisim_mcp.schematic_builder import (
 from multisim_mcp.spice_raw import parse_raw, plot_svg, summarize_columns, write_csv
 
 
-mcp = FastMCP("multisim")
+_COM_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="multisim-com")
+_COM_THREAD_STATE = threading.local()
+
+
+def _invoke_tool_on_com_thread(function: Any, args: tuple, kwargs: dict) -> Any:
+    """Run every tool on one COM-initialized thread for apartment safety."""
+    if os.name == "nt" and not getattr(_COM_THREAD_STATE, "initialized", False):
+        try:
+            import pythoncom
+
+            pythoncom.CoInitialize()
+            _COM_THREAD_STATE.initialized = True
+        except ImportError:
+            # Introspection-only installations intentionally omit pywin32.
+            pass
+    return function(*args, **kwargs)
+
+
+class MultisimMCPServer(MCPServer):
+    """MCPServer that serializes tool calls onto Multisim's COM apartment."""
+
+    def tool(self, *decorator_args: Any, **decorator_kwargs: Any) -> Any:
+        register = super().tool(*decorator_args, **decorator_kwargs)
+
+        def decorator(function: Any) -> Any:
+            @functools.wraps(function)
+            async def serialized(*args: Any, **kwargs: Any) -> Any:
+                loop = asyncio.get_running_loop()
+                invoke = functools.partial(
+                    _invoke_tool_on_com_thread,
+                    function,
+                    args,
+                    kwargs,
+                )
+                return await loop.run_in_executor(_COM_EXECUTOR, invoke)
+
+            register(serialized)
+            # Direct imports and unit tests retain the original synchronous API.
+            return function
+
+        return decorator
+
+
+mcp = MultisimMCPServer(
+    "multisim",
+    version=__version__,
+    instructions=(
+        "Generate editable Multisim circuits, run validated experiments, and "
+        "read completed experiment artifacts through multisim:// resources. "
+        "Use run_circuit_experiment for the complete workflow."
+    ),
+)
 client = MultisimClient()
 codec = Ms14Codec()
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/manifest",
+    name="experiment_manifest",
+    title="Experiment manifest",
+    description="Hashes, sizes, and resource links for a completed experiment.",
+    mime_type="application/json",
+)
+def experiment_manifest_resource(experiment_id: str) -> dict[str, object]:
+    return experiment_manifest(experiment_id)
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/report",
+    name="experiment_report",
+    title="Experiment report",
+    description="Markdown report generated for a completed experiment.",
+    mime_type="text/markdown",
+)
+def experiment_report_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "report")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/schematic",
+    name="experiment_schematic",
+    title="Experiment schematic",
+    description="PNG schematic exported from Multisim.",
+    mime_type="image/png",
+)
+def experiment_schematic_resource(experiment_id: str) -> bytes:
+    return read_binary_artifact(experiment_id, "schematic")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/data",
+    name="experiment_data",
+    title="Experiment data",
+    description="CSV data exported from the Multisim analysis.",
+    mime_type="text/csv",
+)
+def experiment_data_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "data")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/plot",
+    name="experiment_plot",
+    title="Experiment plot",
+    description="SVG waveform plot generated from the experiment data.",
+    mime_type="image/svg+xml",
+)
+def experiment_plot_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "plot")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/netlist",
+    name="experiment_netlist",
+    title="Experiment netlist",
+    description="Validated SPICE netlist used for the experiment.",
+    mime_type="text/x-spice",
+)
+def experiment_netlist_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "netlist")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/circuit",
+    name="experiment_circuit",
+    title="Editable Multisim circuit",
+    description="Binary .ms14 design generated for the experiment.",
+    mime_type="application/octet-stream",
+)
+def experiment_circuit_resource(experiment_id: str) -> bytes:
+    return read_binary_artifact(experiment_id, "circuit")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/raw",
+    name="experiment_raw_data",
+    title="Raw simulation data",
+    description="Raw analysis output emitted by Multisim.",
+    mime_type="application/octet-stream",
+)
+def experiment_raw_resource(experiment_id: str) -> bytes:
+    return read_binary_artifact(experiment_id, "raw")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/commands",
+    name="experiment_commands",
+    title="Experiment commands",
+    description="Validated Multisim command sequence used for the experiment.",
+    mime_type="text/plain",
+)
+def experiment_commands_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "commands")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/log",
+    name="experiment_log",
+    title="Experiment log",
+    description="Multisim command-engine log for the experiment.",
+    mime_type="text/plain",
+)
+def experiment_log_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "log")
+
+
+def _prompt_instructions(zh: str, en: str, language: str) -> str:
+    selected = language.strip().lower()
+    if selected in {"zh", "zh-cn", "chinese", "中文"}:
+        return zh
+    if selected in {"en", "english", "英文"}:
+        return en
+    raise ValueError("language must be zh or en")
+
+
+@mcp.prompt(
+    name="create_circuit_experiment",
+    title="创建 Multisim 电路实验 / Create circuit experiment",
+)
+def create_circuit_experiment_prompt(
+    requirements: str,
+    output_dir: str,
+    language: str = "zh",
+) -> str:
+    """Turn user requirements into the complete Multisim experiment workflow."""
+    return _prompt_instructions(
+        (
+            "根据以下实验要求设计一个安全、可复现的 SPICE 网表，然后调用 "
+            "run_circuit_experiment。先说明器件选择、分析类型和测量节点；成功后读取返回的 "
+            "manifest、report、schematic、data 和 plot Resources，并核对理论值与仿真值。\n\n"
+            f"实验要求：{requirements}\n输出目录：{output_dir}"
+        ),
+        (
+            "Design a safe, reproducible SPICE netlist for the requirements below, then "
+            "call run_circuit_experiment. Explain the component choices, analysis type, "
+            "and measurement nodes first. After success, read the returned manifest, "
+            "report, schematic, data, and plot resources and compare theory with simulation.\n\n"
+            f"Requirements: {requirements}\nOutput directory: {output_dir}"
+        ),
+        language,
+    )
+
+
+@mcp.prompt(name="debug_circuit", title="调试 Multisim 电路 / Debug circuit")
+def debug_circuit_prompt(
+    problem: str,
+    netlist: str = "",
+    language: str = "zh",
+) -> str:
+    """Guide a reproducible diagnosis of a circuit or simulation failure."""
+    return _prompt_instructions(
+        (
+            "诊断下面的 Multisim 电路问题。先检查网表语法、接地、节点连通性、模型、分析命令和量纲，"
+            "再使用最小修改修复。不要启用不安全命令。若需要重新实验，调用 run_circuit_experiment "
+            "并用 Resources 比较修复前后的数据。\n\n"
+            f"问题：{problem}\n网表：\n{netlist or '(未提供)'}"
+        ),
+        (
+            "Diagnose the Multisim circuit problem below. Check netlist syntax, ground, "
+            "connectivity, models, analysis commands, and units before making the smallest "
+            "safe correction. Do not enable unsafe commands. If a rerun is needed, call "
+            "run_circuit_experiment and compare artifacts through Resources.\n\n"
+            f"Problem: {problem}\nNetlist:\n{netlist or '(not provided)'}"
+        ),
+        language,
+    )
+
+
+@mcp.prompt(
+    name="compare_simulation_results",
+    title="比较实验结果 / Compare experiments",
+)
+def compare_simulation_results_prompt(
+    first_experiment_id: str,
+    second_experiment_id: str,
+    language: str = "zh",
+) -> str:
+    """Compare two registered experiment artifact sets."""
+    return _prompt_instructions(
+        (
+            "读取下面两个实验的 manifest、report、data 和 plot Resources。比较电路、分析设置、"
+            "采样点、关键测量值和误差；指出变化原因，并给出表格化结论。\n\n"
+            f"实验 A：{first_experiment_id}\n实验 B：{second_experiment_id}"
+        ),
+        (
+            "Read the manifest, report, data, and plot resources for both experiments. "
+            "Compare circuits, analysis settings, sample counts, key measurements, and "
+            "errors; explain the causes and finish with a compact table.\n\n"
+            f"Experiment A: {first_experiment_id}\nExperiment B: {second_experiment_id}"
+        ),
+        language,
+    )
+
+
+@mcp.prompt(name="write_lab_report", title="撰写实验报告 / Write lab report")
+def write_lab_report_prompt(
+    experiment_id: str,
+    requirements: str = "",
+    language: str = "zh",
+) -> str:
+    """Create a polished report from registered experiment resources."""
+    return _prompt_instructions(
+        (
+            "读取该实验的 manifest、report、schematic、data、plot 和 netlist Resources，"
+            "在不编造数据的前提下撰写中文实验报告。报告应包含目的、原理、器件、步骤、结果、"
+            "理论与仿真误差、异常、结论和复现信息。\n\n"
+            f"实验 ID：{experiment_id}\n补充要求：{requirements or '(无)'}"
+        ),
+        (
+            "Read the experiment manifest, report, schematic, data, plot, and netlist "
+            "resources. Write a polished lab report without inventing data. Include the "
+            "objective, theory, components, procedure, results, theory-versus-simulation "
+            "error, anomalies, conclusion, and reproduction details.\n\n"
+            f"Experiment ID: {experiment_id}\nAdditional requirements: {requirements or '(none)'}"
+        ),
+        language,
+    )
+
+
+@mcp.prompt(
+    name="verify_design_requirements",
+    title="验证设计指标 / Verify design requirements",
+)
+def verify_design_requirements_prompt(
+    requirements: str,
+    experiment_id: str,
+    language: str = "zh",
+) -> str:
+    """Check measured experiment data against explicit design requirements."""
+    return _prompt_instructions(
+        (
+            "读取实验的 manifest、data、plot 和 report Resources，把每一项设计要求转成可计算的"
+            "判据。逐项列出目标、测量方法、实测值、容差和 PASS/FAIL；无法从数据证明的项目必须标为"
+            "未验证，不能猜测。\n\n"
+            f"设计要求：{requirements}\n实验 ID：{experiment_id}"
+        ),
+        (
+            "Read the experiment manifest, data, plot, and report resources. Convert every "
+            "requirement into a measurable criterion and list its target, method, measured "
+            "value, tolerance, and PASS/FAIL result. Mark anything unsupported by the data "
+            "as unverified instead of guessing.\n\n"
+            f"Requirements: {requirements}\nExperiment ID: {experiment_id}"
+        ),
+        language,
+    )
 
 
 @mcp.tool()
@@ -61,6 +377,16 @@ def runtime_status() -> dict:
             "MULTISIM_MCP_TEMPLATE_DIR."
         )
     return result
+
+
+@mcp.tool()
+def register_experiment_artifacts(output_dir: str) -> ExperimentResourceIndex:
+    """Register an existing complete experiment directory as MCP Resources.
+
+    Use this after a server restart when the experiment was generated earlier.
+    Only the fixed high-level experiment artifact set is exposed.
+    """
+    return register_experiment(output_dir)
 
 
 @mcp.tool()
@@ -717,7 +1043,7 @@ def run_circuit_experiment(
     timeout: float = 120.0,
     max_points: int = 2000,
     overwrite: bool = False,
-) -> dict:
+) -> ExperimentResult:
     """Create a schematic, run a safe Multisim analysis, and export a report.
 
     This is the recommended high-level workflow for agents. The schematic and
@@ -883,8 +1209,11 @@ def run_circuit_experiment(
             simulation[key] = str(root / filename)
         simulation["artifacts"] = [str(root / name) for name in manifest_names[3:8]]
         simulation["output_dir"] = str(root)
+        registered = register_experiment(str(root))
         return {
             "success": True,
+            "experiment_id": registered["experiment_id"],
+            "resources": registered["resources"],
             "schematic": schematic,
             "simulation": simulation,
             "report": str(root / "report.md"),

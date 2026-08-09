@@ -122,8 +122,8 @@ for the agent.
 - `GetOutputData` must receive `pythoncom.Missing` for its output
   parameters.
 - List-returning MCP tools return structured dicts such as
-  `{"outputs": [...]}` because FastMCP splits bare lists into multiple
-  text contents.
+  `{"outputs": [...]}`. MCP SDK 2 additionally validates the explicit output
+  schema of the high-level experiment and resource-registration tools.
 - This project is unofficial and not affiliated with NI.
 - Arbitrary command files are disabled by default. Safe netlist experiments
   accept only `op`, `dc`, `ac`, and `tran` commands.

@@ -12,6 +12,8 @@
    allowlisted analysis command.
 6. `spice_raw.py` parses raw output and exports CSV/SVG artifacts.
 7. The high-level MCP tool writes a reproducible Markdown report.
+8. `experiment_resources.py` registers the completed directory under an opaque
+   handle and exposes allowlisted artifacts as MCP Resources.
 
 The source netlist is the current experiment source of truth. Generated visual
 probes are experimental, so authoritative data does not depend on probe XML.
@@ -19,15 +21,30 @@ probes are experimental, so authoritative data does not depend on probe XML.
 ## Layers
 
 - `server.py`: MCP schemas, safety gates, orchestration, and artifact policy.
+- `experiment_resources.py`: opaque experiment handles, fixed artifact mapping,
+  size limits, hashes, and resource reads.
 - `multisim_client.py`: COM and `.ms14` codec adapters.
 - `schematic_builder.py`: deterministic netlist-to-Multisim XML conversion.
 - `spice_raw.py`: dependency-free raw parsing and plotting.
 - `safety.py`: command allowlist and explicit unsafe feature flags.
 
+## MCP 2 and COM threading
+
+MCP Python SDK 2 executes ordinary synchronous handlers on general worker
+threads. Multisim COM objects are apartment-bound, so this server registers an
+async MCP wrapper around every synchronous tool and serializes the underlying
+function calls through one `multisim-com` executor thread. That thread initializes
+COM before its first call and retains ownership for the process lifetime.
+
+Prompts and artifact-only Resources do not access COM and may use the SDK's
+normal handler execution. Experiment resource handles are process-local and can
+be restored after a restart with `register_experiment_artifacts`.
+
 ## Planned architecture
 
-The current MCP process must run under 32-bit Python. A future release should
-move COM ownership to a dedicated 32-bit STA worker and keep the MCP frontend in
+The current MCP process and its dedicated COM thread must run under 32-bit
+Python. A future release should move COM ownership to a dedicated 32-bit STA
+worker process and keep the MCP frontend in
 a normal 64-bit runtime. A local named-pipe or loopback protocol would provide:
 
 - COM thread affinity and serialized circuit ownership.

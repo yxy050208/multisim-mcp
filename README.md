@@ -10,6 +10,9 @@
 > 当前公开发行版为 `v0.1.0-alpha.3`。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；当前 COM 运行时使用 32 位 Python。
 
+主分支正在按 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md) 分阶段开发；下一次公开发布
+计划直接升级到 `v1.0.0`，期间不会发布中间 PyPI/MCP Registry 版本。
+
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.3)

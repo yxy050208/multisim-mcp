@@ -95,6 +95,32 @@ jobs:
       - name: Compile release audit and local-pack tools
         run: python -m compileall tools/release_audit.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
 
+  windows-x86-protocol:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+          architecture: "x86"
+      - name: Install on 32-bit Python
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./mcp_server
+          python -m pip check
+      - name: Verify 32-bit MCP 2 modern and legacy protocol surface
+        shell: pwsh
+        run: |
+          @'
+          import importlib.metadata
+          import struct
+
+          assert struct.calcsize("P") * 8 == 32
+          assert importlib.metadata.version("mcp").startswith("2.")
+          assert importlib.metadata.version("cryptography").startswith("48.")
+          '@ | python -
+          python -m unittest discover -s mcp_server/tests -p "test_*.py"
+
   linux-introspection:
     runs-on: ubuntu-latest
     steps:
@@ -115,27 +141,34 @@ jobs:
           assert result["runtime_mode"] == "introspection-only"
           print(result)
           PY
-      - name: Verify MCP initialize and tool introspection through Docker stdio
+      - name: Verify modern and legacy MCP introspection through Docker stdio
         run: |
-          python -m pip install "mcp>=1.2.0,<2"
+          python -m pip install "mcp>=2.0.0,<3"
           python - <<'PY'
           import asyncio
-          from mcp import ClientSession, StdioServerParameters
-          from mcp.client.stdio import stdio_client
+          from mcp import Client
+          from mcp.client.stdio import StdioServerParameters, stdio_client
 
           async def main():
-              params = StdioServerParameters(
-                  command="docker",
-                  args=["run", "--rm", "-i", "multisim-mcp-glama"],
-              )
-              async with stdio_client(params) as (read, write):
-                  async with ClientSession(read, write) as session:
-                      await session.initialize()
-                      response = await session.list_tools()
-              names = {tool.name for tool in response.tools}
-              assert "runtime_status" in names
-              assert "run_circuit_experiment" in names
-              print(f"Introspection returned {len(names)} tools")
+              for mode, expected in (
+                  ("2026-07-28", "2026-07-28"),
+                  ("legacy", "2025-11-25"),
+              ):
+                  params = StdioServerParameters(
+                      command="docker",
+                      args=["run", "--rm", "-i", "multisim-mcp-glama"],
+                  )
+                  async with Client(stdio_client(params), mode=mode) as session:
+                      tools = await session.list_tools()
+                      prompts = await session.list_prompts()
+                      resources = await session.list_resource_templates()
+                      assert session.protocol_version == expected
+                  names = {tool.name for tool in tools.tools}
+                  assert "runtime_status" in names
+                  assert "run_circuit_experiment" in names
+                  assert len(prompts.prompts) == 5
+                  assert len(resources.resource_templates) == 10
+                  print(f"{mode}: {len(names)} tools")
 
           asyncio.run(main())
           PY

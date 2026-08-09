@@ -13,6 +13,10 @@ and create reproducible reports.
 > locally installed and licensed Multisim 14+ environment is required. The
 > current COM worker uses 32-bit Python.
 
+The main branch is progressing through the phased
+[1.0 roadmap](docs/ROADMAP_TO_1.0.md). The next public package and Registry
+release is planned as `v1.0.0`, without intermediate public versions.
+
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v0.1.0-alpha.3)
