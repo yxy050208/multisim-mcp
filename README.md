@@ -1,5 +1,7 @@
 # Multisim MCP + Skills
 
+[![Glama MCP server score](https://glama.ai/mcp/servers/yxy050208/multisim-mcp/badges/score.svg)](https://glama.ai/mcp/servers/yxy050208/multisim-mcp)
+
 [中文（当前）](README.md) | [English](README.en.md)
 
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出

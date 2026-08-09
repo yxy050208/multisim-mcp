@@ -1,5 +1,7 @@
 # Multisim MCP + Skills
 
+[![Glama MCP server score](https://glama.ai/mcp/servers/yxy050208/multisim-mcp/badges/score.svg)](https://glama.ai/mcp/servers/yxy050208/multisim-mcp)
+
 [中文](README.md) | [English (current)](README.en.md)
 
 An unofficial local MCP server that lets an AI agent generate editable NI

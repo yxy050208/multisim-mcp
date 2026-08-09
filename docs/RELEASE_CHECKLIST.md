@@ -38,10 +38,10 @@ adding an ignore rule does not remove a file that is already staged.
 
 ## Required before v0.1.0-alpha.2
 
-- [ ] Verify Windows COM-free tests and package boundary checks.
-- [ ] Build the Linux validation image from the allowlisted Docker context.
-- [ ] Complete MCP initialize and `tools/list` through container stdio.
-- [ ] Confirm `runtime_status` reports `introspection-only` on Linux.
-- [ ] Publish `0.1.0a2` to PyPI and update the official MCP Registry.
-- [ ] Verify GitHub Release assets match the canonical PyPI SHA-256 hashes.
-- [ ] Add the Glama score badge to the awesome-mcp-servers submission.
+- [x] Verify Windows COM-free tests and package boundary checks.
+- [x] Build the Linux validation image from the allowlisted Docker context.
+- [x] Complete MCP initialize and `tools/list` through container stdio.
+- [x] Confirm `runtime_status` reports `introspection-only` on Linux.
+- [x] Publish `0.1.0a2` to PyPI and update the official MCP Registry.
+- [x] Verify GitHub Release assets match the canonical PyPI SHA-256 hashes.
+- [x] Add the Glama score badge to the awesome-mcp-servers submission.
