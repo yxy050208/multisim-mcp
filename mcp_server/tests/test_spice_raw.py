@@ -26,6 +26,22 @@ Values:
 	0.000000e+00
 """
 
+COMPLEX_RAW = """\
+Title: ac circuit
+Plotname: AC Analysis
+Flags: complex
+No. Variables: 2
+No. Points: 2
+Variables:
+0 frequency frequency frequency
+1 vout voltage V(out)
+Values:
+0 1.000000e+03,0.000000e+00
+ 7.071068e-01,-7.071068e-01
+1 1.000000e+04,0.000000e+00
+ 1.000000e-01,-2.000000e-01
+"""
+
 
 class ParseRawTest(unittest.TestCase):
     def test_header_variables_and_rows(self) -> None:
@@ -55,6 +71,17 @@ class ParseRawTest(unittest.TestCase):
                         fh.write(document)
                     with self.assertRaises(ValueError):
                         parse_raw(raw_path)
+
+    def test_complex_raw_keeps_magnitude_real_imaginary_and_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_path = os.path.join(tmp, "result.raw")
+            with open(raw_path, "w", encoding="utf-8") as handle:
+                handle.write(COMPLEX_RAW)
+            parsed = parse_raw(raw_path)
+        self.assertAlmostEqual(parsed["rows"][0][1], 1.0, places=6)
+        self.assertAlmostEqual(parsed["real_rows"][0][1], 0.7071068, places=6)
+        self.assertAlmostEqual(parsed["imaginary_rows"][0][1], -0.7071068, places=6)
+        self.assertAlmostEqual(parsed["phase_rows"][0][1], -45.0, places=5)
 
 
 class WriteCsvTest(unittest.TestCase):

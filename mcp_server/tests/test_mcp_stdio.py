@@ -53,9 +53,9 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 mode
             )
             self.assertEqual(protocol, expected_protocol)
-            self.assertEqual(len(names), 46)
+            self.assertEqual(len(names), 51)
             self.assertEqual(len(prompts), 5)
-            self.assertEqual(len(resources), 14)
+            self.assertEqual(len(resources), 19)
 
             self.assertIn("runtime_status", names)
             self.assertIn("schematic_component_catalog", names)
@@ -74,6 +74,11 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("run_experiment_sweep", names)
             self.assertIn("submit_experiment_sweep", names)
             self.assertIn("register_sweep_artifacts", names)
+            self.assertIn("component_adapter_catalog", names)
+            self.assertIn("read_virtual_multimeter", names)
+            self.assertIn("analyze_bode_response", names)
+            self.assertIn("analyze_logic_signals", names)
+            self.assertIn("export_formal_experiment_report", names)
             self.assertIn("run_spice_netlist", names)
             self.assertIn("create_circuit_experiment", prompts)
             self.assertIn("verify_design_requirements", prompts)
@@ -81,6 +86,9 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("multisim://experiments/{experiment_id}/schematic", resources)
             self.assertIn("multisim://jobs/{job_id}", resources)
             self.assertIn("multisim://experiments/{experiment_id}/verification", resources)
+            self.assertIn("multisim://experiments/{experiment_id}/formal-html-zh", resources)
+            self.assertIn("multisim://experiments/{experiment_id}/formal-pdf-en", resources)
+            self.assertIn("multisim://experiments/{experiment_id}/reproducibility-manifest", resources)
             self.assertIn("multisim://sweeps/{sweep_id}/summary", resources)
             self.assertIn("multisim://sweeps/{sweep_id}/data", resources)
             self.assertEqual(

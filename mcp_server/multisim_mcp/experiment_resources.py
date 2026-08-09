@@ -69,6 +69,18 @@ _ARTIFACTS: Final[dict[str, tuple[str, str, bool]]] = {
     "commands": ("run.txt", "text/plain", False),
     "log": ("run.log", "text/plain", False),
     "verification": ("verification.json", "application/json", False),
+    "formal_html_zh": ("report.zh-CN.html", "text/html", False),
+    "formal_html_en": ("report.en.html", "text/html", False),
+    "formal_pdf_zh": ("report.zh-CN.pdf", "application/pdf", True),
+    "formal_pdf_en": ("report.en.pdf", "application/pdf", True),
+    "reproducibility_manifest": ("manifest.json", "application/json", False),
+}
+_RESOURCE_PATHS: Final[dict[str, str]] = {
+    "formal_html_zh": "formal-html-zh",
+    "formal_html_en": "formal-html-en",
+    "formal_pdf_zh": "formal-pdf-zh",
+    "formal_pdf_en": "formal-pdf-en",
+    "reproducibility_manifest": "reproducibility-manifest",
 }
 _REQUIRED_FILES: Final = (
     "circuit.ms14",
@@ -101,13 +113,18 @@ def _resource_limit() -> int:
 
 
 def _resource_uri(experiment_id: str, name: str) -> str:
-    return f"{_RESOURCE_SCHEME}/{experiment_id}/{name}"
+    return f"{_RESOURCE_SCHEME}/{experiment_id}/{_RESOURCE_PATHS.get(name, name)}"
 
 
 def _stable_experiment_id(root: Path) -> str:
     normalized = os.path.normcase(str(root.resolve()))
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
     return f"exp-{digest}"
+
+
+def experiment_id_for_output_dir(output_dir: str | Path) -> str:
+    """Return the stable opaque ID without registering or reading artifacts."""
+    return _stable_experiment_id(Path(output_dir).expanduser().resolve())
 
 
 def _safe_artifact(root: Path, filename: str) -> Path:

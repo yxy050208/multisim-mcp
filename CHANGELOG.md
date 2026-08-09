@@ -22,12 +22,18 @@
 - 增加参数、容差、温度和可复现 Monte Carlo 扫描，包含 100 次硬上限、事务式
   汇总产物、MCP Resources 和持久 worker 支持。
 
+- 增加 13 个不依赖 NI 数据库资产的可移植元件适配器，覆盖高价值模拟、功率、时序数字与单比特混合信号模型。
+- 增加数据万用表、Bode Plotter 与 Logic Analyzer MCP 工具；缺少相位证据时明确返回不可用。
+- SPICE3 ASCII raw 解析器新增复数 AC 数据、幅值、实部、虚部与相位支持。
+- 完整实验自动输出中英双语独立 HTML/PDF 与带 SHA-256 的 `manifest.json`，并新增 5 个 Resource 模板。
+- 公开严格声明式 JSON 元件适配器接口、贡献示例和兼容性矩阵；禁止执行代码和外部文件指令。
+
 ### English
 
 - Migrated to MCP Python SDK 2.x with one stdio server serving both the
   `2026-07-28` and legacy protocol eras.
 - Serialized every tool call onto a dedicated COM-initialized worker thread.
-- Added eleven experiment resource templates, two sweep resource templates,
+- Added sixteen experiment resource templates, two sweep resource templates,
   re-registration, five bilingual prompts, and validated structured results
   for the high-level workflow.
 - Added a 32-bit Windows-compatible cryptography constraint and dual-era,
@@ -41,6 +47,12 @@
   pass/fail/unverified verdicts, and theory-versus-simulation errors.
 - Added parameter, tolerance, temperature, and seeded Monte Carlo sweeps with
   a 100-run cap, transactional summaries, resources, and durable jobs.
+- Added thirteen portable component adapters for high-value analog, power,
+  sequential-digital, and one-bit mixed-signal models without NI database assets.
+- Added data-backed multimeter, Bode Plotter, and Logic Analyzer tools.
+- Added complex SPICE3 raw parsing with magnitude, real, imaginary, and phase data.
+- Added standalone Chinese/English HTML and PDF reports, a SHA-256
+  reproducibility manifest, five resources, and a strict declarative adapter API.
 
 ## [0.1.0-alpha.3] - 2026-08-09
 

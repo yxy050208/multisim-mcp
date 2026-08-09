@@ -25,11 +25,18 @@ from multisim_mcp.experiment_resources import (
     ExperimentResult,
     VerifiedExperimentResult,
     experiment_manifest,
+    experiment_id_for_output_dir,
     read_binary_artifact,
     read_text_artifact,
     register_experiment,
     registered_experiment_root,
 )
+from multisim_mcp.component_adapters import (
+    component_adapter_catalog as adapter_catalog,
+    expand_component_adapters,
+)
+from multisim_mcp.formal_report import export_formal_reports
+from multisim_mcp.virtual_instruments import bode_plotter, logic_analyzer, multimeter
 from multisim_mcp.design_verification import (
     DesignRequirement,
     ExperimentSpec,
@@ -127,7 +134,9 @@ mcp = MultisimMCPServer(
         "read completed experiment artifacts through multisim:// resources. "
         "Use submit_circuit_experiment for resilient long runs and "
         "run_verified_circuit_experiment for explicit design verdicts. Preview "
-        "batch work with plan_experiment_sweep, then submit_experiment_sweep."
+        "batch work with plan_experiment_sweep, then submit_experiment_sweep. "
+        "Use component_adapter_catalog for portable @KIND models; completed "
+        "experiments include bilingual HTML/PDF and data-backed instruments."
     ),
 )
 client = MultisimClient()
@@ -264,6 +273,61 @@ def experiment_log_resource(experiment_id: str) -> str:
 )
 def experiment_verification_resource(experiment_id: str) -> str:
     return read_text_artifact(experiment_id, "verification")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/formal-html-zh",
+    name="experiment_formal_html_zh",
+    title="中文正式实验报告 / Formal report in Chinese",
+    description="Self-contained Chinese HTML report.",
+    mime_type="text/html",
+)
+def experiment_formal_html_zh_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "formal_html_zh")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/formal-html-en",
+    name="experiment_formal_html_en",
+    title="English formal experiment report",
+    description="Self-contained English HTML report.",
+    mime_type="text/html",
+)
+def experiment_formal_html_en_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "formal_html_en")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/formal-pdf-zh",
+    name="experiment_formal_pdf_zh",
+    title="中文 PDF 实验报告 / Chinese PDF report",
+    description="Portable Chinese PDF report.",
+    mime_type="application/pdf",
+)
+def experiment_formal_pdf_zh_resource(experiment_id: str) -> bytes:
+    return read_binary_artifact(experiment_id, "formal_pdf_zh")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/formal-pdf-en",
+    name="experiment_formal_pdf_en",
+    title="English PDF experiment report",
+    description="Portable English PDF report.",
+    mime_type="application/pdf",
+)
+def experiment_formal_pdf_en_resource(experiment_id: str) -> bytes:
+    return read_binary_artifact(experiment_id, "formal_pdf_en")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/reproducibility-manifest",
+    name="experiment_reproducibility_manifest",
+    title="Reproducibility manifest",
+    description="Portable manifest with SHA-256 hashes and reproduction inputs.",
+    mime_type="application/json",
+)
+def experiment_reproducibility_manifest_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "reproducibility_manifest")
 
 
 @mcp.resource(
@@ -496,6 +560,70 @@ def measure_experiment(
 
 
 @mcp.tool(com_serialized=False)
+def read_virtual_multimeter(
+    experiment_id: str, signal: str, reference_signal: str | None = None
+) -> dict[str, Any]:
+    """Read DC, true RMS, AC RMS and range from experiment data."""
+    root = registered_experiment_root(experiment_id)
+    return {
+        **multimeter(parse_raw(str(root / "result.raw")), signal, reference_signal),
+        "experiment_id": experiment_id,
+    }
+
+
+@mcp.tool(com_serialized=False)
+def analyze_bode_response(
+    experiment_id: str, input_signal: str, output_signal: str,
+    frequency_signal: str | None = None, max_points: int = 2000,
+) -> dict[str, Any]:
+    """Use the Bode Plotter adapter on an AC-sweep experiment."""
+    root = registered_experiment_root(experiment_id)
+    return {
+        **bode_plotter(
+            parse_raw(str(root / "result.raw")),
+            input_signal,
+            output_signal,
+            frequency_signal,
+            max_points,
+        ),
+        "experiment_id": experiment_id,
+    }
+
+
+@mcp.tool(com_serialized=False)
+def analyze_logic_signals(
+    experiment_id: str, signals: list[str], threshold: float = 2.5,
+    time_signal: str | None = None, max_events: int = 10_000,
+) -> dict[str, Any]:
+    """Use the Logic Analyzer adapter to digitize traces and list edges."""
+    root = registered_experiment_root(experiment_id)
+    return {
+        **logic_analyzer(
+            parse_raw(str(root / "result.raw")),
+            signals,
+            threshold,
+            time_signal,
+            max_events,
+        ),
+        "experiment_id": experiment_id,
+    }
+
+
+@mcp.tool(com_serialized=False)
+def export_formal_experiment_report(experiment_id: str) -> dict[str, Any]:
+    """Export bilingual HTML/PDF reports and a reproducibility manifest."""
+    root = registered_experiment_root(experiment_id)
+    with output_lease(str(root), f"formal-report-{uuid.uuid4().hex}"):
+        return export_formal_reports(root, experiment_id)
+
+
+@mcp.tool(com_serialized=False)
+def component_adapter_catalog() -> dict[str, Any]:
+    """List portable built-in and local declarative component adapters."""
+    return adapter_catalog()
+
+
+@mcp.tool(com_serialized=False)
 def verify_experiment_requirements(
     experiment_id: str,
     requirements: list[DesignRequirement],
@@ -662,11 +790,10 @@ def schematic_component_catalog() -> dict:
             "E/F/G/H controlled-source carrier symbols",
             "generic carrier artwork for K/O/U/X and derived logic gates",
         ],
+        "portable_adapters": adapter_catalog()["adapters"],
         "planned_families": [
             "dedicated symbols for generic carriers",
             "generic subcircuits with more than sixteen terminals",
-            "D/T flip-flops, counters, ADC/DAC, and mixed-signal bridges",
-            "multimeter, Bode plotter, and logic analyzer adapters",
         ],
     }
 
@@ -927,6 +1054,7 @@ def _run_spice_netlist_impl(
         validate_spice_netlist(netlist)
         accepted_commands = validate_analysis_commands(commands)
     simulation_netlist = prepare_simulation_netlist(netlist)
+    validate_spice_netlist(simulation_netlist)
 
     run_id = f"msre_{uuid.uuid4().hex[:16]}"
     work_root = os.environ.get("MULTISIM_MCP_WORKDIR") or r"C:\msre_exp"
@@ -1343,6 +1471,7 @@ def _run_circuit_experiment_unlocked(
     notify("preflight", 3, "Validating netlist, commands, and output destinations")
     accepted = validate_analysis_commands(commands)
     validate_spice_netlist(netlist)
+    validate_spice_netlist(expand_component_adapters(netlist))
     root = Path(output_dir).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     manifest_names = (
@@ -1356,6 +1485,11 @@ def _run_circuit_experiment_unlocked(
         "circuit.cir",
         "plot.svg",
         "report.md",
+        "report.zh-CN.html",
+        "report.en.html",
+        "report.zh-CN.pdf",
+        "report.en.pdf",
+        "manifest.json",
         *(("verification.json",) if requirements is not None else ()),
     )
     destinations = {name: root / name for name in manifest_names}
@@ -1462,6 +1596,7 @@ def _run_circuit_experiment_unlocked(
             "plot.svg",
             verification,
         )
+        export_formal_reports(stage, experiment_id_for_output_dir(root))
 
         missing = [
             str(stage / name)

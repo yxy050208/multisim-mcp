@@ -18,6 +18,16 @@ from typing import Any
 _NUMBER_RE = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
 
 
+def _raw_value(token: str, complex_mode: bool) -> float | complex | None:
+    if _NUMBER_RE.match(token):
+        return float(token)
+    if complex_mode and token.count(",") == 1:
+        real, imaginary = token.split(",", 1)
+        if _NUMBER_RE.match(real) and _NUMBER_RE.match(imaginary):
+            return complex(float(real), float(imaginary))
+    return None
+
+
 def parse_raw(path: str) -> dict[str, Any]:
     """Parse and strictly validate an ASCII SPICE3 raw file."""
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
@@ -26,7 +36,10 @@ def parse_raw(path: str) -> dict[str, Any]:
     header: dict[str, Any] = {}
     variables: list[dict[str, Any]] = []
     rows: list[list[float]] = []
-    current: list[float] | None = None
+    real_rows: list[list[float]] = []
+    imaginary_rows: list[list[float]] = []
+    phase_rows: list[list[float]] = []
+    current: list[float | complex] | None = None
     current_index: int | None = None
     in_variables = False
     in_values = False
@@ -75,15 +88,23 @@ def parse_raw(path: str) -> dict[str, Any]:
         if len(tokens) >= 2 and tokens[0].isdigit() and current is None:
             current_index = int(tokens[0])
             current = []
+            complex_mode = "complex" in str(header.get("flags", "")).casefold()
             for token in tokens[1:]:
-                if _NUMBER_RE.match(token):
-                    current.append(float(token))
+                value = _raw_value(token, complex_mode)
+                if value is not None:
+                    current.append(value)
                 else:
                     current = None
                     current_index = None
                     break
-        elif current is not None and len(tokens) == 1 and _NUMBER_RE.match(tokens[0]):
-            current.append(float(tokens[0]))
+        elif current is not None and len(tokens) == 1:
+            complex_mode = "complex" in str(header.get("flags", "")).casefold()
+            value = _raw_value(tokens[0], complex_mode)
+            if value is not None:
+                current.append(value)
+            else:
+                current = None
+                current_index = None
         else:
             current = None
             current_index = None
@@ -94,7 +115,14 @@ def parse_raw(path: str) -> dict[str, Any]:
                 raise ValueError(
                     f"Raw point index {current_index} is not the expected index {len(rows)}"
                 )
-            rows.append(current)
+            if any(isinstance(value, complex) for value in current):
+                values = [complex(value) for value in current]
+                real_rows.append([value.real for value in values])
+                imaginary_rows.append([value.imag for value in values])
+                phase_rows.append([math.degrees(math.atan2(value.imag, value.real)) for value in values])
+                rows.append([abs(value) for value in values])
+            else:
+                rows.append([float(value) for value in current])
             current = None
             current_index = None
         elif current is not None and expected_width and len(current) > expected_width:
@@ -125,13 +153,21 @@ def parse_raw(path: str) -> dict[str, Any]:
     if any(len(row) != n_variables for row in rows):
         raise ValueError("SPICE raw row width does not match the declared variable count")
 
-    return {
+    result = {
         "header": header,
         "variables": variables,
         "columns": [v["plot"] for v in variables],
         "n_points": len(rows),
         "rows": rows,
+        "value_representation": "magnitude" if real_rows else "real",
     }
+    if real_rows:
+        if len(real_rows) != len(rows):
+            raise ValueError("Complex SPICE raw data contains mixed row encodings")
+        result["real_rows"] = real_rows
+        result["imaginary_rows"] = imaginary_rows
+        result["phase_rows"] = phase_rows
+    return result
 
 
 def write_csv(path: str, parsed: dict[str, Any]) -> str:

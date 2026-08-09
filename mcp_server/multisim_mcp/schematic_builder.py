@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from multisim_mcp.component_adapters import expand_component_adapters
+
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 TEMPLATE_PACK_ENV = "MULTISIM_MCP_TEMPLATE_DIR"
@@ -496,6 +498,7 @@ def parse_spice_value(token: str) -> tuple[float, str]:
 
 
 def parse_netlist(text: str) -> ParsedNetlist:
+    text = expand_component_adapters(text)
     parsed = ParsedNetlist()
     logical_lines = _logical_netlist_lines(text)
     model_types: dict[str, str] = {}
@@ -822,6 +825,7 @@ def parse_netlist(text: str) -> ParsedNetlist:
 
 def prepare_simulation_netlist(text: str) -> str:
     """Translate the schematic A-device shorthand into executable XSPICE."""
+    text = expand_component_adapters(text)
     logical_lines = _logical_netlist_lines(text)
     existing_models: set[str] = set()
     for line in logical_lines:

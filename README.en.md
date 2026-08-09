@@ -31,7 +31,8 @@ release is planned as `v1.0.0`, without intermediate public versions.
 4. export the schematic as PNG;
 5. run operating-point, DC, AC, or transient analysis;
 6. export raw data, CSV, SVG plots, and command logs; and
-7. generate a reproducible Markdown lab report.
+7. generate Markdown, standalone bilingual HTML/PDF reports, and a SHA-256
+   `manifest.json`.
 
 For longer experiments, the development branch adds the durable
 `submit_circuit_experiment` workflow. It returns a `job_id` immediately;
@@ -62,6 +63,19 @@ Phase three adds computable design verification and batch experiments:
 Real Multisim 14.3 regressions cover resistor dividers, coupled inductors,
 digital truth tables, JK timing, and a combined function-generator/oscilloscope
 experiment.
+
+Phase four adds portable models without redistributing NI database assets:
+
+- transformer, potentiometer, relay, crystal, power-diode, and power-MOS macros;
+- D/T flip-flops, four-bit counter/shift-register, and one-bit ADC/DAC macros;
+- data-backed multimeter, Bode, and logic-analyzer tools; and
+- standalone Chinese/English HTML/PDF reports plus a reproducibility manifest.
+
+See the [adapter API](docs/COMPONENT_ADAPTERS.md) and
+[compatibility matrix](docs/COMPATIBILITY.md) for syntax and evidence levels.
+Phase-four regressions additionally cover portable adapter open/export,
+transformer transient, relay and power-device operating points, crystal AC,
+DFF transient behavior, and the complete bilingual-report transaction.
 
 ## Capability
 

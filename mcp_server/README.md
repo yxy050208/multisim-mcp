@@ -27,7 +27,8 @@ Stable and verified on Multisim 14.3:
 - DC operating point, AC sweep, single-frequency AC, and transient analysis.
 - Input waveform injection and RLC value read/write.
 - SPICE netlist execution with safe `op`, `dc`, `ac`, and `tran` commands.
-- Netlist, BOM, schematic image, raw data, CSV, SVG, and Markdown export.
+- Netlist, BOM, schematic image, raw data, CSV, SVG, Markdown, standalone
+  bilingual HTML/PDF, and reproducibility-manifest export.
 - High-level `run_circuit_experiment` workflow.
 - Durable `submit_circuit_experiment` queue with progress, cancellation,
   total/heartbeat timeouts, and isolated-worker recovery.
@@ -36,7 +37,7 @@ Stable and verified on Multisim 14.3:
 - Parameter, tolerance, temperature, and seeded Monte Carlo sweeps with a
   100-run hard limit and durable-worker support.
 - MCP `2026-07-28` discovery plus automatic compatibility with legacy clients.
-- Eleven experiment artifact Resources, two sweep Resources, one job-status
+- Sixteen experiment artifact Resources, two sweep Resources, one job-status
   Resource, and five
   bilingual workflow Prompts.
 - Validated structured output for the complete experiment workflow.
@@ -51,6 +52,11 @@ multisim://experiments/{experiment_id}/schematic
 multisim://experiments/{experiment_id}/data
 multisim://experiments/{experiment_id}/plot
 multisim://experiments/{experiment_id}/verification
+multisim://experiments/{experiment_id}/formal-html-zh
+multisim://experiments/{experiment_id}/formal-html-en
+multisim://experiments/{experiment_id}/formal-pdf-zh
+multisim://experiments/{experiment_id}/formal-pdf-en
+multisim://experiments/{experiment_id}/reproducibility-manifest
 multisim://sweeps/{sweep_id}/summary
 multisim://sweeps/{sweep_id}/data
 ```
@@ -75,6 +81,10 @@ Experimental:
   generated alongside authoritative CSV/SVG experiment data.
   Multisim's exported native netlist is checked after opening so silently
   omitted parts fail the run.
+- Portable `@KIND` adapters synthesize transformer, potentiometer, relay,
+  crystal, power semiconductor, D/T flip-flop, four-bit counter/register, and
+  one-bit ADC/DAC models from ordinary primitives. See
+  [`docs/COMPONENT_ADAPTERS.md`](../docs/COMPONENT_ADAPTERS.md).
 - Generated schematic probes are not enabled by default. Experiment data is
   obtained authoritatively from the same netlist through Multisim's engine.
 
@@ -265,6 +275,7 @@ The synchronous `run_circuit_experiment` compatibility tool will:
 3. Open the design in Multisim and export `schematic.png`.
 4. Run the requested analysis through Multisim's engine.
 5. Export `result.raw`, `data.csv`, `plot.svg`, logs, and `report.md`.
+6. Export Chinese/English HTML/PDF reports and `manifest.json` atomically.
 
 Job records are stored as atomic JSON under `%LOCALAPPDATA%\multisim-mcp\jobs`
 by default. Set `MULTISIM_MCP_JOB_DIR` to select another private local state
@@ -303,6 +314,11 @@ XSC1 out inv 0 0 out 0 OSCILLOSCOPE
 
 The XSC terminal order is A, B, C, D, EXT+, EXT-. XFG supports `WAVE` (SINE,
 SQUARE, or TRIANGLE), `FREQ`, `AMPLITUDE`, `OFFSET`, `DUTY`, and `RISE`.
+
+Completed experiment data can also be read through `read_virtual_multimeter`,
+`analyze_bode_response`, and `analyze_logic_signals`. These tools return
+structured measurements and edge events; the Bode adapter explicitly leaves
+phase unavailable when the raw file contains no phase column.
 
 ## Safety model
 

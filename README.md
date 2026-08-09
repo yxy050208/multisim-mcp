@@ -37,7 +37,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 4. 导出原理图 PNG。
 5. 运行 DC、AC、瞬态或工作点实验。
 6. 导出 raw、CSV、SVG 波形和命令日志。
-7. 生成可复现 Markdown 实验报告。
+7. 生成 Markdown、中英双语独立 HTML/PDF 报告及带 SHA-256 的 `manifest.json`。
 
 对于较长实验，主分支新增 `submit_circuit_experiment` 持久任务接口。它会立即返回
 `job_id`，可通过 `get_experiment_job`、`list_experiment_jobs`、
@@ -92,6 +92,18 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 已经在 Multisim 14.3 上完成分压器、耦合电感、数字门/JK 时序以及
 函数发生器 + 示波器联合实验的真实验证。
+
+第四阶段加入不分发 NI 数据库资产的可移植元件与数据仪器：
+
+- `@TRANSFORMER`、`@POTENTIOMETER`、`@RELAY`、`@CRYSTAL`、功率二极管/MOS；
+- `@DFF`、`@TFF`、`@COUNTER4`、`@SHIFT_REGISTER4`、`@ADC1`、`@DAC1`；
+- `read_virtual_multimeter`、`analyze_bode_response` 和 `analyze_logic_signals`；
+- `export_formal_experiment_report`，以及 5 个新的正式报告/清单 Resource。
+
+适配器语法与社区 JSON 接口见 [`docs/COMPONENT_ADAPTERS.md`](docs/COMPONENT_ADAPTERS.md)，
+真实版本边界见 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)。
+第四阶段真实回归覆盖适配器原理图打开/回导、变压器瞬态、继电器与功率器件工作点、
+晶振 AC、DFF 瞬态以及双语正式报告的完整事务发布。
 
 ## 能力成熟度
 

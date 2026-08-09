@@ -33,6 +33,11 @@ instruments. The project therefore defines coverage by capability tier.
 | JK flip-flop | `A... J K CLK SET RESET Q QBAR JKFF` | Native preview verified | Open/export and real toggle-timing regression verified |
 | Four-channel oscilloscope | `XSC... A B C D EXT+ EXT- OSCILLOSCOPE` | Native instrument verified | Front-panel state survives native save; experiment CSV/SVG remains authoritative |
 | Function generator | `XFG... + COM - FGEN NAME=VALUE...` | Native instrument verified | Sine/square/triangle settings and command-engine equivalent supported |
+| Transformer / potentiometer / relay / crystal | `X... @KIND` | Portable derived topology, 14.3 open/export verified | Standard SPICE RLC/K/S; representative transient/OP/AC regressions |
+| Power diode / NMOS / PMOS | `X... @POWER_*` | Portable derived topology, 14.3 open/export verified | Diode/NMOS OP regression; select parameters for the real part |
+| D/T flip-flop, four-bit counter/register | `X... @DFF/@TFF/@COUNTER4/@SHIFT_REGISTER4` | Portable digital topology, 14.3 open/export verified | Synthesized from NOT/JK; DFF transient regression; 5 V bridge |
+| One-bit ADC/DAC bridge | `X... @ADC1/@DAC1` | Portable mixed-signal topology | Thresholded behavioral model |
+| Multimeter / Bode / logic analyzer | completed experiment data | Data-backed instrument | Structured values/edges; missing Bode phase stays unavailable |
 | Ground/named nets | `0`, node names | Verified | Complete |
 
 Every opened generated design is exported back through Multisim's native netlist
@@ -62,8 +67,8 @@ are temporary carrier shapes rather than the final controlled-source diamonds.
 ## Next families
 
 - Dedicated artwork for controlled, behavioral, switch, line, and generic symbols.
-- Dedicated transformer artwork, relays, potentiometers, and crystals.
+- Dedicated artwork for the portable transformer, relay, potentiometer, and crystal models.
 - Zener/Schottky/LED/SCR/triac and three-terminal MOS variants.
-- D/T flip-flops, counters, ADC/DAC, and mixed-signal bridges.
-- Multimeter, Bode plotter, probes, and logic analyzer.
+- Multi-bit ADC/DAC models and parameterized-width sequential digital macros.
+- Native front-panel multimeter, Bode plotter, probes, and logic analyzer state.
 - Generic symbols above sixteen pins and embedded subcircuit bodies.

@@ -88,6 +88,26 @@ class ExperimentResourceRegistryTest(unittest.TestCase):
                 {item["filename"] for item in manifest["artifacts"]},
             )
 
+    def test_formal_report_resource_paths_match_protocol_templates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_experiment(root)
+            (root / "report.zh-CN.html").write_text("<html>中文</html>", encoding="utf-8")
+            (root / "report.en.html").write_text("<html>English</html>", encoding="utf-8")
+            (root / "report.zh-CN.pdf").write_bytes(b"%PDF-1.4 zh")
+            (root / "report.en.pdf").write_bytes(b"%PDF-1.4 en")
+            (root / "manifest.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
+            registered = register_experiment(str(root))
+        experiment_id = registered["experiment_id"]
+        self.assertEqual(
+            registered["resources"]["formal_html_zh"],
+            f"multisim://experiments/{experiment_id}/formal-html-zh",
+        )
+        self.assertEqual(
+            registered["resources"]["reproducibility_manifest"],
+            f"multisim://experiments/{experiment_id}/reproducibility-manifest",
+        )
+
     def test_manifest_hashes_and_allowlisted_reads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

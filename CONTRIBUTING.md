@@ -22,3 +22,14 @@ tools\python32\python.exe -m pip wheel --no-deps mcp_server
 
 Generated schematic support must be labelled experimental until the design can
 be opened, enumerated, exported, and simulated through a reproducible test.
+
+## Declarative component adapters
+
+Prefer a portable adapter when a contribution can be expressed using ordinary
+SPICE primitives. Start from
+[`docs/component-adapter.example.json`](docs/component-adapter.example.json),
+add COM-free expansion and boundary tests, and update
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). Adapter packs must not contain
+executable code, external-file directives, extracted NI XML, or vendor models
+without explicit redistribution permission. See
+[`docs/COMPONENT_ADAPTERS.md`](docs/COMPONENT_ADAPTERS.md) for the interface.

@@ -21,6 +21,27 @@ class UnsafeToolGateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.run_spice_netlist(netlist, "op")
 
+    def test_external_adapter_expansion_is_revalidated_before_com(self) -> None:
+        adapter = {
+            "schema_version": 1,
+            "kind": "BADMODEL",
+            "terminals": ["p", "n"],
+            "parameters": [],
+            "expansion": [
+                "D{stem} {p} {n} M{stem}",
+                ".model M{stem} D(file=secret.txt)",
+            ],
+            "description_zh": "test",
+            "description_en": "test",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "bad.json").write_text(
+                json.dumps(adapter), encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"MULTISIM_MCP_ADAPTER_DIR": tmp}):
+                with self.assertRaisesRegex(ValueError, "External-file"):
+                    server.run_spice_netlist("X1 a 0 @BADMODEL\n.end\n", "op")
+
     def test_standalone_spice_run_opens_a_blank_document_for_command_engine(self) -> None:
         class FakeClient:
             opened = False
