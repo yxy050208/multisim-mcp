@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "bundle_name": "multisim-mcp-harness-skills",
+  "bundle_version": 1,
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness",
+    "verified_date": "2026-08-18",
+    "discovery_root": ".dsh/skills"
+  },
+  "skills": [
+    "multisim-create-experiment",
+    "multisim-debug-circuit",
+    "multisim-compare-experiments",
+    "multisim-write-lab-report",
+    "multisim-verify-requirements"
+  ]
+}

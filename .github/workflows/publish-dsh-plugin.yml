@@ -1,0 +1,123 @@
+name: Verify or stage DeepSeek Harness plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact plugin version from package.json
+        required: true
+        default: "1.0.0"
+        type: string
+      operation:
+        description: Verify only, or stage an update to an existing npm package
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - stage-existing
+      confirmation:
+        description: For staging, enter stage multisim-mcp-dsh-plugin@VERSION
+        required: false
+        type: string
+
+concurrency:
+  group: publish-dsh-plugin
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_OPERATION: ${{ inputs.operation }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use release npm CLI
+        run: npm install --global npm@12.0.2 --ignore-scripts
+      - name: Validate explicit staging confirmation
+        shell: bash
+        run: |
+          if [[ "$RELEASE_OPERATION" == "stage-existing" ]]; then
+            expected="stage multisim-mcp-dsh-plugin@$RELEASE_VERSION"
+            if [[ "$RELEASE_CONFIRMATION" != "$expected" ]]; then
+              echo "Staging confirmation must equal: $expected" >&2
+              exit 1
+            fi
+          fi
+      - name: Validate release and registry state
+        run: >-
+          python tools/check_dsh_plugin_release.py
+          --expected-version "$RELEASE_VERSION"
+          --check-registry
+          --json
+      - name: Inspect npm package boundary
+        shell: bash
+        run: |
+          npm pack ./integrations/deepseek-harness \
+            --dry-run --json --ignore-scripts > npm-pack.json
+          python tools/check_npm_pack_result.py npm-pack.json \
+            --expected-version "$RELEASE_VERSION"
+
+  stage:
+    if: ${{ inputs.operation == 'stage-existing' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/multisim-mcp-dsh-plugin
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use release npm CLI
+        run: npm install --global npm@12.0.2 --ignore-scripts
+      - name: Require the existing owned package and a new version
+        run: >-
+          python tools/check_dsh_plugin_release.py
+          --expected-version "$RELEASE_VERSION"
+          --check-registry
+          --require-existing-package
+          --json
+      - name: Pack the exact staged artifact
+        id: pack
+        shell: bash
+        run: |
+          npm pack ./integrations/deepseek-harness \
+            --json --ignore-scripts > npm-pack.json
+          python tools/check_npm_pack_result.py npm-pack.json \
+            --expected-version "$RELEASE_VERSION"
+          tarball=$(python tools/check_npm_pack_result.py npm-pack.json \
+            --expected-version "$RELEASE_VERSION" --filename-only)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          sha256sum "$tarball"
+      - name: Stage package with npm Trusted Publishing
+        run: npm stage publish "${{ steps.pack.outputs.tarball }}" --access public

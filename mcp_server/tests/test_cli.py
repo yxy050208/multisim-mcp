@@ -192,6 +192,70 @@ class ConfigGeneratorTest(unittest.TestCase):
         self.assertIn("[mcp_servers.multisim-lab.env]", content)
         self.assertIn('MULTISIM_MCP_WORKDIR = "C:\\\\msre_exp"', content)
 
+    def test_deepseek_harness_cordis_yaml(self) -> None:
+        content = render_client_config(
+            "deepseek-harness",
+            server_name="multisim_lab",
+            python_executable=r"C:\Python32\python.exe",
+            template_dir=r"C:\MultisimMcp\component-pack",
+            work_dir=r"C:\msre_exp",
+            tool_profile="experiment",
+            artifact_export_dir=r"C:\MultisimMcp\exports",
+        )
+        self.assertIn('- id: "mcp-multisim_lab"', content)
+        self.assertIn('name: "@deepseek-ai/dsh-mcp-client"', content)
+        self.assertIn('serverName: "multisim_lab"', content)
+        self.assertIn('transport: "stdio"', content)
+        self.assertIn('command: "C:\\\\Python32\\\\python.exe"', content)
+        self.assertIn('- "multisim_mcp.server"', content)
+        self.assertIn("toolCallTimeoutMs: 120000", content)
+        self.assertIn("maxAttempts: 10", content)
+        self.assertIn("MULTISIM_MCP_TEMPLATE_DIR:", content)
+        self.assertIn('MULTISIM_MCP_TOOL_PROFILE: "experiment"', content)
+        self.assertIn(
+            'MULTISIM_MCP_ARTIFACT_EXPORT_DIR: "C:\\\\MultisimMcp\\\\exports"',
+            content,
+        )
+        self.assertNotIn("DEEPSEEK_API_KEY", content)
+
+    def test_deepseek_harness_enforces_upstream_server_name_rules(self) -> None:
+        with self.assertRaisesRegex(ValueError, "DeepSeek Harness server name"):
+            render_client_config("deepseek-harness", server_name="multisim.lab")
+        with self.assertRaisesRegex(ValueError, "DeepSeek Harness server name"):
+            render_client_config("deepseek-harness", server_name="m" * 33)
+
+    def test_deepseek_harness_cli_json_envelope(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(
+                [
+                    "config",
+                    "--client",
+                    "deepseek-harness",
+                    "--python",
+                    r"C:\Python32\python.exe",
+                    "--tool-profile",
+                    "core",
+                    "--json",
+                ]
+            )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["client"], "deepseek-harness")
+        self.assertIn("@deepseek-ai/dsh-mcp-client", payload["content"])
+        self.assertIn('MULTISIM_MCP_TOOL_PROFILE: "core"', payload["content"])
+
+    def test_direct_renderer_rejects_unknown_tool_profile(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unsupported tool profile"):
+            render_client_config("generic", tool_profile="everything")
+
+    def test_rejects_filesystem_root_as_artifact_export_dir(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not be a filesystem root"):
+            render_client_config(
+                "generic", artifact_export_dir=Path.cwd().anchor
+            )
+
     def test_generic_spec_is_not_wrapped_in_a_client_key(self) -> None:
         content = render_client_config(
             "generic", python_executable=r"C:\Python32\python.exe"
@@ -219,6 +283,26 @@ class ConfigGeneratorTest(unittest.TestCase):
         with patch("multisim_mcp.cli._run_server") as run_server:
             self.assertEqual(main([]), 0)
         run_server.assert_called_once_with()
+
+
+class HarnessSkillsCliTest(unittest.TestCase):
+    def test_harness_skills_json_installs_five_bundled_skills(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "harness-skills",
+                        "--output",
+                        str(Path(tmp) / ".dsh" / "skills"),
+                        "--json",
+                    ]
+                )
+            payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["skill_count"], 5)
+        self.assertEqual(payload["command"], "harness-skills")
 
 
 if __name__ == "__main__":

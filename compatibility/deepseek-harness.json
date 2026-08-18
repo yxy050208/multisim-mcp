@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-08-18",
+  "status": "developer-preview",
+  "upstream": {
+    "repository": "https://github.com/deepseek-ai/deepseek-harness",
+    "root_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/package.json",
+    "dsh_cli_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/apps/cli/package.json",
+    "mcp_client_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/mcp/mcp-client/package.json",
+    "harness_version": "0.1.0-rc.7",
+    "dsh_cli_package": "@deepseek-ai/dsh",
+    "dsh_cli_version": "0.1.0-rc.7",
+    "mcp_client_package": "@deepseek-ai/dsh-mcp-client",
+    "mcp_client_version": "0.1.0-rc.7",
+    "node_engine": "^22.19.0 || >=24.0.0",
+    "package_manager": "pnpm@11.7.0",
+    "mcp_sdk_range": "^1.12.0"
+  },
+  "contract": {
+    "transport": "stdio",
+    "tool_name_prefix": "mcp__multisim__",
+    "server_name_pattern": "^[A-Za-z0-9_-]{1,32}$",
+    "mcp_resources_bridged": false,
+    "mcp_prompts_bridged": false,
+    "skill_discovery_root": ".dsh/skills",
+    "bundle_package": "multisim-mcp-dsh-plugin",
+    "bundle_version": "1.0.0",
+    "bundle_path": "integrations/deepseek-harness",
+    "tool_profiles": {
+      "core": 26,
+      "experiment": 39,
+      "optimization": 40,
+      "full": 55
+    },
+    "skills": [
+      "multisim-create-experiment",
+      "multisim-debug-circuit",
+      "multisim-compare-experiments",
+      "multisim-write-lab-report",
+      "multisim-verify-requirements"
+    ]
+  }
+}

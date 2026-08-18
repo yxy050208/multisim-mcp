@@ -78,3 +78,16 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Push annotated tag `v1.0.0` and verify the Trusted Publishing result on PyPI.
 - [x] Publish matching MCP Registry metadata and GitHub Release artifacts.
 - [x] Verify Glama and awesome-mcp-servers directory metadata after publication.
+
+## DeepSeek Harness npm bundle 1.0.0
+
+- [x] Pin the official Harness CLI and MCP client compatibility baseline.
+- [x] Restrict the npm tarball to four reviewed files.
+- [x] Add a Registry ownership/version guard with unit tests.
+- [x] Add verify-only and stage-existing GitHub Actions paths.
+- [ ] Re-run the Registry guard immediately before the first publication.
+- [ ] Publish `multisim-mcp-dsh-plugin@1.0.0` interactively with maintainer 2FA.
+- [ ] Configure `publish-dsh-plugin.yml` as a stage-only npm Trusted Publisher.
+- [ ] Protect the GitHub `npm` Environment with required reviewers.
+- [ ] Disallow traditional publish tokens and verify package provenance on the
+      next staged release.

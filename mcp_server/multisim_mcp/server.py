@@ -24,12 +24,16 @@ from multisim_mcp.experiment_resources import (
     ExperimentResourceIndex,
     ExperimentResult,
     VerifiedExperimentResult,
+    export_artifact as export_registered_artifact,
     experiment_manifest,
     experiment_id_for_output_dir,
+    list_artifacts,
+    read_artifact_page,
     read_binary_artifact,
     read_text_artifact,
     register_experiment,
     registered_experiment_root,
+    summarize_experiment,
 )
 from multisim_mcp.component_adapters import (
     component_adapter_catalog as adapter_catalog,
@@ -76,10 +80,16 @@ from multisim_mcp.sweep_resources import (
     read_sweep_text,
     register_sweep,
 )
+from multisim_mcp.tool_profiles import (
+    selected_tool_profile,
+    tool_enabled,
+    tool_profile_status,
+)
 
 
 _COM_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="multisim-com")
 _COM_THREAD_STATE = threading.local()
+_TOOL_PROFILE = selected_tool_profile()
 
 
 def _invoke_tool_on_com_thread(function: Any, args: tuple, kwargs: dict) -> Any:
@@ -104,6 +114,10 @@ class MultisimMCPServer(MCPServer):
         register = super().tool(*decorator_args, **decorator_kwargs)
 
         def decorator(function: Any) -> Any:
+            if not tool_enabled(function.__name__, _TOOL_PROFILE):
+                # Keep the original callable available to internal code and unit
+                # tests while omitting it from MCP tools/list for this process.
+                return function
             if not com_serialized:
                 register(function)
                 return function
@@ -521,6 +535,7 @@ def runtime_status() -> dict:
     ]
     result["schematic_templates_ready"] = not missing
     result["missing_schematic_templates"] = missing
+    result["tool_profile"] = tool_profile_status(_TOOL_PROFILE)
     if missing:
         result["template_setup_hint"] = (
             "Run tools/bootstrap_local_component_pack.py and set "
@@ -537,6 +552,42 @@ def register_experiment_artifacts(output_dir: str) -> ExperimentResourceIndex:
     Only the fixed high-level experiment artifact set is exposed.
     """
     return register_experiment(output_dir)
+
+
+@mcp.tool(com_serialized=False)
+def list_experiment_artifacts(experiment_id: str) -> dict[str, Any]:
+    """List artifact metadata, hashes, MIME types, and safe access capabilities."""
+    return list_artifacts(experiment_id)
+
+
+@mcp.tool(com_serialized=False)
+def read_experiment_artifact(
+    experiment_id: str,
+    name: str,
+    offset: int = 0,
+    max_chars: int = 20_000,
+) -> dict[str, Any]:
+    """Read one bounded page from an allowlisted text experiment artifact."""
+    return read_artifact_page(experiment_id, name, offset, max_chars)
+
+
+@mcp.tool(com_serialized=False)
+def export_experiment_artifact(
+    experiment_id: str,
+    name: str,
+    destination_subdir: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Export an artifact beneath MULTISIM_MCP_ARTIFACT_EXPORT_DIR."""
+    return export_registered_artifact(
+        experiment_id, name, destination_subdir, overwrite
+    )
+
+
+@mcp.tool(com_serialized=False)
+def get_experiment_summary(experiment_id: str) -> dict[str, Any]:
+    """Return a compact report, verification, and artifact summary for agents."""
+    return summarize_experiment(experiment_id)
 
 
 @mcp.tool(com_serialized=False)

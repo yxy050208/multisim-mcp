@@ -58,6 +58,10 @@ jobs:
           assert result["introspection_ready"] is True
           '@ | python -
           multisim-mcp config --client generic --python $((Get-Command python).Source)
+      - name: Validate pinned DeepSeek Harness contract
+        run: |
+          python tools/check_deepseek_harness_compat.py --json
+          python tools/check_dsh_plugin_release.py --json
       - name: Compile installed sources
         run: python -m compileall mcp_server
       - name: Run COM-free tests against installed wheel
@@ -68,17 +72,26 @@ jobs:
           @'
           from importlib.resources import files
           from pathlib import Path
+          import json
           import tarfile
           import zipfile
           import multisim_mcp
 
           package = files("multisim_mcp")
           assert package.joinpath("templates/manifest.json").is_file()
+          harness_manifest = package.joinpath("harness_skills/manifest.json")
+          assert harness_manifest.is_file()
+          skill_names = json.loads(harness_manifest.read_text(encoding="utf-8"))["skills"]
+          assert len(skill_names) == 5
+          for name in skill_names:
+              assert package.joinpath(f"harness_skills/{name}/SKILL.md").is_file()
           wheels = list(Path("mcp_server/dist").glob("*.whl"))
           assert wheels
           with zipfile.ZipFile(wheels[0]) as archive:
               names = archive.namelist()
               assert any(name.endswith("licenses/LICENSE") for name in names)
+              assert any(name.endswith("harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
               assert not any("/templates/" in name and name.endswith(".xml") for name in names)
               metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
               metadata = archive.read(metadata_name).decode("utf-8")
@@ -89,11 +102,13 @@ jobs:
               names = archive.getnames()
               assert any(name.endswith("/LICENSE") for name in names)
               assert any(name.endswith("/multisim_mcp/templates/manifest.json") for name in names)
+              assert any(name.endswith("/multisim_mcp/harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
               assert not any("/templates/" in name and name.endswith(".xml") for name in names)
           print("Code-only wheel and sdist contain manifest/license and no extracted XML")
           '@ | python -
       - name: Compile release audit and local-pack tools
-        run: python -m compileall tools/release_audit.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
+        run: python -m compileall tools/release_audit.py tools/check_deepseek_harness_compat.py tools/check_dsh_plugin_release.py tools/check_npm_pack_result.py tools/smoke_deepseek_harness.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
 
   windows-x86-protocol:
     runs-on: windows-latest

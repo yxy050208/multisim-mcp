@@ -91,3 +91,17 @@ English: tag only after a final staged-file audit; never attach the local templa
 
 English: publish in order—green CI, tag/PyPI, verified GitHub Release, MCP
 Registry, then community-directory metadata.
+
+## 7. DeepSeek Harness npm bundle
+
+`integrations/deepseek-harness` 是独立 npm 发布物。首次发布不能使用 npm staged
+publishing，必须由维护者本地登录并通过 2FA 发布。包存在后，在 npm 中把
+`publish-dsh-plugin.yml` 配置为绑定 GitHub `npm` Environment、且只允许
+`npm stage publish` 的 Trusted Publisher；后续版本先由 OIDC 暂存，再由维护者以
+2FA 审批。仓库不保存长期 npm 发布 Token。
+
+完整预检、首次发布和后续审批步骤见
+[`DEEPSEEK_HARNESS_NPM_RELEASE.md`](DEEPSEEK_HARNESS_NPM_RELEASE.md)。
+
+English: the first npm publication is interactive with 2FA. Later releases use
+stage-only OIDC and require a separate maintainer review and 2FA approval.
