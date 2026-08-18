@@ -4,7 +4,40 @@
 
 ## [Unreleased]
 
-暂无变更。 / No changes yet.
+### 中文
+
+- 新增 2.0 综合路线图，确定先平台化、再纠错优化、开放仿真后端、可视化工作台和
+  KiCad 工程输出的开发顺序。
+- 新增 DeepSeek 与官方 DeepSeek Harness 兼容说明，包括凭据边界、工具规模、
+  Resources/Prompts 当前限制和版本验证矩阵。
+- 配置生成器新增 `deepseek-harness` 客户端，输出官方 MCP Client 使用的 Cordis
+  插件片段，并校验上游 `serverName` 约束。
+- 新增四种服务端 Tool Profile；默认 `full` 保持完整工具兼容，其他档案可减少
+  DeepSeek Harness 等客户端的工具 schema 上下文占用。
+- 新增列出、分页读取、受控导出和汇总实验产物的四个 Tool 等价入口，供暂不消费
+  MCP Resources 的客户端使用；导出限定在显式批准的根目录内。
+- 新增五个版本化 DeepSeek Harness Skill，覆盖创建、纠错、比较、报告和指标验证；
+  `harness-skills` 命令可安全安装到项目 `.dsh/skills`，默认拒绝覆盖。
+- 新增机器可读 Harness 兼容清单、确定性本地门禁和每周非阻塞上游版本漂移监控。
+- 新增可独立安装的 `multisim-mcp-dsh-plugin` bundle 源码，以及隔离、无 API Key、
+  固定官方 dsh 版本的配置组合与真实启动烟雾测试。
+
+### English
+
+- Added the post-1.0 platform, optimization, multi-EDA, and visual-workbench roadmap.
+- Documented the DeepSeek and official DeepSeek Harness compatibility baseline.
+- Added a `deepseek-harness` client target that renders a validated Cordis MCP
+  plugin fragment without forwarding model credentials to the MCP process.
+- Added four server-side tool profiles while preserving the complete `full`
+  profile as the default.
+- Added four Tool equivalents for listing, paginating, exporting, and summarizing
+  experiment artifacts when a client does not consume MCP Resources.
+- Added five versioned DeepSeek Harness skills plus a safe, no-clobber project
+  installer for `.dsh/skills`.
+- Added a machine-readable Harness compatibility manifest, deterministic local
+  gate, and weekly non-blocking upstream drift monitor.
+- Added an installable `multisim-mcp-dsh-plugin` source bundle and an isolated,
+  credential-free smoke test against the pinned official dsh CLI.
 
 ## [1.0.0] - 2026-08-10
 

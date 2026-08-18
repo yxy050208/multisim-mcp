@@ -23,6 +23,8 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+      - name: Validate pinned DeepSeek Harness contract
+        run: python tools/check_deepseek_harness_compat.py --json
       - name: Build distributions
         run: |
           python -m pip install --upgrade pip build
@@ -40,11 +42,15 @@ jobs:
           with zipfile.ZipFile(wheel) as archive:
               names = archive.namelist()
               assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              assert any(name.endswith("harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
               metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
               assert marker in archive.read(metadata_name).decode("utf-8")
           with tarfile.open(sdist, "r:gz") as archive:
               names = archive.getnames()
               assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              assert any(name.endswith("/multisim_mcp/harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
               readme = next(member for member in archive.getmembers() if member.name.endswith("/README.md"))
               assert marker in archive.extractfile(readme).read().decode("utf-8")
           PY

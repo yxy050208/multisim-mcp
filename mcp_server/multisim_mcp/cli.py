@@ -14,12 +14,16 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from multisim_mcp import __version__
+from multisim_mcp.experiment_resources import ARTIFACT_EXPORT_DIR_ENV
+from multisim_mcp.harness_skills import install_harness_skills
+from multisim_mcp.tool_profiles import TOOL_PROFILE_ENV, TOOL_PROFILES
 
 SCHEMA_VERSION = 1
 LOCAL_PACK_SCHEMA_VERSION = 2
 REQUIRED_TEMPLATES = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
-CLIENTS = ("claude-desktop", "codex", "generic")
+CLIENTS = ("claude-desktop", "codex", "deepseek-harness", "generic")
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_HARNESS_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 def _load_module(name: str) -> Any:
@@ -506,6 +510,8 @@ def _server_spec(
     python_executable: str,
     template_dir: str | None,
     work_dir: str | None,
+    tool_profile: str | None,
+    artifact_export_dir: str | None,
 ) -> dict[str, Any]:
     def normalize(value: str) -> str:
         return os.path.abspath(os.path.expanduser(value))
@@ -518,6 +524,13 @@ def _server_spec(
         if " " in resolved_work_dir:
             raise ValueError("work directory must not contain spaces")
         environment["MULTISIM_MCP_WORKDIR"] = resolved_work_dir
+    if tool_profile:
+        environment[TOOL_PROFILE_ENV] = tool_profile
+    if artifact_export_dir:
+        resolved_export_dir = Path(normalize(artifact_export_dir))
+        if resolved_export_dir == Path(resolved_export_dir.anchor):
+            raise ValueError("artifact export directory must not be a filesystem root")
+        environment[ARTIFACT_EXPORT_DIR_ENV] = str(resolved_export_dir)
     result: dict[str, Any] = {
         "command": normalize(python_executable),
         "args": ["-m", "multisim_mcp.server"],
@@ -531,12 +544,56 @@ def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _render_deepseek_harness_config(
+    server_name: str, spec: dict[str, Any]
+) -> str:
+    """Render a Cordis plugin row for the official DeepSeek Harness MCP client."""
+    if not _HARNESS_SERVER_NAME_RE.fullmatch(server_name):
+        raise ValueError(
+            "DeepSeek Harness server name must be 1-32 characters and contain "
+            "only letters, digits, underscore, and hyphen"
+        )
+
+    # JSON string literals are valid YAML scalars and avoid path escaping bugs on
+    # Windows. Keep this fragment dependency-free so it works in the 32-bit host.
+    lines = [
+        f"- id: {_toml_string(f'mcp-{server_name}')}",
+        '  name: "@deepseek-ai/dsh-mcp-client"',
+        "  config:",
+        f"    serverName: {_toml_string(server_name)}",
+        '    transport: "stdio"',
+        f"    command: {_toml_string(spec['command'])}",
+        "    args:",
+    ]
+    lines.extend(f"      - {_toml_string(item)}" for item in spec["args"])
+    if spec.get("env"):
+        lines.append("    env:")
+        lines.extend(
+            f"      {key}: {_toml_string(value)}"
+            for key, value in sorted(spec["env"].items())
+        )
+    lines.extend(
+        [
+            "    failOnStartupError: true",
+            "    toolCallTimeoutMs: 120000",
+            "    reconnect:",
+            "      enabled: true",
+            "      initialDelayMs: 500",
+            "      maxDelayMs: 30000",
+            "      maxAttempts: 10",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 def render_client_config(
     client: str,
     server_name: str = "multisim",
     python_executable: str | None = None,
     template_dir: str | None = None,
     work_dir: str | None = None,
+    tool_profile: str | None = None,
+    artifact_export_dir: str | None = None,
 ) -> str:
     """Render a copy-pasteable MCP client configuration fragment."""
     if client not in CLIENTS:
@@ -545,7 +602,17 @@ def render_client_config(
         raise ValueError(
             "server name may contain only letters, digits, dot, underscore, and hyphen"
         )
-    spec = _server_spec(python_executable or sys.executable, template_dir, work_dir)
+    if tool_profile is not None and tool_profile not in TOOL_PROFILES:
+        raise ValueError(f"unsupported tool profile: {tool_profile}")
+    spec = _server_spec(
+        python_executable or sys.executable,
+        template_dir,
+        work_dir,
+        tool_profile,
+        artifact_export_dir,
+    )
+    if client == "deepseek-harness":
+        return _render_deepseek_harness_config(server_name, spec)
     if client == "codex":
         lines = [
             f"[mcp_servers.{server_name}]",
@@ -638,11 +705,41 @@ def build_parser() -> argparse.ArgumentParser:
     config.add_argument(
         "--work-dir", help="space-free Multisim experiment work directory"
     )
+    config.add_argument(
+        "--tool-profile",
+        choices=TOOL_PROFILES,
+        help="limit tools/list to a task-oriented profile (default: full)",
+    )
+    config.add_argument(
+        "--artifact-export-dir",
+        help="approved root for export_experiment_artifact",
+    )
     config.add_argument("--output", help="write the fragment to this file")
     config.add_argument(
         "--force", action="store_true", help="replace an existing output file"
     )
     config.add_argument(
+        "--json",
+        dest="json_command",
+        action="store_true",
+        help="emit a JSON result envelope",
+    )
+
+    harness_skills = subparsers.add_parser(
+        "harness-skills",
+        help="install the bundled DeepSeek Harness skills into a project",
+    )
+    harness_skills.add_argument(
+        "--output",
+        default=".dsh/skills",
+        help="Harness skill discovery root (default: .dsh/skills)",
+    )
+    harness_skills.add_argument(
+        "--force",
+        action="store_true",
+        help="replace existing copies of the five bundled skills",
+    )
+    harness_skills.add_argument(
         "--json",
         dest="json_command",
         action="store_true",
@@ -675,6 +772,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             _print_doctor_human(report)
         return 1 if args.strict and not report["full_workflow_ready"] else 0
+    if args.command == "harness-skills":
+        try:
+            result = install_harness_skills(args.output, force=args.force)
+        except (OSError, ValueError) as exc:
+            if json_output:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": SCHEMA_VERSION,
+                            "command": "harness-skills",
+                            "success": False,
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            else:
+                parser.error(str(exc))
+            return 2
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(result["output_dir"])
+        return 0
     if args.command == "config":
         try:
             content = render_client_config(
@@ -683,6 +804,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 python_executable=args.python,
                 template_dir=args.template_dir,
                 work_dir=args.work_dir,
+                tool_profile=args.tool_profile,
+                artifact_export_dir=args.artifact_export_dir,
             )
             output = (
                 _write_config(args.output, content, args.force) if args.output else None

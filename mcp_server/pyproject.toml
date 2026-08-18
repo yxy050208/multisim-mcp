@@ -43,4 +43,8 @@ include-package-data = false
 include = ["multisim_mcp*"]
 
 [tool.setuptools.package-data]
-multisim_mcp = ["templates/*.json"]
+multisim_mcp = [
+    "templates/*.json",
+    "harness_skills/manifest.json",
+    "harness_skills/*/SKILL.md",
+]

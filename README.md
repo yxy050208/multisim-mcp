@@ -183,10 +183,34 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --client codex `
   --python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
+
+# 输出 DeepSeek Harness Cordis 插件片段
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client deepseek-harness `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack `
+  --work-dir C:\msre_exp `
+  --artifact-export-dir C:\MultisimMcp\exports `
+  --tool-profile experiment
+
+# 在 Harness 项目根安装五个双语实验 Skill
+C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
 ```
 
 配置生成器默认只打印可复制片段；`--output` 写入新文件，除非再传入 `--force`，
-否则不会覆盖已有文件。它不会自动合并 Claude Desktop 或 Codex 的现有配置。
+否则不会覆盖已有文件。它不会自动合并 Claude Desktop、Codex 或 Harness 的现有配置。
+DeepSeek 模型与官方 Harness 的分层、凭据边界和版本兼容性见
+[`DeepSeek / Harness 适配说明`](docs/DEEPSEEK_HARNESS.md)。
+`--tool-profile core|experiment|optimization|full` 可限制客户端发现的工具；
+省略时保持 55 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
+`--artifact-export-dir` 后可用，并且只能写入该目录之下。
+Harness Skill 安装默认不覆盖现有文件；需要恢复打包版本时显式增加 `--force`。
+仓库维护者可用 `python tools/check_deepseek_harness_compat.py --json` 验证固定的
+Harness 本地契约；版本与上游检查细节见适配说明。
+需要把集成作为 Harness 插件安装时，可使用
+[`integrations/deepseek-harness`](integrations/deepseek-harness) 中的独立 bundle；
+它目前支持本地源码安装，尚未发布到 npm。维护者的首次 2FA 发布与后续 OIDC
+暂存流程见 [`npm 发布手册`](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md)。
 
 手工 MCP 客户端配置：
 
@@ -205,6 +229,8 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 元件覆盖和剩余边界见 [`docs/COMPONENT_COVERAGE.md`](docs/COMPONENT_COVERAGE.md)。
 从 alpha 升级请阅读 [`docs/MIGRATION_TO_1.0.md`](docs/MIGRATION_TO_1.0.md)；任务与
 实验恢复流程见 [`docs/RECOVERY.md`](docs/RECOVERY.md)。
+1.0 之后的纠错、优化、多 EDA 后端和可视化工作台计划见
+[`2.0 综合路线图`](docs/ROADMAP_TO_2.0.md)。
 
 ## 仓库结构
 

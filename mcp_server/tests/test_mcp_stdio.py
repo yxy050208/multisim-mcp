@@ -14,16 +14,19 @@ from mcp.client.stdio import (
     get_default_environment,
     stdio_client,
 )
+from multisim_mcp.tool_profiles import PROFILE_TOOL_NAMES, TOOL_PROFILE_ENV
 
 
 class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
     async def _connect(
-        self, mode: str
-    ) -> tuple[str, set[str], set[str], set[str], dict]:
+        self, mode: str, tool_profile: str | None = None
+    ) -> tuple[str, set[str], set[str], set[str], dict | None]:
         package_root = Path(multisim_mcp.__file__).resolve().parent.parent
         environment = get_default_environment()
         import_paths = [str(package_root), *(item for item in sys.path if item)]
         environment["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(import_paths))
+        if tool_profile:
+            environment[TOOL_PROFILE_ENV] = tool_profile
         params = StdioServerParameters(
             command=sys.executable,
             args=["-m", "multisim_mcp.server"],
@@ -34,14 +37,19 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             prompts = await session.list_prompts()
             resources = await session.list_resource_templates()
             experiment = next(
-                tool for tool in tools.tools if tool.name == "run_circuit_experiment"
+                (
+                    tool
+                    for tool in tools.tools
+                    if tool.name == "run_circuit_experiment"
+                ),
+                None,
             )
             return (
                 session.protocol_version,
                 {tool.name for tool in tools.tools},
                 {prompt.name for prompt in prompts.prompts},
                 {item.uri_template for item in resources.resource_templates},
-                experiment.output_schema,
+                experiment.output_schema if experiment else None,
             )
 
     async def test_modern_and_legacy_clients_discover_full_surface(self) -> None:
@@ -53,7 +61,7 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 mode
             )
             self.assertEqual(protocol, expected_protocol)
-            self.assertEqual(len(names), 51)
+            self.assertEqual(len(names), 55)
             self.assertEqual(len(prompts), 5)
             self.assertEqual(len(resources), 19)
 
@@ -79,6 +87,10 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("analyze_bode_response", names)
             self.assertIn("analyze_logic_signals", names)
             self.assertIn("export_formal_experiment_report", names)
+            self.assertIn("list_experiment_artifacts", names)
+            self.assertIn("read_experiment_artifact", names)
+            self.assertIn("export_experiment_artifact", names)
+            self.assertIn("get_experiment_summary", names)
             self.assertIn("run_spice_netlist", names)
             self.assertIn("create_circuit_experiment", prompts)
             self.assertIn("verify_design_requirements", prompts)
@@ -104,6 +116,18 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                     "output_dir",
                 },
             )
+
+    async def test_task_profiles_publish_exact_stable_tool_sets(self) -> None:
+        for profile in ("core", "experiment", "optimization"):
+            with self.subTest(profile=profile):
+                _, names, prompts, resources, _ = await self._connect(
+                    "2026-07-28", tool_profile=profile
+                )
+                self.assertEqual(names, PROFILE_TOOL_NAMES[profile])
+                # Profiles reduce tool schema only; MCP Resources and Prompts
+                # retain their stable compatibility surface.
+                self.assertEqual(len(prompts), 5)
+                self.assertEqual(len(resources), 19)
 
 
 if __name__ == "__main__":

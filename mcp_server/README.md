@@ -165,6 +165,18 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
 
+# Official DeepSeek Harness Cordis plugin row
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client deepseek-harness `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack `
+  --work-dir C:\msre_exp `
+  --artifact-export-dir C:\MultisimMcp\exports `
+  --tool-profile experiment
+
+# Install the five bilingual workflow skills in a Harness project.
+C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
+
 # Unwrapped command/args/env JSON for another stdio client
 C:\path\to\python32\Scripts\multisim-mcp.exe config --client generic
 ```
@@ -173,6 +185,21 @@ The generator previews content on stdout. `--output <new-file>` writes a
 fragment, refuses to overwrite by default, and accepts `--force` only when the
 caller explicitly wants replacement. It does not merge into a live client
 configuration.
+
+The Harness fragment uses `@deepseek-ai/dsh-mcp-client`, enforces the upstream
+1-32 character `serverName` rule, and never copies a DeepSeek API key into the
+MCP child process. See [`docs/DEEPSEEK_HARNESS.md`](../docs/DEEPSEEK_HARNESS.md).
+The same `--tool-profile core|experiment|optimization|full` option works for
+every generated client config. The default remains `full` for compatibility.
+`--artifact-export-dir` sets the only root beneath which the artifact export
+tool may write; without it, artifact export fails closed.
+`harness-skills` writes the packaged bundle to `.dsh/skills`, refuses existing
+files by default, and only replaces them when `--force` is explicit.
+Source-tree maintainers can run `python tools/check_deepseek_harness_compat.py
+--json` from the repository root to validate the pinned Harness contract.
+The independently installable Harness bundle lives in
+[`integrations/deepseek-harness`](../integrations/deepseek-harness) and currently
+supports local source installation; it is not yet published to npm.
 
 Manual MCP client configuration:
 

@@ -166,11 +166,36 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --client codex `
   --python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
+
+# Print a DeepSeek Harness Cordis plugin fragment.
+C:\path\to\python32\Scripts\multisim-mcp.exe config `
+  --client deepseek-harness `
+  --python C:\path\to\python32\python.exe `
+  --template-dir C:\MultisimMcp\component-pack `
+  --work-dir C:\msre_exp `
+  --artifact-export-dir C:\MultisimMcp\exports `
+  --tool-profile experiment
+
+# Install the five bilingual experiment skills from a Harness project root.
+C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
 ```
 
 The generator prints a copy-pasteable fragment by default. `--output` writes a
 new file and refuses to replace one unless `--force` is also present. It never
-merges into a live Claude Desktop or Codex configuration automatically.
+merges into a live Claude Desktop, Codex, or Harness configuration automatically.
+See the [DeepSeek / Harness integration guide](docs/DEEPSEEK_HARNESS.md) for the
+credential boundary and compatibility baseline.
+`--tool-profile core|experiment|optimization|full` limits tool discovery;
+omitting it preserves the 55-tool `full` compatibility mode. Artifact export is
+disabled unless `--artifact-export-dir` explicitly approves a destination root.
+The Harness skill installer preserves existing files unless `--force` is explicit.
+Repository maintainers can validate the pinned local Harness contract with
+`python tools/check_deepseek_harness_compat.py --json`.
+An independently installable source bundle is available under
+[`integrations/deepseek-harness`](integrations/deepseek-harness); it has not yet
+been published to npm. Maintainers should follow the
+[npm release guide](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md) for the first 2FA
+publication and later OIDC-staged updates.
 
 Manual MCP client configuration:
 
@@ -199,6 +224,8 @@ See [SECURITY.md](SECURITY.md).
 Alpha users should read the [1.0 migration guide](docs/MIGRATION_TO_1.0.md).
 Durable-job and artifact recovery procedures are documented in
 [the recovery guide](docs/RECOVERY.md).
+The diagnosis, optimization, multi-EDA, and visual-workbench direction is
+documented in the [2.0 roadmap](docs/ROADMAP_TO_2.0.md).
 
 ## License
 

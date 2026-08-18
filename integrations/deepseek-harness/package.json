@@ -1,0 +1,42 @@
+{
+  "name": "multisim-mcp-dsh-plugin",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness bundle for the Multisim MCP server",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "mcp",
+    "multisim",
+    "eda"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yxy050208/multisim-mcp.git",
+    "directory": "integrations/deepseek-harness"
+  },
+  "homepage": "https://github.com/yxy050208/multisim-mcp#deepseek-harness",
+  "bugs": {
+    "url": "https://github.com/yxy050208/multisim-mcp/issues"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-mcp-client": "0.1.0-rc.7"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
