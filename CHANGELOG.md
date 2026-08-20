@@ -19,6 +19,9 @@
 - 新增传输无关 `ExperimentRequest` 与 `ExperimentApplicationService`，同步、验证和
   持久 worker 实验共用可注入事务入口；真实瞬态门禁生成 453 点数据、15 个完整文件
   和 15 个安全 Resource 句柄，同时保持 MCP 结果与 job 存储格式兼容。
+- 将约 400 行 staging、绘图、报告、完整性门禁、原子发布和回滚逻辑提取为
+  `MultisimExperimentPipeline`；新增发布中途故障注入测试，证明旧产物恢复且无临时
+  状态残留，并再次通过 453 点真实 Multisim 完整事务。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -59,6 +62,9 @@
 - Added transport-neutral `ExperimentRequest` and `ExperimentApplicationService`
   boundaries shared by synchronous, verified, and durable-worker experiments;
   a real transient gate produced 453 points and the complete 15-file transaction.
+- Extracted staging, plotting, reporting, completeness checks, atomic publishing,
+  and rollback into injectable `MultisimExperimentPipeline`, including a
+  mid-publication fault test that proves complete restoration and cleanup.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

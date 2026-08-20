@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from multisim_mcp.server import _write_experiment_report
+from multisim_mcp.experiment_pipeline import _write_experiment_report
 
 
 class ReportSafetyTest(unittest.TestCase):

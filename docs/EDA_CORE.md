@@ -54,6 +54,11 @@ Multisim 14.3 与双 LM324 宏模型回归；仿真兼容桥通过了 10 V 分�
 执行器。服务模块不导入 MCP 或 COM，也能将信息完整的纯结构化 `CircuitDesign`
 显式编译为 SPICE。现有 job 存储格式和 MCP 返回结果没有变化。
 
+文件事务已经从 `server.py` 提取到 `MultisimExperimentPipeline`。流水线接收可注入的
+原理图、仿真、正式报告和资源注册执行器，独立负责跨进程输出租约、预检、staging、
+绘图、验证、中英报告、完整性门禁、原子发布和逆序回滚。发布中途注入故障的测试确认
+旧产物逐项恢复，临时文件与 staging 目录全部清理；模块本身不导入 MCP 或 COM。
+
 真实 Multisim 14.3 完整事务门禁生成了可编辑电路、453 点瞬态数据、PNG/SVG、
 Markdown、中英 HTML/PDF、日志和 SHA-256 manifest，共 15 个文件并注册 15 个安全
 Resource 句柄。
@@ -73,10 +78,9 @@ Resource 句柄。
 
 下一步按以下顺序迁移：
 
-1. 将遗留事务执行器的文件发布与报告流水线从 `server.py` 提取为独立组件；
-2. 将 Multisim COM 调用固定在独立 32 位 worker；
-3. 为工程目录和优化目录补充版本化 manifest；
-4. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
+1. 将 Multisim COM 调用固定在独立 32 位 worker；
+2. 为工程目录和优化目录补充版本化 manifest；
+3. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
 
 ## English summary
 
@@ -99,3 +103,8 @@ transport-neutral `ExperimentRequest` and `ExperimentApplicationService` with
 an injectable transaction runner. A real Multisim transient gate produced 453
 points and the complete 15-file bilingual artifact transaction without changing
 the MCP result or persisted-job format.
+
+`MultisimExperimentPipeline` now owns staging, plotting, verification, bilingual
+reports, completeness gates, atomic publication, and reverse-order rollback
+outside `server.py`. Injected mid-publication failures prove that prior artifacts
+are restored and temporary state is removed.

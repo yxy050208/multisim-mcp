@@ -236,7 +236,8 @@ neutral [EDA core and backend boundary](docs/EDA_CORE.md) and limited-SPICE
 adapter are now available. Schematic generation and standalone SPICE simulation
 plus synchronous, verified, and durable-worker complete experiments are routed
 through application services while existing MCP signatures and persisted-job
-formats remain compatible.
+formats remain compatible. Experiment staging, reporting, atomic publication,
+and rollback now live in an independent injectable pipeline.
 
 ## License
 
