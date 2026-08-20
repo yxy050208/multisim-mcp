@@ -1334,17 +1334,16 @@ def create_schematic_from_netlist(
     image_path: str | None = None,
     overwrite: bool = False,
 ) -> dict:
-    """Create an editable Multisim schematic from a limited SPICE netlist.
+    """Create an editable Multisim schematic from a supported SPICE netlist.
 
-    Version 0.1 supports RLC components, scalar/waveform voltage and current
-    sources, B/E/F/G/H/T primitives, modeled diodes, BJT, MOSFET, JFET, MESFET,
-    voltage switches, OPAMP5, generic two-to-five-terminal X subcircuits, ground,
-    named nets, wiring, and deterministic layout. Several extended families use
-    verified generic carrier symbols while retaining native SPICE behavior.
-    NOT/AND/OR/JK digital parts are schematic-preview maturity.
-    Generated schematic probes
-    remain experimental; the high-level experiment tool obtains authoritative
-    data from the same netlist through Multisim's command engine.
+    Supports RLC components, scalar/waveform voltage and current sources,
+    B/E/F/G/H/T primitives, modeled semiconductors and switches, OPAMP5,
+    generic two-to-sixteen-terminal X subcircuits, digital devices, ground,
+    named nets, wiring, and deterministic layout. Compatible inline subcircuits
+    are recursively expanded into editable primitives; unsupported macro-model
+    constructs remain explicit carrier-only evidence. Generated schematic probes
+    remain experimental. The high-level experiment tool obtains authoritative
+    data from the same source netlist through Multisim's command engine.
     """
     return _create_schematic_impl(
         netlist,

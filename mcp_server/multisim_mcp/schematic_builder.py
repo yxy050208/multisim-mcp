@@ -412,6 +412,19 @@ class ParsedNetlist:
     components: list[ComponentSpec] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
     grounded: bool = False
+    subcircuits: dict[str, "SubcircuitDefinition"] = field(default_factory=dict)
+    expanded_subcircuits: list[dict[str, Any]] = field(default_factory=list)
+    subcircuit_expansion_failures: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SubcircuitDefinition:
+    """An inline SPICE subcircuit available for editable expansion."""
+
+    name: str
+    pins: tuple[str, ...]
+    parameters: dict[str, str]
+    text: str
 
 
 def _logical_netlist_lines(text: str) -> list[str]:
@@ -429,6 +442,406 @@ def _logical_netlist_lines(text: str) -> list[str]:
     if current is not None:
         logical.append(current)
     return logical
+
+
+def _collect_subcircuits(
+    logical_lines: list[str],
+) -> tuple[dict[str, SubcircuitDefinition], str]:
+    """Collect inline definitions and their command-engine dependency library."""
+    definitions: dict[str, SubcircuitDefinition] = {}
+    library_lines: list[str] = []
+    index = 0
+    while index < len(logical_lines):
+        line = logical_lines[index].strip()
+        lower = line.lower()
+        if lower.startswith(".subckt"):
+            header = line.split()
+            if len(header) < 2:
+                index += 1
+                continue
+            name = header[1]
+            pins: list[str] = []
+            parameter_tokens: list[str] = []
+            reading_parameters = False
+            for token in header[2:]:
+                lowered = token.lower()
+                if lowered in {"params:", "param:"} or "=" in token:
+                    reading_parameters = True
+                    if "=" not in token:
+                        continue
+                if reading_parameters:
+                    parameter_tokens.append(token)
+                else:
+                    pins.append(token)
+            block = [line]
+            depth = 1
+            index += 1
+            while index < len(logical_lines) and depth:
+                candidate = logical_lines[index].strip()
+                candidate_lower = candidate.lower()
+                if candidate_lower.startswith(".subckt"):
+                    depth += 1
+                elif candidate_lower.startswith(".ends"):
+                    depth -= 1
+                if candidate and not candidate.startswith(("*", ";", "#")):
+                    block.append(candidate.split(";", 1)[0].rstrip())
+                index += 1
+            text = "\n".join(block)
+            definitions[name.lower()] = SubcircuitDefinition(
+                name=name,
+                pins=tuple(pins),
+                parameters=_parse_parameter_assignments(parameter_tokens),
+                text=text,
+            )
+            library_lines.extend(block)
+            continue
+        if lower.startswith(
+            (".model", ".param", ".global", ".options", ".temp", ".func")
+        ):
+            library_lines.append(line.split(";", 1)[0].rstrip())
+        index += 1
+    library = "\n".join(line for line in library_lines if line)
+    return definitions, library
+
+
+def _split_subcircuit_instance(
+    parts: list[str], definitions: dict[str, SubcircuitDefinition]
+) -> tuple[list[str], str, list[str]]:
+    """Return nodes, model name, and instance parameters for an X record."""
+    model_index: int | None = None
+    for index in range(len(parts) - 1, 1, -1):
+        if parts[index].lower() in definitions:
+            model_index = index
+            break
+    if model_index is None:
+        for index in range(2, len(parts)):
+            token = parts[index]
+            if token.lower() in {"params:", "param:"} or "=" in token:
+                model_index = index - 1
+                break
+    if model_index is None:
+        model_index = len(parts) - 1
+    return parts[1:model_index], parts[model_index], parts[model_index + 1 :]
+
+
+def _parse_parameter_assignments(tokens: list[str]) -> dict[str, str]:
+    parameters: dict[str, str] = {}
+    for token in tokens:
+        if token.lower() in {"params:", "param:"} or "=" not in token:
+            continue
+        name, value = token.split("=", 1)
+        if name:
+            parameters[name.lower()] = value
+    return parameters
+
+
+def _substitute_parameters(text: str, parameters: dict[str, str]) -> str:
+    rendered = text
+    for _ in range(4):
+        previous = rendered
+        for name, value in parameters.items():
+            rendered = re.sub(
+                rf"\{{\s*{re.escape(name)}\s*\}}",
+                value,
+                rendered,
+                flags=re.IGNORECASE,
+            )
+        def substitute_in_expression(match: re.Match[str]) -> str:
+            expression = match.group(1)
+            for name, value in parameters.items():
+                expression = re.sub(
+                    rf"(?<![A-Za-z0-9_.]){re.escape(name)}(?![A-Za-z0-9_.])",
+                    f"({value})",
+                    expression,
+                    flags=re.IGNORECASE,
+                )
+            return "{" + expression + "}"
+
+        rendered = re.sub(r"\{([^{}]+)\}", substitute_in_expression, rendered)
+        if rendered == previous:
+            break
+    return rendered
+
+
+def _expanded_refdes(refdes: str, prefix: str) -> str:
+    raw_suffix = re.sub(r"[^A-Za-z0-9]", "", f"{prefix}{refdes[1:]}")
+    ascii_letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    letters = "".join(char for char in raw_suffix if char in ascii_letters)[:14]
+    digits = "".join(char for char in raw_suffix if char.isdigit())[:4]
+    digest = str(
+        int(uuid.uuid5(uuid.NAMESPACE_OID, raw_suffix).hex[:8], 16) % 1_000_000
+    )
+    # Multisim normalizes names such as RXU1__DOM or RXU1DOM back to RXU1.
+    # Keeping all alphabetic characters before the final numeric suffix makes
+    # the generated reference stable across XML encode/open/export round-trips.
+    return f"{refdes[0]}{letters}{digits}{digest.zfill(6)}"
+
+
+def _expanded_node(
+    node: str,
+    pins: dict[str, str],
+    prefix: str,
+    global_nodes: frozenset[str],
+) -> str:
+    normalized, _ = _normalize_net(node)
+    if normalized == "0" or normalized in global_nodes:
+        return normalized
+    if normalized in pins:
+        return pins[normalized]
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", normalized)
+    return f"{prefix}__{safe}"
+
+
+def _rewrite_expression_nodes(
+    text: str,
+    pins: dict[str, str],
+    prefix: str,
+    global_nodes: frozenset[str],
+) -> str:
+    def replace(match: re.Match[str]) -> str:
+        function = match.group(1)
+        arguments = [item.strip() for item in match.group(2).split(",")]
+        if function.lower() == "v":
+            mapped = [
+                _expanded_node(item, pins, prefix, global_nodes)
+                for item in arguments
+            ]
+        else:
+            mapped = [_expanded_refdes(item, prefix) for item in arguments]
+        return f"{function}({','.join(mapped)})"
+
+    return re.sub(r"\b([VI])\(([^()]+)\)", replace, text, flags=re.IGNORECASE)
+
+
+_EXPANDABLE_NODE_COUNTS: dict[str, int] = {
+    "R": 2,
+    "C": 2,
+    "L": 2,
+    "V": 2,
+    "I": 2,
+    "E": 4,
+    "G": 4,
+    "F": 2,
+    "H": 2,
+    "B": 2,
+    "T": 4,
+    "D": 2,
+    "Q": 3,
+    "M": 4,
+    "S": 4,
+    "J": 3,
+    "Z": 3,
+    "W": 2,
+    "O": 4,
+    "U": 3,
+}
+
+
+def _expand_subcircuit_instance(
+    node_tokens: list[str],
+    instance_parameters: list[str],
+    definition: SubcircuitDefinition,
+    definitions: dict[str, SubcircuitDefinition],
+    *,
+    prefix: str,
+    global_parameters: dict[str, str],
+    global_nodes: frozenset[str],
+    function_names: frozenset[str],
+    depth: int = 0,
+) -> tuple[list[str] | None, str | None]:
+    if depth > 16:
+        return None, "subcircuit nesting exceeds 16 levels"
+    if len(node_tokens) != len(definition.pins):
+        return (
+            None,
+            f"{definition.name} expects {len(definition.pins)} pins, "
+            f"received {len(node_tokens)}",
+        )
+    parameters = dict(global_parameters)
+    parameters.update(definition.parameters)
+    parameters.update(_parse_parameter_assignments(instance_parameters))
+    pins = {
+        pin.lower(): _normalize_net(node)[0]
+        for pin, node in zip(definition.pins, node_tokens)
+    }
+    body = _logical_netlist_lines(definition.text)[1:-1]
+    expanded: list[str] = []
+    for raw_line in body:
+        line = raw_line.strip()
+        if not line or line.startswith(("*", ";", "#")):
+            continue
+        lowered = line.lower()
+        if lowered.startswith(".param"):
+            local = _parse_parameter_assignments(
+                _substitute_parameters(line, parameters).split()[1:]
+            )
+            parameters.update(local)
+            continue
+        if lowered.startswith(".model"):
+            continue
+        if lowered.startswith((".if", ".elseif", ".else", ".endif")):
+            return None, "conditional .if model blocks are not yet expandable"
+        if lowered.startswith("."):
+            return None, f"directive {line.split()[0]} is not expandable"
+
+        substituted = _substitute_parameters(line, parameters)
+        referenced_function = next(
+            (
+                name
+                for name in function_names
+                if re.search(
+                    rf"(?<![A-Za-z0-9_.]){re.escape(name)}\s*\(",
+                    substituted,
+                    flags=re.IGNORECASE,
+                )
+            ),
+            None,
+        )
+        if referenced_function:
+            return None, f".func call {referenced_function!r} is not expandable"
+        parts = substituted.split()
+        if not parts:
+            continue
+        kind = parts[0][0].upper()
+        if kind == "X":
+            child_nodes, child_model, child_parameters = _split_subcircuit_instance(
+                parts, definitions
+            )
+            child = definitions.get(child_model.lower())
+            if child is None:
+                return None, f"nested subcircuit {child_model!r} is not defined inline"
+            mapped_nodes = [
+                _expanded_node(node, pins, prefix, global_nodes)
+                for node in child_nodes
+            ]
+            child_prefix = re.sub(
+                r"[^A-Za-z0-9_]", "_", f"{prefix}__{parts[0]}"
+            )
+            child_lines, error = _expand_subcircuit_instance(
+                mapped_nodes,
+                child_parameters,
+                child,
+                definitions,
+                prefix=child_prefix,
+                global_parameters=global_parameters,
+                global_nodes=global_nodes,
+                function_names=function_names,
+                depth=depth + 1,
+            )
+            if child_lines is None:
+                return None, error
+            expanded.extend(child_lines)
+            continue
+        if kind == "K":
+            if len(parts) != 4:
+                return None, f"unsupported coupled-inductor record: {line}"
+            parts[0] = _expanded_refdes(parts[0], prefix)
+            parts[1] = _expanded_refdes(parts[1], prefix)
+            parts[2] = _expanded_refdes(parts[2], prefix)
+            expanded.append(" ".join(parts))
+            continue
+        node_count = _EXPANDABLE_NODE_COUNTS.get(kind)
+        if node_count is None or len(parts) < node_count + 2:
+            return None, f"unsupported subcircuit device record: {line}"
+        if kind != "B" and ("{" in substituted or "}" in substituted):
+            return None, f"parameter expression is not expandable: {line}"
+        parts[0] = _expanded_refdes(parts[0], prefix)
+        for index in range(1, node_count + 1):
+            parts[index] = _expanded_node(
+                parts[index], pins, prefix, global_nodes
+            )
+        if kind in {"F", "H", "W"} and len(parts) > 3:
+            parts[3] = _expanded_refdes(parts[3], prefix)
+        remainder = " ".join(parts[node_count + 1 :])
+        if remainder:
+            remainder = _rewrite_expression_nodes(
+                remainder, pins, prefix, global_nodes
+            )
+            parts = parts[: node_count + 1] + remainder.split()
+        expanded.append(" ".join(parts))
+    return expanded, None
+
+
+def _expand_top_level_subcircuits(
+    logical_lines: list[str], definitions: dict[str, SubcircuitDefinition]
+) -> tuple[list[str], list[dict[str, Any]], list[dict[str, str]]]:
+    global_parameters: dict[str, str] = {}
+    global_nodes: set[str] = set()
+    function_names: set[str] = set()
+    context_depth = 0
+    for line in logical_lines:
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if lowered.startswith(".subckt"):
+            context_depth += 1
+            continue
+        if lowered.startswith(".ends"):
+            context_depth = max(0, context_depth - 1)
+            continue
+        if context_depth:
+            continue
+        if lowered.startswith(".param"):
+            global_parameters.update(
+                _parse_parameter_assignments(stripped.split()[1:])
+            )
+        elif lowered.startswith(".global"):
+            global_nodes.update(
+                _normalize_net(item)[0] for item in stripped.split()[1:]
+            )
+        elif lowered.startswith(".func"):
+            match = re.match(
+                r"(?i)^\.func\s+([A-Za-z_][A-Za-z0-9_.]*)\s*\(",
+                stripped,
+            )
+            if match:
+                function_names.add(match.group(1).lower())
+
+    rendered: list[str] = []
+    expanded_records: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    in_subcircuit = 0
+    for line in logical_lines:
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if lowered.startswith(".subckt"):
+            in_subcircuit += 1
+            continue
+        if lowered.startswith(".ends"):
+            in_subcircuit = max(0, in_subcircuit - 1)
+            continue
+        if in_subcircuit:
+            continue
+        parts = stripped.split()
+        if parts and parts[0][0].upper() == "X":
+            nodes, model, parameters = _split_subcircuit_instance(parts, definitions)
+            definition = definitions.get(model.lower())
+            if definition is not None:
+                prefix = re.sub(r"[^A-Za-z0-9_]", "_", parts[0])
+                expanded, error = _expand_subcircuit_instance(
+                    nodes,
+                    parameters,
+                    definition,
+                    definitions,
+                    prefix=prefix,
+                    global_parameters=global_parameters,
+                    global_nodes=frozenset(global_nodes),
+                    function_names=frozenset(function_names),
+                )
+                if expanded is not None:
+                    rendered.extend(expanded)
+                    expanded_records.append(
+                        {
+                            "refdes": parts[0],
+                            "model": definition.name,
+                            "components": len(expanded),
+                        }
+                    )
+                    continue
+                failures.append(
+                    {"refdes": parts[0], "model": definition.name, "reason": str(error)}
+                )
+        rendered.append(stripped)
+    return rendered, expanded_records, failures
 
 
 def _load_template(name: str) -> ET.Element:
@@ -501,6 +914,13 @@ def parse_netlist(text: str) -> ParsedNetlist:
     text = expand_component_adapters(text)
     parsed = ParsedNetlist()
     logical_lines = _logical_netlist_lines(text)
+    subcircuits, subcircuit_library = _collect_subcircuits(logical_lines)
+    parsed.subcircuits = subcircuits
+    parse_lines, expanded_records, expansion_failures = _expand_top_level_subcircuits(
+        logical_lines, subcircuits
+    )
+    parsed.expanded_subcircuits = expanded_records
+    parsed.subcircuit_expansion_failures = expansion_failures
     model_types: dict[str, str] = {}
     model_definitions: dict[str, str] = {}
     for raw_line in logical_lines:
@@ -510,7 +930,7 @@ def parse_netlist(text: str) -> ParsedNetlist:
             model_definitions[parts[1].lower()] = " ".join(parts[2:])
 
     in_subcircuit = 0
-    for raw_line in logical_lines:
+    for raw_line in parse_lines:
         line = raw_line.strip()
         if not line or line.startswith(("*", ";")):
             continue
@@ -777,10 +1197,30 @@ def parse_netlist(text: str) -> ParsedNetlist:
                     model="OSCILLOSCOPE",
                 )
             )
-        elif kind == "X" and 4 <= len(parts) <= 18:
-            model = parts[-1]
-            nodes = [_normalize_net(item)[0] for item in parts[1:-1]]
-            if len(nodes) == 5 and model.upper() in {
+        elif kind == "X" and 4 <= len(parts) <= 66:
+            node_tokens, model, instance_parameters = _split_subcircuit_instance(
+                parts, subcircuits
+            )
+            nodes = [_normalize_net(item)[0] for item in node_tokens]
+            definition = subcircuits.get(model.lower())
+            if definition and len(nodes) != len(definition.pins):
+                parsed.unsupported.append(
+                    f"{line} [subcircuit {definition.name} expects "
+                    f"{len(definition.pins)} pins, received {len(nodes)}]"
+                )
+                continue
+            if definition and 2 <= len(nodes) <= 16:
+                parsed.components.append(
+                    ComponentSpec(
+                        kind="XSUBN",
+                        refdes=refdes,
+                        nodes=nodes,
+                        model=model,
+                        model_definition=subcircuit_library,
+                        parameters=instance_parameters,
+                    )
+                )
+            elif len(nodes) == 5 and model.upper() in {
                 "OPAMP5",
                 "IDEALOPAMP",
                 "LM741",
@@ -793,6 +1233,7 @@ def parse_netlist(text: str) -> ParsedNetlist:
                         refdes=refdes,
                         nodes=nodes,
                         model=model,
+                        parameters=instance_parameters,
                     )
                 )
             elif 2 <= len(nodes) <= 5:
@@ -802,6 +1243,10 @@ def parse_netlist(text: str) -> ParsedNetlist:
                         refdes=refdes,
                         nodes=nodes,
                         model=model,
+                        model_definition=(
+                            subcircuit_library if definition else None
+                        ),
+                        parameters=instance_parameters,
                     )
                 )
             elif 6 <= len(nodes) <= 16:
@@ -811,6 +1256,10 @@ def parse_netlist(text: str) -> ParsedNetlist:
                         refdes=refdes,
                         nodes=nodes,
                         model=model,
+                        model_definition=(
+                            subcircuit_library if definition else None
+                        ),
+                        parameters=instance_parameters,
                     )
                 )
             else:
@@ -1055,9 +1504,9 @@ def _shift_pin_geometry(pin_item: ET.Element, dx: float, dy: float) -> None:
 def _make_variable_subcircuit_templates(
     pin_count: int,
 ) -> tuple[ET.Element, ET.Element, list[ET.Element]]:
-    """Create a rectangular native carrier with 6–16 real schematic pins."""
-    if not 6 <= pin_count <= 16:
-        raise ValueError("Variable subcircuit symbols require 6 to 16 pins")
+    """Create a rectangular native X-model carrier with 2–16 real pins."""
+    if not 2 <= pin_count <= 16:
+        raise ValueError("Variable subcircuit symbols require 2 to 16 pins")
     # The resistor-network carrier has a genuine 16-terminal X-model interface.
     # Multisim rejects merely appending ports to a fixed five-terminal X model.
     element_item = _deepcopy(_load_template("xsub16_element.xml"))
@@ -1386,6 +1835,9 @@ def _configure_component_semantics(
             f"{terminals_by_kind.get(spec.kind, ' '.join(f'%t{name}' for name in XSUB16_TERMINAL_NAMES[:len(spec.nodes)]))} "
             f"{model}"
         )
+        instance_parameters = " ".join(spec.parameters).strip()
+        if instance_parameters:
+            rendered += f" {instance_parameters}"
         template.set("String", _asc(rendered))
         # Native component records cache a second copy of the template in a
         # CiaCollString. Keeping it stale makes variable-pin X carriers enumerate
@@ -1967,7 +2419,7 @@ def build_schematic(
     if parsed.grounded:
         specs.append(ComponentSpec(kind="GND", refdes="0", nodes=["0"]))
 
-    grid_columns = min(4, max(2, math.ceil(math.sqrt(max(1, len(specs))))))
+    grid_columns = min(6, max(2, math.ceil(math.sqrt(max(1, len(specs))))))
     grid_origin_x = 36
     grid_origin_y = 117
     grid_step_x = 207
@@ -2210,7 +2662,16 @@ def build_schematic(
         str(Path(output_path).with_suffix(".ms14")),
     )
 
-    model_warnings: list[str] = []
+    model_warnings: list[str] = [
+        f"{item['refdes']}: inline subcircuit {item['model']!r} was expanded into "
+        f"{item['components']} editable primitive components"
+        for item in parsed.expanded_subcircuits
+    ]
+    model_warnings.extend(
+        f"{item['refdes']}: inline subcircuit {item['model']!r} could not be "
+        f"expanded for editable simulation: {item['reason']}"
+        for item in parsed.subcircuit_expansion_failures
+    )
     for spec in parsed.components:
         aliases = NATIVE_MODEL_ALIASES.get(spec.kind)
         if (
@@ -2243,11 +2704,18 @@ def build_schematic(
                 f"{model_note}"
             )
         if spec.kind.startswith("XSUB"):
-            model_warnings.append(
-                f"{spec.refdes}: generic {len(spec.nodes)}-terminal subcircuit "
-                f"{spec.model!r} is shown as a carrier block; its model body is "
-                "used by command-engine simulation but is not embedded in the editable symbol"
-            )
+            if spec.model_definition:
+                model_warnings.append(
+                    f"{spec.refdes}: generic {len(spec.nodes)}-terminal subcircuit "
+                    f"{spec.model!r} is shown as a carrier block; its model body is "
+                    "retained only for command-engine simulation"
+                )
+            else:
+                model_warnings.append(
+                    f"{spec.refdes}: generic {len(spec.nodes)}-terminal subcircuit "
+                    f"{spec.model!r} is shown as a carrier block; its model body is "
+                    "not present in the source netlist"
+                )
         if spec.kind in set(DIGITAL_MODEL_KINDS.values()):
             model_warnings.append(
                 f"{spec.refdes}: {spec.kind} uses a native Multisim digital model; "
@@ -2276,6 +2744,15 @@ def build_schematic(
     tree = ET.ElementTree(root)
     tree.write(str(output_path), encoding="utf-8", xml_declaration=True)
 
+    if parsed.subcircuit_expansion_failures:
+        editable_model_status = (
+            "partial" if parsed.expanded_subcircuits else "carrier_only"
+        )
+    elif parsed.expanded_subcircuits:
+        editable_model_status = "complete"
+    else:
+        editable_model_status = "not_applicable"
+
     return {
         "xml": str(output_path),
         "components": [
@@ -2291,6 +2768,17 @@ def build_schematic(
         ],
         "nets": sorted(node_records),
         "grounded": parsed.grounded,
+        "subcircuits": [
+            {"name": item.name, "pins": list(item.pins)}
+            for item in parsed.subcircuits.values()
+        ],
+        "expanded_subcircuits": parsed.expanded_subcircuits,
+        "subcircuit_expansion_failures": parsed.subcircuit_expansion_failures,
+        "editable_model_coverage": {
+            "status": editable_model_status,
+            "expanded_instances": len(parsed.expanded_subcircuits),
+            "carrier_only_instances": len(parsed.subcircuit_expansion_failures),
+        },
         "unsupported": parsed.unsupported,
         "model_warnings": model_warnings,
         "probes": probes,
@@ -2314,6 +2802,7 @@ __all__ = [
     "ComponentDefinition",
     "ComponentSpec",
     "ParsedNetlist",
+    "SubcircuitDefinition",
     "build_schematic",
     "parse_netlist",
     "parse_spice_value",

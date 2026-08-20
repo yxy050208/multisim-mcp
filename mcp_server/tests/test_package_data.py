@@ -310,7 +310,6 @@ U1 in out 0 UMOD L=1 N=8
 
     def test_builder_registers_native_oscilloscope_and_strips_it_for_spice(self) -> None:
         import tempfile
-        import xml.etree.ElementTree as ET
         from pathlib import Path
 
         netlist = """\
@@ -408,14 +407,134 @@ R99 p n 1k
             generated = output.read_text(encoding="utf-8")
         self.assertEqual(
             [item["kind"] for item in result["components"]],
-            ["XSUB2", "XSUB3", "XSUB4", "XSUB5"],
+            ["R", "XSUB3", "XSUB4", "XSUB5"],
         )
         self.assertEqual(result["unsupported"], [])
         self.assertEqual(len(result["model_warnings"]), 4)
-        self.assertIn("x%p %t1 %t2 TWO_PIN", generated)
+        self.assertTrue(result["components"][0]["refdes"].startswith("RX"))
         self.assertIn("x%p %tC %tB %tE THREE_PIN", generated)
         self.assertIn("x%p %tD %tG %tS %tSUB FOUR_PIN", generated)
         self.assertIn("x%p %tIN+ %tIN- %tVS+ %tVS- %tOUT FIVE_PIN", generated)
+
+    def test_builder_expands_inline_subcircuit_library_and_instance_parameters(self) -> None:
+        import tempfile
+        import xml.etree.ElementTree as ET
+        from pathlib import Path
+
+        netlist = """\
+V1 in 0 1
+XU1 in out GAIN PARAMS: SCALE=2
+XU2 out out2 GAIN SCALE=3
+.param GLOBAL_GAIN=10
+.global VREF
+.model DCLAMP D(IS=1n)
+.subckt CHILD a b
+D1 a b DCLAMP
+.ends CHILD
+.subckt GAIN in out PARAMS: SCALE=1
+XCLAMP in mid CHILD
+E1 out 0 in 0 {SCALE}
+B1 shaped 0 V={SCALE*V(in)}
+R1 shaped VREF {GLOBAL_GAIN}
+.ends GAIN
+.end
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "inline-library.xml"
+            result = build_schematic(netlist, output, probe_nets=[])
+            generated = output.read_text(encoding="utf-8")
+
+        self.assertEqual(
+            result["subcircuits"],
+            [
+                {"name": "CHILD", "pins": ["a", "b"]},
+                {"name": "GAIN", "pins": ["in", "out"]},
+            ],
+        )
+        self.assertEqual(
+            result["expanded_subcircuits"],
+            [
+                {"refdes": "XU1", "model": "GAIN", "components": 4},
+                {"refdes": "XU2", "model": "GAIN", "components": 4},
+            ],
+        )
+        self.assertEqual(result["subcircuit_expansion_failures"], [])
+        self.assertEqual(
+            result["editable_model_coverage"],
+            {
+                "status": "complete",
+                "expanded_instances": 2,
+                "carrier_only_instances": 0,
+            },
+        )
+        self.assertFalse(
+            any(item["kind"].startswith("XSUB") for item in result["components"])
+        )
+        gains = [
+            item["value"]
+            for item in result["components"]
+            if item["kind"] == "E"
+        ]
+        self.assertEqual(gains, ["2", "3"])
+        behavioral_models = [
+            item["model"]
+            for item in result["components"]
+            if item["kind"] == "BV"
+        ]
+        self.assertIn("V={(2)*V(in)}", behavioral_models)
+        self.assertIn("V={(3)*V(out)}", behavioral_models)
+        self.assertEqual(
+            [item["value"] for item in result["components"] if item["kind"] == "R"],
+            ["10", "10"],
+        )
+        self.assertIn("vref", result["nets"])
+        self.assertNotIn("xu1__vref", result["nets"])
+        self.assertGreaterEqual(generated.count("DXUXCLAMP"), 2)
+
+    def test_builder_marks_function_dependent_macro_as_carrier_only(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        netlist = """\
+.func softclip(x) {limit(x,-1,1)}
+XU1 in out AMP
+.subckt AMP in out
+B1 out 0 V={softclip(V(in))}
+.ends AMP
+.end
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_schematic(
+                netlist, Path(tmp) / "function-macro.xml", probe_nets=[]
+            )
+
+        self.assertEqual(
+            [item["kind"] for item in result["components"]], ["XSUBN"]
+        )
+        self.assertEqual(result["editable_model_coverage"]["status"], "carrier_only")
+        self.assertIn(
+            ".func call 'softclip' is not expandable",
+            result["subcircuit_expansion_failures"][0]["reason"],
+        )
+
+    def test_builder_rejects_subcircuit_pin_count_mismatch(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        netlist = """\
+XU1 a b c TWO_PIN
+.subckt TWO_PIN p n
+R1 p n 1k
+.ends TWO_PIN
+.end
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_schematic(
+                netlist, Path(tmp) / "pin-mismatch.xml", probe_nets=[]
+            )
+        self.assertEqual(result["components"], [])
+        self.assertIn("expects 2 pins, received 3", result["unsupported"][0])
+        self.assertEqual(result["editable_model_coverage"]["status"], "carrier_only")
 
     def test_builder_supports_variable_six_to_sixteen_pin_subcircuits(self) -> None:
         import tempfile

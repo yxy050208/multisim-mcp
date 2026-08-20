@@ -17,15 +17,22 @@ _SOURCE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.:$-]*$")
 _SAFE_NETLIST_DIRECTIVES = frozenset(
     {
         ".end",
+        ".else",
+        ".elseif",
         ".ends",
+        ".endif",
+        ".func",
         ".global",
         ".ic",
+        ".if",
         ".model",
         ".nodeset",
         ".options",
         ".param",
+        ".protect",
         ".subckt",
         ".temp",
+        ".unprotect",
     }
 )
 _SUSPICIOUS_NETLIST_TOKENS = (
@@ -121,7 +128,9 @@ def validate_spice_netlist(netlist: str) -> None:
     MOSFET, source, and subcircuit experiments. Analysis directives belong in
     the separately validated command argument.
     """
-    in_subcircuit = 0
+    subcircuit_stack: list[str] = []
+    subcircuit_names: set[str] = set()
+    conditional_depth = 0
     for line_number, raw_line in enumerate(netlist.splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith(("*", ";", "#")):
@@ -142,13 +151,39 @@ def validate_spice_netlist(netlist: str) -> None:
                 f"surface (line {line_number})"
             )
         if directive == ".subckt":
-            in_subcircuit += 1
+            parts = line.split()
+            if len(parts) < 2 or not _SOURCE_NAME.fullmatch(parts[1]):
+                raise ValueError(f"Invalid .subckt name on line {line_number}")
+            name = parts[1]
+            normalized_name = name.lower()
+            if normalized_name in subcircuit_names:
+                raise ValueError(
+                    f"Duplicate .subckt name {name!r} on line {line_number}"
+                )
+            subcircuit_names.add(normalized_name)
+            subcircuit_stack.append(name)
         elif directive == ".ends":
-            in_subcircuit -= 1
-            if in_subcircuit < 0:
+            if not subcircuit_stack:
                 raise ValueError(f"Unmatched .ends on line {line_number}")
-    if in_subcircuit:
-        raise ValueError("Unclosed .subckt block")
+            expected = subcircuit_stack.pop()
+            parts = line.split()
+            if len(parts) > 1 and parts[1].lower() != expected.lower():
+                raise ValueError(
+                    f".ends name {parts[1]!r} does not match {expected!r} "
+                    f"on line {line_number}"
+                )
+        elif directive == ".if":
+            conditional_depth += 1
+        elif directive in {".elseif", ".else"} and conditional_depth == 0:
+            raise ValueError(f"Unmatched {directive} on line {line_number}")
+        elif directive == ".endif":
+            conditional_depth -= 1
+            if conditional_depth < 0:
+                raise ValueError(f"Unmatched .endif on line {line_number}")
+    if subcircuit_stack:
+        raise ValueError(f"Unclosed .subckt block: {subcircuit_stack[-1]}")
+    if conditional_depth:
+        raise ValueError("Unclosed .if block")
 
 
 __all__ = [

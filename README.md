@@ -47,8 +47,8 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 1.0 还加入了可计算的设计验收与批量实验：
 
-- `run_verified_circuit_experiment` 接收版本化 `ExperimentSpec`，自动测量增益、
-  带宽、截止频率、上升时间、过冲、纹波、功耗等指标，并把逐项
+- `run_verified_circuit_experiment` 接收版本化 `ExperimentSpec`，自动测量时域频率、
+  THD、增益、带宽、截止频率、上升时间、过冲、纹波、功耗等指标，并把逐项
   `pass` / `fail` / `unverified` 结论写入 `verification.json` 和实验报告。
 - `measure_experiment` 与 `verify_experiment_requirements` 可对已注册实验重新计算
   指标；信号或证据缺失时只返回 `unverified`，不会猜测结果。
@@ -121,6 +121,9 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
   K/T/O/U 耦合与传输线、二极管、NPN/PNP、NMOS/PMOS、JFET/MESFET、
   电压/电流控制开关、五端运放及 2–16 端通用 X 子电路；扩展族暂用通用载体符号。生成后会通过
   Multisim 反向网表确认器件没有被静默丢弃。
+- 直接粘贴的厂商 `.subckt` 宏模型可递归展开为可编辑原生器件，保留嵌套依赖、
+  局部节点和 `PARAMS:` 参数；`editable_model_coverage` 会区分完整展开、部分展开和
+  仅载体状态，详见 [`docs/VENDOR_SPICE_MODELS.md`](docs/VENDOR_SPICE_MODELS.md)。
 - 已加入原生 NOT/AND/OR/NAND/NOR/XOR/XNOR 和 JK 触发器预览；
   原理图打开/回导、组合逻辑真值表和 JK 翻转时序均已真实验证。
 - 支持原生 XFG 函数发生器和四通道 XSC 示波器状态，实验波形同时导出为

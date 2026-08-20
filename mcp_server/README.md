@@ -75,6 +75,10 @@ Experimental:
   NPN/PNP BJT, NMOS/PMOS, JFET/MESFET, voltage switches, five-terminal op-amps,
   and generic two-to-sixteen-terminal X subcircuits. Extended families currently
   use verified carrier symbols pending dedicated artwork.
+  Compatible inline vendor `.subckt` models are recursively expanded into
+  editable primitives with nested dependencies and instance parameters retained.
+  The result reports `editable_model_coverage`; conditional/proprietary records
+  that cannot be expanded remain explicit carrier-only evidence.
   Native NOT/AND/OR/NAND/NOR/XOR/XNOR and JK flip-flop symbols are available as
   a preview; their open/export and authoritative timing-data paths are verified.
   Native XSC oscilloscope and configurable XFG function-generator state are

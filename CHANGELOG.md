@@ -6,6 +6,14 @@
 
 ### 中文
 
+- 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
+  窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
+  `verification.json` 与正式实验报告。
+- 新增课程设计反馈记录，明确等效模型/厂商模型证据边界、联动频率冲突和自动原理图
+  布局限制，避免把等效模型 PASS 误报为实物验收完成。
+- 新增内联厂商 `.subckt` 宏模型递归展开：保留嵌套依赖、局部节点、模型引用和
+  `PARAMS:` 覆盖，生成 Multisim 稳定参考编号，并以 `editable_model_coverage`
+  区分完整、部分和仅载体证据；两级 LM324 真实事务回归通过。
 - 新增 2.0 综合路线图，确定先平台化、再纠错优化、开放仿真后端、可视化工作台和
   KiCad 工程输出的开发顺序。
 - 新增 DeepSeek 与官方 DeepSeek Harness 兼容说明，包括凭据边界、工具规模、
@@ -24,6 +32,16 @@
 
 ### English
 
+- Added time-domain `frequency` and `thd` verification metrics after a real
+  five-output waveform-generator regression, including explicit measurement
+  windows, edge/threshold/hysteresis controls, minimum cycles, fundamental
+  frequency, and harmonic count.
+- Documented the evidence boundary between equivalent and vendor models plus
+  linked-range and automatic-schematic-layout limitations found by the course
+  design workflow.
+- Added recursive editable expansion for compatible inline vendor `.subckt`
+  models, including nested dependencies, scoped nodes, instance parameters,
+  stable Multisim references, and explicit editable-model coverage status.
 - Added the post-1.0 platform, optimization, multi-EDA, and visual-workbench roadmap.
 - Documented the DeepSeek and official DeepSeek Harness compatibility baseline.
 - Added a `deepseek-harness` client target that renders a validated Cordis MCP

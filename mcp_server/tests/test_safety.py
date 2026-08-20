@@ -48,6 +48,38 @@ R1 a b 1k
 """
         validate_spice_netlist(netlist)
 
+    def test_accepts_inline_vendor_model_conditionals_and_functions(self) -> None:
+        netlist = """\
+.param MODE=1
+.func softclip(x) {limit(x,-1,1)}
+.protect
+.subckt AMP in out PARAMS: GAIN=10
+.if (MODE=1)
+E1 out 0 in 0 {GAIN}
+.else
+E1 out 0 in 0 1
+.endif
+.ends AMP
+.unprotect
+X1 in out AMP PARAMS: GAIN=2
+.end
+"""
+        validate_spice_netlist(netlist)
+
+    def test_rejects_malformed_subcircuit_and_conditional_blocks(self) -> None:
+        for netlist, message in (
+            (".subckt AMP a b\n.ends OTHER\n", "does not match"),
+            (
+                ".subckt AMP a b\n.ends AMP\n.subckt amp a b\n.ends amp\n",
+                "Duplicate",
+            ),
+            (".else\n", "Unmatched"),
+            (".if (1)\n", "Unclosed"),
+        ):
+            with self.subTest(netlist=netlist):
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_spice_netlist(netlist)
+
     def test_rejects_control_and_external_file_directives(self) -> None:
         for directive in (
             ".control\nshell whoami\n.endc",

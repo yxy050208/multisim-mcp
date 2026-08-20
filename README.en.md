@@ -44,7 +44,8 @@ down the MCP frontend, and interrupted jobs are safely requeued after restart.
 Version 1.0 adds computable design verification and batch experiments:
 
 - `run_verified_circuit_experiment` accepts a versioned `ExperimentSpec`,
-  measures gain, bandwidth, cutoff, rise time, overshoot, ripple, and power,
+  measures time-domain frequency, THD, gain, bandwidth, cutoff, rise time,
+  overshoot, ripple, and power,
   then persists per-requirement `pass`, `fail`, or `unverified` evidence in
   `verification.json` and the Markdown report.
 - `measure_experiment` and `verify_experiment_requirements` recompute metrics
@@ -91,10 +92,15 @@ Experimental but verified:
 
 - editable R/L/C, source, B/E/F/G/H, K/T/O/U, semiconductor, switch,
   five-terminal op-amp, and 2-16-terminal generic subcircuit schematics;
+- recursive editable expansion for compatible inline vendor `.subckt` models,
+  including nested dependencies, local nodes, and `PARAMS:` overrides, with
+  machine-readable complete/partial/carrier-only coverage;
 - NOT/AND/OR/NAND/NOR/XOR/XNOR and JK preview symbols with real timing data;
 - native XFG function-generator and four-channel XSC oscilloscope state.
 
 See [component coverage](docs/COMPONENT_COVERAGE.md) for precise boundaries.
+See [vendor macro-model compatibility](docs/VENDOR_SPICE_MODELS.md) for the
+editable-expansion and safe-file boundary.
 
 ## Public-release asset policy
 

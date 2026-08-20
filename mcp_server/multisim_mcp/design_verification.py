@@ -58,6 +58,8 @@ METRICS: Final = frozenset(
         "mean",
         "rms",
         "peak_to_peak",
+        "frequency",
+        "thd",
         "gain",
         "cutoff_frequency",
         "bandwidth",
@@ -92,6 +94,17 @@ _METRIC_PARAMETERS: Final[dict[str, frozenset[str]]] = {
     "mean": _COMMON_PARAMETERS,
     "rms": _COMMON_PARAMETERS,
     "peak_to_peak": _COMMON_PARAMETERS,
+    "frequency": _COMMON_PARAMETERS
+    | {"threshold", "edge", "hysteresis", "min_cycles"},
+    "thd": _COMMON_PARAMETERS
+    | {
+        "fundamental_frequency",
+        "harmonics",
+        "threshold",
+        "edge",
+        "hysteresis",
+        "min_cycles",
+    },
     "gain": _COMMON_PARAMETERS | {"gain_mode", "decibels"},
     "cutoff_frequency": _COMMON_PARAMETERS | {"threshold_db"},
     "bandwidth": _COMMON_PARAMETERS | {"threshold_db", "bandwidth_mode"},
@@ -157,6 +170,57 @@ def validate_measurement_requests(
             )
         if "decibels" in parameters and not isinstance(parameters["decibels"], bool):
             raise ValueError(f"{identifier}.parameters.decibels must be a boolean")
+        if metric in {"frequency", "thd"}:
+            edge = str(parameters.get("edge", "rising")).lower()
+            if edge not in {"rising", "falling"}:
+                raise ValueError(
+                    f"{identifier}.parameters.edge must be rising or falling"
+                )
+            if "threshold" in parameters:
+                _finite_number(
+                    parameters["threshold"], f"{identifier}.parameters.threshold"
+                )
+            if "hysteresis" in parameters:
+                hysteresis = _finite_number(
+                    parameters["hysteresis"],
+                    f"{identifier}.parameters.hysteresis",
+                )
+                if hysteresis < 0:
+                    raise ValueError(
+                        f"{identifier}.parameters.hysteresis must not be negative"
+                    )
+            if "min_cycles" in parameters:
+                min_cycles = parameters["min_cycles"]
+                if (
+                    isinstance(min_cycles, bool)
+                    or not isinstance(min_cycles, int)
+                    or not 1 <= min_cycles <= 10_000
+                ):
+                    raise ValueError(
+                        f"{identifier}.parameters.min_cycles must be an integer "
+                        "between 1 and 10000"
+                    )
+        if metric == "thd":
+            if "fundamental_frequency" in parameters:
+                fundamental = _finite_number(
+                    parameters["fundamental_frequency"],
+                    f"{identifier}.parameters.fundamental_frequency",
+                )
+                if fundamental <= 0:
+                    raise ValueError(
+                        f"{identifier}.parameters.fundamental_frequency must be positive"
+                    )
+            if "harmonics" in parameters:
+                harmonics = parameters["harmonics"]
+                if (
+                    isinstance(harmonics, bool)
+                    or not isinstance(harmonics, int)
+                    or not 2 <= harmonics <= 50
+                ):
+                    raise ValueError(
+                        f"{identifier}.parameters.harmonics must be an integer "
+                        "between 2 and 50"
+                    )
         if requirements:
             operator = str(item.get("operator", "")).lower()
             if operator not in OPERATORS:
@@ -324,6 +388,115 @@ def _last_rising_crossing_before(
     return None
 
 
+def _threshold_crossings(
+    x: list[float],
+    y: list[float],
+    threshold: float,
+    *,
+    edge: str,
+    hysteresis: float,
+) -> list[float]:
+    """Return interpolated Schmitt-style threshold crossings."""
+    half_band = hysteresis / 2.0
+    low, high = threshold - half_band, threshold + half_band
+    rising = edge == "rising"
+    armed = y[0] <= low if rising else y[0] >= high
+    crossings: list[float] = []
+    for index in range(1, len(y)):
+        before, after = y[index - 1], y[index]
+        if not armed:
+            if rising and min(before, after) <= low:
+                armed = True
+            elif not rising and max(before, after) >= high:
+                armed = True
+        crossed = before < threshold <= after if rising else before > threshold >= after
+        if armed and crossed:
+            if math.isclose(before, after):
+                crossing = x[index - 1]
+            else:
+                fraction = (threshold - before) / (after - before)
+                crossing = x[index - 1] + fraction * (x[index] - x[index - 1])
+            crossings.append(crossing)
+            armed = False
+    return crossings
+
+
+def _periodic_crossings(
+    x: list[float], y: list[float], parameters: dict[str, Any]
+) -> tuple[list[float] | None, dict[str, Any], str | None]:
+    if len(y) < 4:
+        return None, {}, "frequency measurement requires at least 4 samples"
+    if any(after <= before for before, after in zip(x, x[1:])):
+        return None, {}, "frequency measurement requires a strictly increasing x signal"
+    low, high = min(y), max(y)
+    span = high - low
+    if math.isclose(span, 0.0, abs_tol=1e-30):
+        return None, {}, "frequency measurement signal has zero amplitude"
+    threshold = _finite_number(
+        parameters.get("threshold", (low + high) / 2.0), "threshold"
+    )
+    hysteresis = _finite_number(parameters.get("hysteresis", 0.0), "hysteresis")
+    if hysteresis < 0:
+        return None, {}, "hysteresis must not be negative"
+    if not low < threshold < high:
+        return None, {}, "frequency threshold must lie inside the signal range"
+    if hysteresis >= 2.0 * min(threshold - low, high - threshold):
+        return None, {}, "frequency hysteresis band must lie inside the signal range"
+    edge = str(parameters.get("edge", "rising")).lower()
+    crossings = _threshold_crossings(
+        x, y, threshold, edge=edge, hysteresis=hysteresis
+    )
+    minimum = int(parameters.get("min_cycles", 2))
+    if len(crossings) < minimum + 1:
+        return (
+            None,
+            {"crossing_count": len(crossings)},
+            f"frequency measurement requires at least {minimum + 1} {edge} crossings",
+        )
+    return (
+        crossings,
+        {
+            "threshold": threshold,
+            "edge": edge,
+            "hysteresis": hysteresis,
+            "crossing_count": len(crossings),
+        },
+        None,
+    )
+
+
+def _trapezoid_integral(x: list[float], values: list[float]) -> float:
+    return sum(
+        (x[index] - x[index - 1])
+        * (values[index] + values[index - 1])
+        / 2.0
+        for index in range(1, len(x))
+    )
+
+
+def _harmonic_amplitudes(
+    x: list[float], y: list[float], fundamental: float, harmonics: int
+) -> tuple[float, list[float]]:
+    duration = x[-1] - x[0]
+    mean = _trapezoid_integral(x, y) / duration
+    centered = [sample - mean for sample in y]
+    amplitudes: list[float] = []
+    for harmonic in range(1, harmonics + 1):
+        omega = 2.0 * math.pi * fundamental * harmonic
+        cosine = [
+            sample * math.cos(omega * (time - x[0]))
+            for time, sample in zip(x, centered)
+        ]
+        sine = [
+            sample * math.sin(omega * (time - x[0]))
+            for time, sample in zip(x, centered)
+        ]
+        a = 2.0 * _trapezoid_integral(x, cosine) / duration
+        b = 2.0 * _trapezoid_integral(x, sine) / duration
+        amplitudes.append(math.hypot(a, b))
+    return mean, amplitudes
+
+
 def _measurement_failure(item: dict[str, Any], reason: str) -> dict[str, Any]:
     return {
         "id": item["id"],
@@ -378,6 +551,70 @@ def measure_one(parsed: dict[str, Any], request: MeasurementRequest) -> dict[str
             value = math.sqrt(sum(sample * sample for sample in y) / len(y))
         else:
             value = max(y) - min(y)
+    elif metric == "frequency":
+        crossings, crossing_details, error = _periodic_crossings(x, y, parameters)
+        if crossings is None:
+            return _measurement_failure(item, str(error))
+        periods = [
+            after - before for before, after in zip(crossings, crossings[1:])
+        ]
+        ordered = sorted(periods)
+        middle = len(ordered) // 2
+        period = (
+            ordered[middle]
+            if len(ordered) % 2
+            else (ordered[middle - 1] + ordered[middle]) / 2.0
+        )
+        if period <= 0:
+            return _measurement_failure(item, "frequency period is not positive")
+        value = 1.0 / period
+        default_unit = "Hz"
+        details.update(
+            crossing_details,
+            period=period,
+            cycles=len(periods),
+            first_crossing=crossings[0],
+            last_crossing=crossings[-1],
+        )
+    elif metric == "thd":
+        crossings, crossing_details, error = _periodic_crossings(x, y, parameters)
+        if crossings is None:
+            return _measurement_failure(item, str(error))
+        start, end = crossings[0], crossings[-1]
+        indices = [index for index, time in enumerate(x) if start <= time <= end]
+        if len(indices) < 8:
+            return _measurement_failure(item, "THD window contains fewer than 8 samples")
+        harmonic_x = [x[index] for index in indices]
+        harmonic_y = [y[index] for index in indices]
+        cycle_count = len(crossings) - 1
+        estimated_fundamental = cycle_count / (end - start)
+        fundamental = _finite_number(
+            parameters.get("fundamental_frequency", estimated_fundamental),
+            "fundamental_frequency",
+        )
+        harmonics = int(parameters.get("harmonics", 10))
+        mean, amplitudes = _harmonic_amplitudes(
+            harmonic_x, harmonic_y, fundamental, harmonics
+        )
+        if math.isclose(amplitudes[0], 0.0, abs_tol=1e-30):
+            return _measurement_failure(item, "THD fundamental amplitude is zero")
+        value = (
+            math.sqrt(sum(amplitude * amplitude for amplitude in amplitudes[1:]))
+            / amplitudes[0]
+            * 100.0
+        )
+        default_unit = "%"
+        details.update(
+            crossing_details,
+            fundamental_frequency=fundamental,
+            estimated_fundamental_frequency=estimated_fundamental,
+            harmonics=harmonics,
+            harmonic_peak_amplitudes=amplitudes,
+            dc_component=mean,
+            cycles=cycle_count,
+            analysis_start=harmonic_x[0],
+            analysis_end=harmonic_x[-1],
+        )
     elif metric == "value_at":
         if "at_x" not in parameters:
             return _measurement_failure(item, "value_at requires parameters.at_x")
