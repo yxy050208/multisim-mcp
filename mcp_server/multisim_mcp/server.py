@@ -57,6 +57,10 @@ from multisim_mcp.eda_backend import (
 )
 from multisim_mcp.eda_service import EdaApplicationService
 from multisim_mcp.experiment_sweep import plan_experiment_sweep as expand_sweep
+from multisim_mcp.experiment_service import (
+    ExperimentApplicationService,
+    ExperimentRequest,
+)
 from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
@@ -1792,7 +1796,7 @@ def _run_circuit_experiment_unlocked(
         shutil.rmtree(stage, ignore_errors=True)
 
 
-def _run_circuit_experiment_impl(
+def _run_circuit_experiment_transaction(
     netlist: str,
     commands: str,
     output_dir: str,
@@ -1827,6 +1831,52 @@ def _run_circuit_experiment_impl(
             requirements,
             theoretical_values,
         )
+
+
+def _experiment_application_service() -> ExperimentApplicationService:
+    """Build the experiment service around the current transaction executor."""
+    return ExperimentApplicationService(_run_circuit_experiment_transaction)
+
+
+def _run_circuit_experiment_impl(
+    netlist: str,
+    commands: str,
+    output_dir: str,
+    title: str = "Multisim experiment",
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+    checkpoint: Callable[[str, int, str], None] | None = None,
+    cancel_requested: Callable[[], bool] | None = None,
+    owner: str | None = None,
+    requirements: list[DesignRequirement] | None = None,
+    theoretical_values: dict[str, float] | None = None,
+) -> ExperimentResult | VerifiedExperimentResult:
+    """Route one complete experiment through the transport-neutral service."""
+    design = circuit_design_from_spice(
+        netlist,
+        title=title.strip() or "Multisim experiment",
+    )
+    request = ExperimentRequest(
+        design=design,
+        commands=commands,
+        output_directory=output_dir,
+        title=title,
+        timeout_seconds=timeout,
+        max_points=max_points,
+        overwrite=overwrite,
+        owner=owner,
+        requirements=(tuple(requirements) if requirements is not None else None),
+        theoretical_values=(
+            theoretical_values if theoretical_values is not None else {}
+        ),
+    )
+    result = _experiment_application_service().run(
+        request,
+        checkpoint=checkpoint,
+        cancel_requested=cancel_requested,
+    )
+    return result  # type: ignore[return-value]
 
 
 @mcp.tool()

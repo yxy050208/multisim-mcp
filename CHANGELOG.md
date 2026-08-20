@@ -16,6 +16,9 @@
 - `run_spice_netlist` 已接入同一应用服务，保留可选输出目录、超时、返回点数、覆盖和
   危险命令双重授权契约；产物清单会去重临时/发布副本，并通过真实 10 V 分压器工作点
   回归得到 5 V 输出。
+- 新增传输无关 `ExperimentRequest` 与 `ExperimentApplicationService`，同步、验证和
+  持久 worker 实验共用可注入事务入口；真实瞬态门禁生成 453 点数据、15 个完整文件
+  和 15 个安全 Resource 句柄，同时保持 MCP 结果与 job 存储格式兼容。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -53,6 +56,9 @@
 - Routed `run_spice_netlist` through the same application service while
   preserving optional publication, timeout, point-limit, overwrite, and unsafe
   command gates; a real 10 V divider operating-point regression produced 5 V.
+- Added transport-neutral `ExperimentRequest` and `ExperimentApplicationService`
+  boundaries shared by synchronous, verified, and durable-worker experiments;
+  a real transient gate produced 453 points and the complete 15-file transaction.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

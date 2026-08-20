@@ -75,6 +75,46 @@ class UnsafeToolGateTest(unittest.TestCase):
 
 
 class EdaCompatibilityBridgeTest(unittest.TestCase):
+    def test_complete_experiment_uses_application_service_without_result_changes(self) -> None:
+        netlist = "V1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.end\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "complete experiment"
+            native_result = {
+                "success": True,
+                "experiment_id": "exp-compatibility",
+                "resources": {"report": "multisim://experiments/test/report"},
+                "schematic": {"success": True},
+                "simulation": {"success": True},
+                "report": str(output / "report.md"),
+                "plot": str(output / "plot.svg"),
+                "output_dir": str(output.resolve()),
+            }
+            with patch.object(
+                server,
+                "_run_circuit_experiment_transaction",
+                return_value=native_result,
+            ) as executor:
+                result = server.run_circuit_experiment(
+                    netlist,
+                    "\n op \n",
+                    str(output),
+                    title="Compatibility experiment",
+                    timeout=45,
+                    max_points=321,
+                    overwrite=True,
+                )
+
+        self.assertEqual(result, native_result)
+        kwargs = executor.call_args.kwargs
+        self.assertEqual(kwargs["netlist"], netlist)
+        self.assertEqual(kwargs["commands"], "op")
+        self.assertEqual(kwargs["output_dir"], str(output.resolve()))
+        self.assertEqual(kwargs["title"], "Compatibility experiment")
+        self.assertEqual(kwargs["timeout"], 45.0)
+        self.assertEqual(kwargs["max_points"], 321)
+        self.assertTrue(kwargs["overwrite"])
+        self.assertIsNone(kwargs["requirements"])
+
     def test_simulation_bridge_preserves_safe_source_dialect_and_failure_result(self) -> None:
         netlist = "Y1 a b VENDOR_DEVICE\n.end\n"
         with tempfile.TemporaryDirectory() as tmp:

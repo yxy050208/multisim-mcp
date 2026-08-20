@@ -48,6 +48,16 @@ Multisim 14.3 与双 LM324 宏模型回归；仿真兼容桥通过了 10 V 分�
 `ArtifactSet` 优先记录发布副本，避免同名临时文件重复。危险命令标志不会绕过现有
 服务器策略，底层执行器仍要求显式环境变量授权。
 
+完整实验新增独立的 `ExperimentRequest` 和 `ExperimentApplicationService`。同步
+`run_circuit_experiment`、验证实验和持久任务 worker 共用这一入口；服务统一处理安全
+分析命令、绝对输出目录、超时、返回点数、所有者、需求和理论值，再调用可注入事务
+执行器。服务模块不导入 MCP 或 COM，也能将信息完整的纯结构化 `CircuitDesign`
+显式编译为 SPICE。现有 job 存储格式和 MCP 返回结果没有变化。
+
+真实 Multisim 14.3 完整事务门禁生成了可编辑电路、453 点瞬态数据、PNG/SVG、
+Markdown、中英 HTML/PDF、日志和 SHA-256 manifest，共 15 个文件并注册 15 个安全
+Resource 句柄。
+
 `multisim_mcp.spice_adapter` 提供两个方向清晰、失败关闭的转换边界：
 
 - `circuit_design_from_spice()` 先执行安全策略和语法解析，将解析后的元件、顶层简单
@@ -63,9 +73,9 @@ Multisim 14.3 与双 LM324 宏模型回归；仿真兼容桥通过了 10 V 分�
 
 下一步按以下顺序迁移：
 
-1. 将完整实验事务移入应用服务，MCP 工具只做参数/结果适配；
+1. 将遗留事务执行器的文件发布与报告流水线从 `server.py` 提取为独立组件；
 2. 将 Multisim COM 调用固定在独立 32 位 worker；
-3. 为工程目录、实验目录和优化目录写入版本化 manifest；
+3. 为工程目录和优化目录补充版本化 manifest；
 4. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
 
 ## English summary
@@ -83,3 +93,9 @@ SPICE adapter preserves a validated source netlist as authoritative and only
 compiles its documented structured subset when requested; unsupported or
 incomplete constructs fail closed instead of being guessed. Unsafe command
 execution still requires the existing explicit server-side opt-in.
+
+Complete synchronous, verified, and durable-worker experiments now share a
+transport-neutral `ExperimentRequest` and `ExperimentApplicationService` with
+an injectable transaction runner. A real Multisim transient gate produced 453
+points and the complete 15-file bilingual artifact transaction without changing
+the MCP result or persisted-job format.
