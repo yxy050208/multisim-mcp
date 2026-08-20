@@ -107,6 +107,7 @@ class MultisimClient:
     def __init__(self) -> None:
         self._app: Any = None
         self._circuit: Any = None
+        self._connected_by_client = False
 
     def _ensure_com(self) -> None:
         require_compatible_runtime()
@@ -147,6 +148,7 @@ class MultisimClient:
         app = self._ensure_app()
         if not bool(app.IsConnected):
             app.Connect()
+            self._connected_by_client = True
         return app
 
     @property
@@ -170,7 +172,18 @@ class MultisimClient:
             finally:
                 self._app = None
                 self._circuit = None
+                self._connected_by_client = False
         return {"connected": False}
+
+    def close(self) -> None:
+        """Release this wrapper without disconnecting a pre-existing session."""
+        try:
+            if self._app is not None and self._connected_by_client:
+                self._app.Disconnect()
+        finally:
+            self._app = None
+            self._circuit = None
+            self._connected_by_client = False
 
     def open_circuit(self, path: str) -> dict:
         self._connect_app()

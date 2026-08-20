@@ -60,10 +60,11 @@ from multisim_mcp.experiment_service import (
     ExperimentRequest,
 )
 from multisim_mcp.experiment_pipeline import MultisimExperimentPipeline
-from multisim_mcp.multisim_client import (
-    Ms14Codec,
-    MultisimClient,
-    runtime_diagnostics,
+from multisim_mcp.com_worker_client import (
+    MultisimWorkerProcess,
+    WorkerMs14Codec,
+    WorkerMultisimClient,
+    worker_runtime_diagnostics,
 )
 from multisim_mcp.multisim_backend import MultisimBackend
 from multisim_mcp.job_engine import (
@@ -98,27 +99,20 @@ from multisim_mcp.tool_profiles import (
 )
 
 
-_COM_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="multisim-com")
-_COM_THREAD_STATE = threading.local()
+_WORKER_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="multisim-worker",
+)
 _TOOL_PROFILE = selected_tool_profile()
 
 
-def _invoke_tool_on_com_thread(function: Any, args: tuple, kwargs: dict) -> Any:
-    """Run every tool on one COM-initialized thread for apartment safety."""
-    if os.name == "nt" and not getattr(_COM_THREAD_STATE, "initialized", False):
-        try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
-            _COM_THREAD_STATE.initialized = True
-        except ImportError:
-            # Introspection-only installations intentionally omit pywin32.
-            pass
+def _invoke_tool_on_worker_thread(function: Any, args: tuple, kwargs: dict) -> Any:
+    """Keep blocking, stateful worker calls off the MCP event loop."""
     return function(*args, **kwargs)
 
 
 class MultisimMCPServer(MCPServer):
-    """MCPServer that serializes tool calls onto Multisim's COM apartment."""
+    """MCPServer that serializes calls to the isolated Multisim worker."""
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any) -> Any:
         com_serialized = bool(decorator_kwargs.pop("com_serialized", True))
@@ -137,12 +131,12 @@ class MultisimMCPServer(MCPServer):
             async def serialized(*args: Any, **kwargs: Any) -> Any:
                 loop = asyncio.get_running_loop()
                 invoke = functools.partial(
-                    _invoke_tool_on_com_thread,
+                    _invoke_tool_on_worker_thread,
                     function,
                     args,
                     kwargs,
                 )
-                return await loop.run_in_executor(_COM_EXECUTOR, invoke)
+                return await loop.run_in_executor(_WORKER_EXECUTOR, invoke)
 
             register(serialized)
             # Direct imports and unit tests retain the original synchronous API.
@@ -164,8 +158,9 @@ mcp = MultisimMCPServer(
         "experiments include bilingual HTML/PDF and data-backed instruments."
     ),
 )
-client = MultisimClient()
-codec = Ms14Codec()
+_MULTISIM_WORKER = MultisimWorkerProcess()
+client = WorkerMultisimClient(_MULTISIM_WORKER)
+codec = WorkerMs14Codec(_MULTISIM_WORKER)
 _JOB_MANAGER: ExperimentJobManager | None = None
 _JOB_MANAGER_LOCK = threading.Lock()
 
@@ -538,7 +533,7 @@ def connect() -> dict:
 @mcp.tool()
 def runtime_status() -> dict:
     """Check platform and Python compatibility without starting Multisim."""
-    result = runtime_diagnostics()
+    result = worker_runtime_diagnostics(_MULTISIM_WORKER)
     paths = template_search_paths()
     required = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
     missing = [
@@ -1319,13 +1314,18 @@ def _create_schematic_impl(
             candidates = [spec.refdes]
             if spec.kind.startswith("D"):
                 candidates.append(spec.refdes + "A")
-            native_components[spec.refdes] = True if spec.kind in {"OSC6", "XFG3"} else spec.refdes in enumerated_components if spec.kind == "K" else any(
-                re.search(
-                    rf"(?<![A-Za-z0-9_]){re.escape(candidate)}(?![A-Za-z0-9_])",
-                    exported,
+            if spec.kind in {"OSC6", "XFG3"}:
+                native_components[spec.refdes] = True
+            elif spec.kind == "K":
+                native_components[spec.refdes] = spec.refdes in enumerated_components
+            else:
+                native_components[spec.refdes] = any(
+                    re.search(
+                        rf"(?<![A-Za-z0-9_]){re.escape(candidate)}(?![A-Za-z0-9_])",
+                        exported,
+                    )
+                    for candidate in candidates
                 )
-                for candidate in candidates
-            )
         result["verification"]["native_netlist_components"] = native_components
         result["verification"]["native_netlist_complete"] = all(
             native_components.values()
@@ -1787,15 +1787,6 @@ def encode_ms14(source_xml: str, output_ms14: str | None = None) -> dict:
 
 
 def main() -> None:
-    if os.name == "nt":
-        try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
-        except ImportError:
-            # Keep protocol introspection available so runtime_status can explain
-            # how to repair an incomplete Windows installation.
-            pass
     mcp.run()
 
 

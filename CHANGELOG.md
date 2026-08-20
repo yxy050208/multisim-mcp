@@ -22,6 +22,10 @@
 - 将约 400 行 staging、绘图、报告、完整性门禁、原子发布和回滚逻辑提取为
   `MultisimExperimentPipeline`；新增发布中途故障注入测试，证明旧产物恢复且无临时
   状态残留，并再次通过 453 点真实 Multisim 完整事务。
+- 新增版本化 JSON-RPC COM worker，将全部 Multisim Automation 与 `.ms14` 编解码
+  操作固定在独立 32 位进程；MCP 前端现可使用 64 位 Python，支持状态保持、心跳/
+  取消转发、RPC 超时、崩溃重启和并发串行化。真实隔离门禁生成 437 点数据和完整
+  15 文件事务，CLI 新增 `--worker-python` 配置。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -65,6 +69,10 @@
 - Extracted staging, plotting, reporting, completeness checks, atomic publishing,
   and rollback into injectable `MultisimExperimentPipeline`, including a
   mid-publication fault test that proves complete restoration and cleanup.
+- Moved every Multisim Automation and `.ms14` codec operation behind a versioned
+  JSON-RPC subprocess that retains state in 32-bit Python while allowing a
+  64-bit MCP frontend, with cancellation/heartbeat forwarding, RPC timeouts,
+  crash restart, serialized concurrency, and a real 437-point artifact gate.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

@@ -122,7 +122,8 @@ for the agent.
 ## Known Constraints
 
 - Windows only; Multisim must be installed and licensed.
-- The COM server is 32-bit, so the MCP host must use 32-bit Python.
+- The COM server is 32-bit. The isolated worker must use 32-bit Python, while
+  the MCP frontend may use 32-bit or 64-bit Python.
 - Simulation is not headless; Multisim opens on the desktop.
 - The Automation API exposes no place-component or wire-drawing methods, so
   schematic generation is template/XML based, not automatic drawing.

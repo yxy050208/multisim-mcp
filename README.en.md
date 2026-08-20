@@ -11,7 +11,8 @@ and create reproducible reports.
 > The current stable release is `v1.0.0`. This project is not affiliated
 > with or endorsed by NI. A
 > locally installed and licensed Multisim 14+ environment is required. The
-> current COM worker uses 32-bit Python.
+> COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
+> 32-bit or 64-bit Python.
 
 The completed development phases and release gates are recorded in the
 [1.0 roadmap](docs/ROADMAP_TO_1.0.md).
@@ -38,8 +39,10 @@ For longer experiments, use the durable
 `get_experiment_job`, `list_experiment_jobs`, `cancel_experiment_job`,
 `retry_experiment_job`, and `multisim://jobs/{job_id}` expose progress,
 cancellation, and safe retries. Each job runs in
-an isolated subprocess, so a worker crash or heartbeat timeout does not take
-down the MCP frontend, and interrupted jobs are safely requeued after restart.
+an isolated job subprocess, while every Multisim COM/codec operation crosses a
+stateful 32-bit worker boundary. A crash, RPC timeout, or heartbeat timeout does
+not take down the MCP frontend; the COM worker restarts on a later call and
+interrupted jobs are safely requeued after restart.
 
 Version 1.0 adds computable design verification and batch experiments:
 
@@ -129,11 +132,20 @@ See the [publishing guide](docs/PUBLISHING.md) and
 
 ## Quick start
 
-Install the published package into a 32-bit Python environment:
+The simplest compatible deployment still installs into 32-bit Python:
 
 ```powershell
 C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.0.0"
 C:\path\to\python32\Scripts\multisim-mcp.exe
+```
+
+Alternatively, install the MCP frontend in 64-bit Python and retain a separate
+32-bit Python containing this package and `pywin32`. The Windows `py` launcher
+is auto-detected, or configure the worker explicitly:
+
+```powershell
+$env:MULTISIM_MCP_WORKER_PYTHON = 'C:\path\to\python32\python.exe'
+C:\path\to\python64\python.exe -m multisim_mcp.server
 ```
 
 Linux and Docker provide MCP tool discovery and compatibility diagnostics only;
@@ -170,7 +182,8 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 # Print a Codex config.toml fragment.
 C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --client codex `
-  --python C:\path\to\python32\python.exe `
+  --python C:\path\to\python64\python.exe `
+  --worker-python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
 
 # Print a DeepSeek Harness Cordis plugin fragment.

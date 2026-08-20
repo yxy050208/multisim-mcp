@@ -182,11 +182,15 @@ class McpExperimentResourceTest(unittest.IsolatedAsyncioTestCase):
         finally:
             clear_experiment_registry()
 
-    async def test_tools_run_on_the_dedicated_com_thread(self) -> None:
+    async def test_tools_run_on_the_dedicated_worker_frontend_thread(self) -> None:
         from multisim_mcp import server
 
-        fake_runtime = lambda: {"thread": threading.current_thread().name}
-        with patch.object(server, "runtime_diagnostics", side_effect=fake_runtime):
+        def fake_runtime(_worker: object) -> dict[str, str]:
+            return {"thread": threading.current_thread().name}
+
+        with patch.object(
+            server, "worker_runtime_diagnostics", side_effect=fake_runtime
+        ):
             async with Client(mcp) as client:
                 first = await client.call_tool("runtime_status", {})
                 second = await client.call_tool("runtime_status", {})
@@ -194,7 +198,7 @@ class McpExperimentResourceTest(unittest.IsolatedAsyncioTestCase):
         first_payload = json.loads(first.content[0].text)
         second_payload = json.loads(second.content[0].text)
         self.assertEqual(first_payload["thread"], second_payload["thread"])
-        self.assertTrue(first_payload["thread"].startswith("multisim-com"))
+        self.assertTrue(first_payload["thread"].startswith("multisim-worker"))
 
     async def test_job_tools_and_status_resource_are_protocol_readable(self) -> None:
         from multisim_mcp import server

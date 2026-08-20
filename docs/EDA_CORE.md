@@ -59,6 +59,11 @@ Multisim 14.3 与双 LM324 宏模型回归；仿真兼容桥通过了 10 V 分�
 绘图、验证、中英报告、完整性门禁、原子发布和逆序回滚。发布中途注入故障的测试确认
 旧产物逐项恢复，临时文件与 staging 目录全部清理；模块本身不导入 MCP 或 COM。
 
+Multisim Automation 与 `.ms14` 编解码现在全部通过版本化 JSON-RPC 进入独立 32 位
+worker。该进程保留当前连接/电路状态，主进程通过锁串行调用，并转发长仿真的心跳和
+取消；协议错误、RPC 超时或崩溃只终止 worker，下一次调用可重新启动。64 位 Python
+前端拉起 32 位 worker 的真实 COM 门禁已经通过。
+
 真实 Multisim 14.3 完整事务门禁生成了可编辑电路、453 点瞬态数据、PNG/SVG、
 Markdown、中英 HTML/PDF、日志和 SHA-256 manifest，共 15 个文件并注册 15 个安全
 Resource 句柄。
@@ -78,9 +83,8 @@ Resource 句柄。
 
 下一步按以下顺序迁移：
 
-1. 将 Multisim COM 调用固定在独立 32 位 worker；
-2. 为工程目录和优化目录补充版本化 manifest；
-3. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
+1. 为工程目录和优化目录补充版本化 manifest；
+2. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
 
 ## English summary
 
@@ -108,3 +112,8 @@ the MCP result or persisted-job format.
 reports, completeness gates, atomic publication, and reverse-order rollback
 outside `server.py`. Injected mid-publication failures prove that prior artifacts
 are restored and temporary state is removed.
+
+All Multisim Automation and codec calls now cross a versioned JSON-RPC boundary
+into a stateful 32-bit worker. A 64-bit frontend successfully started the worker
+and retained a real Multisim 14.3 circuit across calls; heartbeat forwarding,
+cancellation, timeouts, crash restart, and serialized concurrency are covered.

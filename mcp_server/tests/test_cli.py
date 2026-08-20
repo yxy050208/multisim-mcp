@@ -83,7 +83,7 @@ class DoctorTest(unittest.TestCase):
                 (root / name).write_text("fixture", encoding="utf-8")
             with (
                 patch(
-                    "multisim_mcp.multisim_client.runtime_diagnostics",
+                    "multisim_mcp.cli._worker_runtime_diagnostics",
                     return_value=runtime,
                 ),
                 patch(
@@ -178,6 +178,19 @@ class ConfigGeneratorTest(unittest.TestCase):
         self.assertEqual(
             spec["env"]["MULTISIM_MCP_TEMPLATE_DIR"],
             r"C:\MultisimMcp\component-pack",
+        )
+
+    def test_64_bit_frontend_can_configure_a_separate_32_bit_worker(self) -> None:
+        content = render_client_config(
+            "claude-desktop",
+            python_executable=r"C:\Python64\python.exe",
+            worker_python=r"C:\Python32\python.exe",
+        )
+        spec = json.loads(content)["mcpServers"]["multisim"]
+        self.assertEqual(spec["command"], r"C:\Python64\python.exe")
+        self.assertEqual(
+            spec["env"]["MULTISIM_MCP_WORKER_PYTHON"],
+            r"C:\Python32\python.exe",
         )
 
     def test_codex_toml(self) -> None:

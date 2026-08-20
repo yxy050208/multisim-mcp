@@ -50,7 +50,7 @@ AI client / Visual Workbench
 - [x] 将独立 SPICE 仿真工具接入应用服务并保持安全命令策略和返回契约。
 - [x] 把同步、验证和持久 worker 实验入口从 MCP 工具迁移到应用服务。
 - [x] 将事务发布/报告执行器从 `server.py` 提取为可注入独立流水线组件。
-- [ ] 将 Multisim COM 操作保留在独立 32 位 worker 中。
+- [x] 将 Multisim COM/编解码操作保留在独立 32 位 worker 中，支持 64 位前端。
 - [ ] 为项目目录、实验目录和优化目录增加版本化 manifest。
 - [x] 保持现有 55 个工具、19 个 Resource 模板和 5 个 Prompt 兼容。
 - [x] 规划 DeepSeek 与 DeepSeek Harness 的分层适配。
@@ -102,7 +102,7 @@ AI client / Visual Workbench
 - [ ] 展示实验状态、优化收敛、敏感度和候选排名；
 - [ ] 比较两个设计版本及其 `DesignPatch`；
 - [ ] 在数据结构稳定后加入补丁审批、运行控制和回滚；
-- [ ] 主应用保持 64 位，Multisim worker 保持隔离的 32 位进程；
+- [x] 主应用支持 64 位，Multisim worker 保持隔离的 32 位进程；
 - [ ] GUI 与 MCP 调用同一应用服务，不复制业务逻辑。
 
 阶段门禁：关闭并重新打开项目后能恢复完整工程状态；界面崩溃不会破坏

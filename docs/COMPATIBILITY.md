@@ -6,11 +6,11 @@
 | 能力 | Windows 32-bit + Multisim 14.3 | Windows 64-bit | Linux/Docker | 证据状态 |
 | --- | --- | --- | --- | --- |
 | MCP 2026-07-28 / legacy 初始化 | 支持 | 支持 | 支持 | 协议回归 |
-| COM 自动化与 `.ms14` 生成 | 支持 | 仅诊断 | 不支持 | 真实回归 |
-| 安全 SPICE 工作点/DC/AC/瞬态 | 支持 | 取决于 COM 注册 | 不支持 | 真实回归 |
-| RLC、源、半导体、受控源、传输线 | 支持 | 同 COM 限制 | 仅解析 | 真实回归 |
-| NOT/AND/OR/NAND/NOR/XOR/XNOR/JK | 支持 | 同 COM 限制 | 仅展开 | 真实时序回归 |
-| XFG 函数发生器 / XSC 示波器 | 支持 | 同 COM 限制 | 仅解析 | 真实仪器回归 |
+| COM 自动化与 `.ms14` 生成 | 支持 | 支持，使用独立 32 位 worker | 不支持 | 真实回归 |
+| 安全 SPICE 工作点/DC/AC/瞬态 | 支持 | 支持，使用独立 32 位 worker | 不支持 | 真实回归 |
+| RLC、源、半导体、受控源、传输线 | 支持 | 支持，使用独立 32 位 worker | 仅解析 | 真实回归 |
+| NOT/AND/OR/NAND/NOR/XOR/XNOR/JK | 支持 | 支持，使用独立 32 位 worker | 仅展开 | 真实时序回归 |
+| XFG 函数发生器 / XSC 示波器 | 支持 | 支持，使用独立 32 位 worker | 仅解析 | 真实仪器回归 |
 | 变压器/电位器/继电器/晶振宏 | derived | derived | 仅展开 | 14.3 打开/回导；真实瞬态/工作点/AC 回归 |
 | 功率二极管/NMOS/PMOS 宏 | derived | derived | 仅展开 | 14.3 打开/回导；二极管/NMOS 工作点回归；需按实物校准 |
 | D/T、COUNTER4、SHIFT_REGISTER4 | derived | derived | 仅展开 | 14.3 打开/回导；DFF 瞬态回归；5 V XSPICE 桥 |

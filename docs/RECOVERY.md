@@ -6,7 +6,8 @@ Multisim MCP 1.0 将长实验隔离到 worker 进程，并把任务状态以原�
 ## MCP 或 Multisim 意外退出
 
 1. 不要删除任务目录、输出目录旁的锁文件或半成品目录。
-2. 重新启动同一 32 位 Python 环境中的 MCP server。
+2. 重新启动 MCP server；若前端为 64 位，确认 `MULTISIM_MCP_WORKER_PYTHON`
+   仍指向安装了本项目和 pywin32 的 32 位 Python。
 3. 调用 `list_experiment_jobs`，再用 `get_experiment_job(job_id)` 查看状态。
 4. 服务会把中断的 `running` / `cancelling` 任务安全恢复为队列任务，并从原始规范重建，
    不会把不完整产物当成成功结果。

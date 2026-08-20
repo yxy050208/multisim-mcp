@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from multisim_mcp import __version__
+from multisim_mcp.com_worker_client import WORKER_PYTHON_ENV
 from multisim_mcp.experiment_resources import ARTIFACT_EXPORT_DIR_ENV
 from multisim_mcp.harness_skills import install_harness_skills
 from multisim_mcp.tool_profiles import TOOL_PROFILE_ENV, TOOL_PROFILES
@@ -155,24 +156,26 @@ def _codec_diagnostics() -> dict[str, Any]:
 
 
 def _activation_diagnostics() -> dict[str, Any]:
-    """Explicitly probe COM while preserving a pre-existing connection."""
-    client_class = _load_module("multisim_mcp.multisim_client").MultisimClient
-    client = client_class()
-    app: Any = None
-    was_connected = False
+    """Explicitly probe COM inside a disposable isolated worker."""
+    worker_module = _load_module("multisim_mcp.com_worker_client")
+    worker = worker_module.MultisimWorkerProcess()
+    client = worker_module.WorkerMultisimClient(worker)
     try:
-        app = client._ensure_app()
-        was_connected = bool(app.IsConnected)
         details = client.connect()
         return {"checked": True, "ready": True, "details": details}
     except Exception as exc:
         return {"checked": True, "ready": False, "error": str(exc)}
     finally:
-        if app is not None and not was_connected:
-            try:
-                client.disconnect()
-            except Exception:
-                pass
+        worker.close()
+
+
+def _worker_runtime_diagnostics() -> dict[str, Any]:
+    worker_module = _load_module("multisim_mcp.com_worker_client")
+    worker = worker_module.MultisimWorkerProcess()
+    try:
+        return worker_module.worker_runtime_diagnostics(worker)
+    finally:
+        worker.close()
 
 
 def collect_doctor_report(
@@ -181,7 +184,7 @@ def collect_doctor_report(
     """Collect side-effect-free setup diagnostics for people and agents."""
     language = _preferred_language(language)
     client_module = _load_module("multisim_mcp.multisim_client")
-    runtime = client_module.runtime_diagnostics()
+    runtime = _worker_runtime_diagnostics()
     prog_id = client_module.PROG_ID
     checks: list[dict[str, Any]] = []
 
@@ -191,8 +194,8 @@ def collect_doctor_report(
             "pass" if sys.version_info >= (3, 10) else "fail",
             _message(
                 language,
-                f"Python {runtime['python']}（要求 3.10 或更高版本）",
-                f"Python {runtime['python']} (3.10 or newer required)",
+                f"Worker Python {runtime['python']}（要求 3.10 或更高版本）",
+                f"Worker Python {runtime['python']} (3.10 or newer required)",
             ),
             (
                 None
@@ -224,7 +227,8 @@ def collect_doctor_report(
                 else _message(
                     language,
                     "真实 Multisim 自动化必须在 Windows 上运行；当前环境只能发现 MCP 工具。",
-                    "Run real Multisim automation on Windows; this environment supports MCP introspection only.",
+                    "Run real Multisim automation on Windows; this environment "
+                    "supports MCP introspection only.",
                 )
             ),
         )
@@ -236,19 +240,22 @@ def collect_doctor_report(
             "pass" if bits_ok else "fail",
             _message(
                 language,
-                f"当前 Python 为 {runtime['python_bits']} 位；Multisim COM 需要 32 位。",
-                f"Python is {runtime['python_bits']}-bit; Multisim COM requires 32-bit Python.",
+                f"Multisim worker 为 {runtime['python_bits']} 位；主进程可为 32/64 位。",
+                f"The Multisim worker is {runtime['python_bits']}-bit; the "
+                "frontend may be 32/64-bit.",
             ),
             (
                 None
                 if bits_ok
                 else _message(
                     language,
-                    "使用 32 位 Python 重新安装 multisim-mcp。",
-                    "Reinstall multisim-mcp with a 32-bit Python interpreter.",
+                    f"安装 32 位 Python，或设置 {WORKER_PYTHON_ENV}。",
+                    f"Install 32-bit Python or set {WORKER_PYTHON_ENV}.",
                 )
             ),
             executable=runtime["python_executable"],
+            frontend_bits=runtime.get("frontend_python_bits"),
+            frontend_executable=runtime.get("frontend_python_executable"),
         )
     )
     pywin32_ok = bool(runtime["pywin32_available"])
@@ -261,12 +268,12 @@ def collect_doctor_report(
                 (
                     "pywin32 已安装。"
                     if pywin32_ok
-                    else "当前解释器中没有可用的 pywin32。"
+                    else "32 位 worker 中没有可用的 pywin32。"
                 ),
                 (
                     "pywin32 is available."
                     if pywin32_ok
-                    else "pywin32 is unavailable in this interpreter."
+                    else "pywin32 is unavailable in the 32-bit worker."
                 ),
             ),
             (
@@ -274,8 +281,8 @@ def collect_doctor_report(
                 if pywin32_ok
                 else _message(
                     language,
-                    "在同一个 32 位 Python 环境中重新安装 multisim-mcp。",
-                    "Reinstall multisim-mcp in the same 32-bit Python environment.",
+                    "在 32 位 worker Python 中安装 multisim-mcp 与 pywin32。",
+                    "Install multisim-mcp and pywin32 in the 32-bit worker Python.",
                 )
             ),
         )
@@ -321,7 +328,8 @@ def collect_doctor_report(
                 else _message(
                     language,
                     "确认已安装并授权 Multisim 14+，然后从当前 Windows 用户启动一次 Multisim。",
-                    "Verify that licensed Multisim 14+ is installed, then start it once as the current Windows user.",
+                    "Verify that licensed Multisim 14+ is installed, then start "
+                    "it once as the current Windows user.",
                 )
             ),
             prog_id=prog_id,
@@ -423,8 +431,12 @@ def collect_doctor_report(
                 if templates_ready
                 else _message(
                     language,
-                    "使用 1.0 源码重新运行 tools/bootstrap_local_component_pack.py，并设置 MULTISIM_MCP_TEMPLATE_DIR。",
-                    "Rebuild the pack with the 1.0 tools/bootstrap_local_component_pack.py and set MULTISIM_MCP_TEMPLATE_DIR.",
+                    "使用 1.0 源码重新运行 "
+                    "tools/bootstrap_local_component_pack.py，并设置 "
+                    "MULTISIM_MCP_TEMPLATE_DIR。",
+                    "Rebuild the pack with the 1.0 "
+                    "tools/bootstrap_local_component_pack.py and set "
+                    "MULTISIM_MCP_TEMPLATE_DIR.",
                 )
             ),
             search_paths=[str(path) for path in paths],
@@ -453,7 +465,8 @@ def collect_doctor_report(
                 else _message(
                     language,
                     "安装 electronics-workbench-decoder@0.2.0，并确保 ewd/ewe 与 node 可用。",
-                    "Install electronics-workbench-decoder@0.2.0 and make ewd/ewe plus node available.",
+                    "Install electronics-workbench-decoder@0.2.0 and make "
+                    "ewd/ewe plus node available.",
                 )
             ),
             tools=codec["tools"],
@@ -481,7 +494,8 @@ def collect_doctor_report(
             (
                 "The real Multisim COM connection and complete experiment workflow are ready."
                 if activation["ready"]
-                else "Static prerequisites passed; run doctor --connect to verify the real Multisim connection."
+                else "Static prerequisites passed; run doctor --connect to "
+                "verify the real Multisim connection."
             )
             if full_workflow_ready
             else (
@@ -508,6 +522,7 @@ def collect_doctor_report(
 
 def _server_spec(
     python_executable: str,
+    worker_python: str | None,
     template_dir: str | None,
     work_dir: str | None,
     tool_profile: str | None,
@@ -517,6 +532,8 @@ def _server_spec(
         return os.path.abspath(os.path.expanduser(value))
 
     environment: dict[str, str] = {}
+    if worker_python:
+        environment[WORKER_PYTHON_ENV] = normalize(worker_python)
     if template_dir:
         environment["MULTISIM_MCP_TEMPLATE_DIR"] = normalize(template_dir)
     if work_dir:
@@ -590,6 +607,7 @@ def render_client_config(
     client: str,
     server_name: str = "multisim",
     python_executable: str | None = None,
+    worker_python: str | None = None,
     template_dir: str | None = None,
     work_dir: str | None = None,
     tool_profile: str | None = None,
@@ -606,6 +624,7 @@ def render_client_config(
         raise ValueError(f"unsupported tool profile: {tool_profile}")
     spec = _server_spec(
         python_executable or sys.executable,
+        worker_python,
         template_dir,
         work_dir,
         tool_profile,
@@ -685,7 +704,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument(
         "--connect",
         action="store_true",
-        help="explicitly activate and connect to Multisim, then restore prior state",
+        help="explicitly activate and connect to Multisim in a disposable worker",
     )
     doctor.add_argument(
         "--strict",
@@ -699,7 +718,11 @@ def build_parser() -> argparse.ArgumentParser:
     config.add_argument("--client", choices=CLIENTS, required=True)
     config.add_argument("--name", default="multisim", help="MCP server name")
     config.add_argument(
-        "--python", default=sys.executable, help="32-bit Python executable"
+        "--python", default=sys.executable, help="MCP frontend Python executable"
+    )
+    config.add_argument(
+        "--worker-python",
+        help="32-bit Python executable (auto-discovered through py launcher by default)",
     )
     config.add_argument("--template-dir", help="local component template pack")
     config.add_argument(
@@ -802,6 +825,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.client,
                 server_name=args.name,
                 python_executable=args.python,
+                worker_python=args.worker_python,
                 template_dir=args.template_dir,
                 work_dir=args.work_dir,
                 tool_profile=args.tool_profile,

@@ -9,7 +9,8 @@ experiments, exporting data, and generating reproducible reports.
 Multisim 执行实验，并导出 `.ms14`、原理图、raw、CSV、SVG 和 Markdown 报告。
 
 > Stable 1.0 software. This project is not affiliated with NI. Multisim must be
-> installed and licensed locally. The current COM worker requires 32-bit Python.
+> installed and licensed locally. COM runs in an isolated 32-bit Python worker;
+> the MCP frontend may use 32-bit or 64-bit Python.
 
 Linux and Docker support MCP initialization, tool discovery, and
 `runtime_status` diagnostics only. They do not run Multisim. On an unsupported
@@ -22,7 +23,7 @@ software, samples, licenses, or extracted templates.
 
 Stable and verified on Multisim 14.3:
 
-- MCP stdio lifecycle and 32-bit runtime diagnostics.
+- MCP stdio lifecycle and isolated worker/frontend runtime diagnostics.
 - Open/save circuits and enumerate components, inputs, and outputs.
 - DC operating point, AC sweep, single-frequency AC, and transient analysis.
 - Input waveform injection and RLC value read/write.
@@ -103,7 +104,9 @@ signatures while execution is migrated behind this boundary.
 Requirements:
 
 - Windows and a licensed Multisim 14+ installation.
-- 32-bit Python 3.10+.
+- Python 3.10+ for the MCP frontend (32-bit or 64-bit).
+- A separate 32-bit Python 3.10+ environment containing this package and
+  `pywin32` for the Multisim worker.
 - Node.js 18+ only for `.ms14` XML conversion.
 
 The Windows dependency set deliberately uses `cryptography>=48.0.1,<49`.
@@ -159,6 +162,14 @@ compatible; `serve` is the explicit equivalent:
 C:\path\to\python32\Scripts\multisim-mcp.exe serve
 ```
 
+For a 64-bit frontend, install the package in both environments and either let
+the Windows `py` launcher discover the worker or select it explicitly:
+
+```powershell
+$env:MULTISIM_MCP_WORKER_PYTHON = 'C:\path\to\python32\python.exe'
+C:\path\to\python64\python.exe -m multisim_mcp.server
+```
+
 Generate a client configuration fragment:
 
 ```powershell
@@ -172,7 +183,8 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 # Codex config.toml
 C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --client codex `
-  --python C:\path\to\python32\python.exe `
+  --python C:\path\to\python64\python.exe `
+  --worker-python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
 
 # Official DeepSeek Harness Cordis plugin row

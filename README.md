@@ -8,7 +8,8 @@
 电路图、CSV、波形图和实验报告。
 
 > 当前稳定发行版为 `v1.0.0`。项目非 NI 官方产品，需要本机安装并授权
-> Multisim 14+；当前 COM 运行时使用 32 位 Python。
+> Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
+> Python。
 
 四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
@@ -42,8 +43,9 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 `job_id`，可通过 `get_experiment_job`、`list_experiment_jobs`、
 `cancel_experiment_job`、`retry_experiment_job` 或 `multisim://jobs/{job_id}` 查询、
 取消和重试任务。每个实验
-运行在隔离 worker 进程中；worker 崩溃或心跳超时不会拖垮 MCP 服务，服务重启后未完成
-任务会安全地重新排队。
+运行在隔离任务进程中；全部 Multisim COM/编解码操作还会进入长期驻留的 32 位
+COM worker。worker 崩溃、RPC 超时或心跳超时不会拖垮 MCP 服务，后续调用可重启
+COM worker，服务重启后未完成任务会安全地重新排队。
 
 1.0 还加入了可计算的设计验收与批量实验：
 
@@ -133,11 +135,20 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 ## 快速开始
 
-从 PyPI 安装到 32 位 Python 环境：
+最简单的兼容部署仍是直接安装到 32 位 Python：
 
 ```powershell
 C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.0.0"
 C:\path\to\python32\Scripts\multisim-mcp.exe
+```
+
+也可以把 MCP 前端安装到 64 位 Python，并为 COM worker 单独保留一套安装了本项目和
+`pywin32` 的 32 位 Python。若系统 `py` launcher 能发现 32 位 Python，会自动选择；
+否则设置：
+
+```powershell
+$env:MULTISIM_MCP_WORKER_PYTHON = 'C:\path\to\python32\python.exe'
+C:\path\to\python64\python.exe -m multisim_mcp.server
 ```
 
 Linux/Docker 仅提供 MCP 工具发现和兼容性诊断，不能运行 Multisim 仿真。容器中的
@@ -184,7 +195,8 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 # 输出 Codex config.toml 片段
 C:\path\to\python32\Scripts\multisim-mcp.exe config `
   --client codex `
-  --python C:\path\to\python32\python.exe `
+  --python C:\path\to\python64\python.exe `
+  --worker-python C:\path\to\python32\python.exe `
   --template-dir C:\MultisimMcp\component-pack
 
 # 输出 DeepSeek Harness Cordis 插件片段

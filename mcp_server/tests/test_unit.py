@@ -100,7 +100,6 @@ class DispatchFallbackTest(unittest.TestCase):
         ):
             result = client._ensure_app()
         self.assertIs(result, app)
-
     def test_dynamic_dispatch_failure_preserves_both_errors(self) -> None:
         def fail_generated(_prog_id: str) -> object:
             raise AttributeError("CLSIDToClassMap")
@@ -122,6 +121,51 @@ class DispatchFallbackTest(unittest.TestCase):
             ),
         ):
             client._ensure_app()
+
+
+class ConnectionOwnershipTest(unittest.TestCase):
+    class App:
+        VersionInfo = "Multisim test"
+        Path = "Multisim.exe"
+
+        def __init__(self, connected: bool) -> None:
+            self.IsConnected = connected
+            self.connect_calls = 0
+            self.disconnect_calls = 0
+
+        def Connect(self) -> None:
+            self.connect_calls += 1
+            self.IsConnected = True
+
+        def Disconnect(self) -> None:
+            self.disconnect_calls += 1
+            self.IsConnected = False
+
+    def test_close_preserves_a_preexisting_connection(self) -> None:
+        app = self.App(connected=True)
+        client = MultisimClient()
+        client._app = app
+        with (
+            patch("multisim_mcp.multisim_client.require_compatible_runtime"),
+            patch.object(client, "_ensure_com"),
+        ):
+            client.connect()
+        client.close()
+        self.assertEqual(app.connect_calls, 0)
+        self.assertEqual(app.disconnect_calls, 0)
+
+    def test_close_disconnects_a_session_created_by_this_client(self) -> None:
+        app = self.App(connected=False)
+        client = MultisimClient()
+        client._app = app
+        with (
+            patch("multisim_mcp.multisim_client.require_compatible_runtime"),
+            patch.object(client, "_ensure_com"),
+        ):
+            client.connect()
+        client.close()
+        self.assertEqual(app.connect_calls, 1)
+        self.assertEqual(app.disconnect_calls, 1)
 
 
 class RuntimeDiagnosticsTest(unittest.TestCase):
