@@ -37,10 +37,16 @@
 
 ## 当前兼容桥
 
-`create_schematic_from_netlist` 是第一个迁移到应用服务的 1.0 MCP 工具。它的公开
-参数和返回结果保持不变，但内部先将网表导入 `CircuitDesign`，再通过
-`EdaApplicationService` 和 `MultisimBackend` 执行。该兼容桥已经通过真实
-Multisim 14.3 与双 LM324 宏模型回归。
+`create_schematic_from_netlist` 和 `run_spice_netlist` 已迁移到应用服务。两个工具的
+公开参数和返回结果保持不变，但内部先将网表导入 `CircuitDesign`，再通过
+`EdaApplicationService` 和 `MultisimBackend` 执行。原理图兼容桥通过了真实
+Multisim 14.3 与双 LM324 宏模型回归；仿真兼容桥通过了 10 V 分压器工作点回归，
+得到预期的 5 V 输出并发布五项实验产物。
+
+`SimulationRequest` 支持可选发布目录、超时、最大返回点数和显式
+`unsafe_commands` 标志。省略发布目录时，产物仍由后端工作目录追踪；指定目录时，
+`ArtifactSet` 优先记录发布副本，避免同名临时文件重复。危险命令标志不会绕过现有
+服务器策略，底层执行器仍要求显式环境变量授权。
 
 `multisim_mcp.spice_adapter` 提供两个方向清晰、失败关闭的转换边界：
 
@@ -57,7 +63,7 @@ Multisim 14.3 与双 LM324 宏模型回归。
 
 下一步按以下顺序迁移：
 
-1. 将 `run_spice_netlist` 和完整实验事务移入应用服务，MCP 工具只做参数/结果适配；
+1. 将完整实验事务移入应用服务，MCP 工具只做参数/结果适配；
 2. 将 Multisim COM 调用固定在独立 32 位 worker；
 3. 为工程目录、实验目录和优化目录写入版本化 manifest；
 4. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
@@ -70,8 +76,10 @@ The first platformization slice introduces strict, versioned `CircuitDesign`,
 injectable `MultisimBackend`. The core imports neither MCP nor COM and is tested
 with deterministic no-COM executors on Python 3.10 and 32-bit Python 3.12.
 
-The public MCP surface remains unchanged. `create_schematic_from_netlist` is the
-first tool routed through the application service and Multisim backend. The
-explicit SPICE adapter preserves a validated source netlist as authoritative and
-only compiles its documented structured subset when requested; unsupported or
-incomplete constructs fail closed instead of being guessed.
+The public MCP surface remains unchanged. `create_schematic_from_netlist` and
+`run_spice_netlist` are routed through the application service and Multisim
+backend, with real schematic and operating-point regressions. The explicit
+SPICE adapter preserves a validated source netlist as authoritative and only
+compiles its documented structured subset when requested; unsupported or
+incomplete constructs fail closed instead of being guessed. Unsafe command
+execution still requires the existing explicit server-side opt-in.

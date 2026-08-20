@@ -233,8 +233,9 @@ Durable-job and artifact recovery procedures are documented in
 The diagnosis, optimization, multi-EDA, and visual-workbench direction is
 documented in the [2.0 roadmap](docs/ROADMAP_TO_2.0.md). The first transport-
 neutral [EDA core and backend boundary](docs/EDA_CORE.md) and limited-SPICE
-adapter are now available. The first schematic tool is routed through the
-application service while the existing MCP tool signatures remain compatible.
+adapter are now available. Schematic generation and standalone SPICE simulation
+are routed through the application service while the existing MCP tool
+signatures remain compatible.
 
 ## License
 

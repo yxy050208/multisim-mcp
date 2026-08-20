@@ -13,6 +13,9 @@
 - 新增失败关闭的 `CircuitDesign` 与受限 SPICE 转换边界；
   `create_schematic_from_netlist` 已作为首个工具通过应用服务执行，公开签名和返回结果
   保持兼容，并通过真实 Multisim 14.3 与双 LM324 宏模型回归。
+- `run_spice_netlist` 已接入同一应用服务，保留可选输出目录、超时、返回点数、覆盖和
+  危险命令双重授权契约；产物清单会去重临时/发布副本，并通过真实 10 V 分压器工作点
+  回归得到 5 V 输出。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -47,6 +50,9 @@
 - Added a fail-closed `CircuitDesign`/limited-SPICE conversion boundary and
   routed `create_schematic_from_netlist` through the application service while
   preserving its public contract, including a real dual-LM324 Multisim test.
+- Routed `run_spice_netlist` through the same application service while
+  preserving optional publication, timeout, point-limit, overwrite, and unsafe
+  command gates; a real 10 V divider operating-point regression produced 5 V.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

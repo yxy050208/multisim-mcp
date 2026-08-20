@@ -75,6 +75,57 @@ class UnsafeToolGateTest(unittest.TestCase):
 
 
 class EdaCompatibilityBridgeTest(unittest.TestCase):
+    def test_simulation_bridge_preserves_safe_source_dialect_and_failure_result(self) -> None:
+        netlist = "Y1 a b VENDOR_DEVICE\n.end\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            native_result = {
+                "success": False,
+                "run_id": "failed-compatibility-run",
+                "work_dir": tmp,
+                "state": 1,
+                "last_error": "vendor device unavailable",
+            }
+            with patch.object(
+                server, "_run_spice_netlist_impl", return_value=native_result
+            ) as executor:
+                result = server.run_spice_netlist(netlist, "op")
+
+        self.assertEqual(result, native_result)
+        self.assertEqual(executor.call_args.args, (netlist, "op"))
+
+    def test_simulation_tool_uses_eda_service_without_changing_result(self) -> None:
+        netlist = "V1 in 0 5\nR1 in 0 1k\n.end\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "result.raw"
+            raw.write_bytes(b"raw")
+            native_result = {
+                "success": True,
+                "run_id": "compatibility-run",
+                "work_dir": tmp,
+                "raw": str(raw),
+                "rows": [[0.0, 5.0]],
+            }
+            with patch.object(
+                server, "_run_spice_netlist_impl", return_value=native_result
+            ) as executor:
+                result = server.run_spice_netlist(
+                    netlist,
+                    "op",
+                    timeout=7.5,
+                    max_points=123,
+                    unsafe_commands=True,
+                    overwrite=True,
+                )
+
+        self.assertEqual(result, native_result)
+        args, kwargs = executor.call_args
+        self.assertEqual(args, (netlist, "op"))
+        self.assertIsNone(kwargs["output_dir"])
+        self.assertEqual(kwargs["timeout"], 7.5)
+        self.assertEqual(kwargs["max_points"], 123)
+        self.assertTrue(kwargs["unsafe_commands"])
+        self.assertTrue(kwargs["overwrite"])
+
     def test_schematic_tool_uses_eda_service_without_changing_result(self) -> None:
         netlist = "V1 in 0 5\nR1 in 0 1k\n.end\n"
         native_result = {

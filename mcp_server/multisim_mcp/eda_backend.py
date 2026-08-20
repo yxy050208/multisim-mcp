@@ -234,10 +234,11 @@ class SimulationRequest:
 
     design: CircuitDesign
     commands: str
-    output_directory: str
+    output_directory: str | None = None
     timeout_seconds: float = 120.0
     max_points: int = 2000
     overwrite: bool = False
+    unsafe_commands: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.design, CircuitDesign):
@@ -245,11 +246,14 @@ class SimulationRequest:
         object.__setattr__(
             self, "commands", _require_text(self.commands, "commands", maximum=64_000)
         )
-        object.__setattr__(
-            self,
-            "output_directory",
-            _require_text(self.output_directory, "output_directory", maximum=8192),
-        )
+        if self.output_directory is not None:
+            object.__setattr__(
+                self,
+                "output_directory",
+                _require_text(
+                    self.output_directory, "output_directory", maximum=8192
+                ),
+            )
         if (
             isinstance(self.timeout_seconds, bool)
             or not isinstance(self.timeout_seconds, (int, float))
@@ -262,8 +266,9 @@ class SimulationRequest:
             or not 1 <= self.max_points <= 10_000_000
         ):
             raise ValueError("max_points must be between 1 and 10000000")
-        if not isinstance(self.overwrite, bool):
-            raise ValueError("overwrite must be a boolean")
+        for name in ("unsafe_commands", "overwrite"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
 
 
 @dataclass(frozen=True, slots=True)

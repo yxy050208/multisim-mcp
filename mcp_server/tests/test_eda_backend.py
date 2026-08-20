@@ -73,16 +73,28 @@ class EdaBackendTest(unittest.TestCase):
                 **kwargs,
             }
             root = Path(str(kwargs["output_dir"]))
+            work = root / "backend-work"
+            work.mkdir()
             paths = {
-                "raw": root / "result.raw",
-                "csv": root / "data.csv",
-                "netlist": root / "circuit.cir",
-                "commands": root / "run.txt",
-                "log": root / "run.log",
+                "raw": work / "result.raw",
+                "csv": work / "data.csv",
+                "netlist": work / "circuit.cir",
+                "commands": work / "run.txt",
+                "log": work / "run.log",
             }
             for name, path in paths.items():
                 path.write_text(name, encoding="utf-8")
-            return {"success": True, **{key: str(path) for key, path in paths.items()}}
+            published: list[str] = []
+            for path in paths.values():
+                destination = root / path.name
+                destination.write_bytes(path.read_bytes())
+                published.append(str(destination))
+            return {
+                "success": True,
+                "work_dir": str(work),
+                **{key: str(path) for key, path in paths.items()},
+                "artifacts": published,
+            }
 
         backend = MultisimBackend(schematic_executor, simulation_executor)
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +123,16 @@ class EdaBackendTest(unittest.TestCase):
         self.assertTrue(all(len(item.sha256) == 64 for item in schematic.artifacts.artifacts))
         self.assertTrue(simulation.success)
         self.assertEqual(len(simulation.artifacts.artifacts), 5)
+        self.assertTrue(
+            all(
+                Path(item.location).parent.name == "simulation"
+                for item in simulation.artifacts.artifacts
+            )
+        )
+        self.assertEqual(
+            simulation.artifacts.metadata["storage_location"],
+            str((root / "simulation").resolve()),
+        )
         simulation_call = calls["simulation"]
         assert isinstance(simulation_call, dict)
         self.assertEqual(simulation_call["commands"], "op")
@@ -137,6 +159,47 @@ class EdaBackendTest(unittest.TestCase):
                     )
                 )
 
+    def test_simulation_can_keep_backend_managed_artifacts_without_publication(self) -> None:
+        calls: dict[str, object] = {}
+
+        def simulation_executor(
+            netlist: str, commands: str, **kwargs: object
+        ) -> dict[str, object]:
+            calls.update(kwargs)
+            work = Path(str(calls["work_root"])) / "run"
+            work.mkdir()
+            raw = work / "result.raw"
+            raw.write_bytes(b"raw")
+            return {
+                "success": True,
+                "work_dir": str(work),
+                "raw": str(raw),
+                "rows": [[0.0, 5.0]],
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            calls["work_root"] = tmp
+            backend = MultisimBackend(lambda *args, **kwargs: {}, simulation_executor)
+            execution = backend.simulate(
+                SimulationRequest(
+                    design=self._design(),
+                    commands="op",
+                    unsafe_commands=True,
+                )
+            )
+            expected_work = str((Path(tmp) / "run").resolve())
+
+        self.assertTrue(execution.success)
+        self.assertIsNone(calls["output_dir"])
+        self.assertTrue(calls["unsafe_commands"])
+        self.assertEqual(
+            execution.artifacts.metadata["storage_location"], expected_work
+        )
+        self.assertEqual(
+            execution.to_dict()["payload"]["compatibility_result"]["rows"],
+            [[0.0, 5.0]],
+        )
+
     def test_backend_contract_rejects_ambiguous_capabilities_and_requests(self) -> None:
         encoded = MultisimBackend(
             lambda *args, **kwargs: {}, lambda *args, **kwargs: {}
@@ -151,6 +214,18 @@ class EdaBackendTest(unittest.TestCase):
                 commands="op",
                 output_directory="output",
                 timeout_seconds=float("nan"),
+            )
+        with self.assertRaisesRegex(ValueError, "max_points"):
+            SimulationRequest(
+                design=self._design(),
+                commands="op",
+                max_points=10_000_001,
+            )
+        with self.assertRaisesRegex(ValueError, "unsafe_commands"):
+            SimulationRequest(
+                design=self._design(),
+                commands="op",
+                unsafe_commands=1,  # type: ignore[arg-type]
             )
 
     def test_application_service_can_dispatch_to_a_no_com_fake_backend(self) -> None:

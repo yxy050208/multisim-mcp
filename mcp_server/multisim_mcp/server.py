@@ -50,7 +50,11 @@ from multisim_mcp.design_verification import (
     validate_measurement_requests,
     verify_requirements,
 )
-from multisim_mcp.eda_backend import SchematicRequest
+from multisim_mcp.eda_backend import (
+    BackendExecution,
+    SchematicRequest,
+    SimulationRequest,
+)
 from multisim_mcp.eda_service import EdaApplicationService
 from multisim_mcp.experiment_sweep import plan_experiment_sweep as expand_sweep
 from multisim_mcp.multisim_client import (
@@ -1208,15 +1212,24 @@ def run_spice_netlist(
     arbitrary command sourcing. Unrestricted engine commands require both the
     ``unsafe_commands`` argument and an explicit server-side environment flag.
     """
-    return _run_spice_netlist_impl(
+    design = circuit_design_from_spice(
         netlist,
-        commands,
-        output_dir,
-        timeout,
-        max_points,
-        unsafe_commands,
-        overwrite,
+        title="Standalone SPICE simulation",
+        allow_unsupported=True,
     )
+    execution = _eda_application_service().simulate(
+        "multisim",
+        SimulationRequest(
+            design=design,
+            commands=commands,
+            output_directory=output_dir or None,
+            timeout_seconds=timeout,
+            max_points=max_points,
+            unsafe_commands=unsafe_commands,
+            overwrite=overwrite,
+        ),
+    )
+    return _eda_compatibility_result(execution)
 
 
 def _create_schematic_impl(
@@ -1335,6 +1348,13 @@ def _eda_application_service() -> EdaApplicationService:
     )
 
 
+def _eda_compatibility_result(execution: BackendExecution) -> dict:
+    result = execution.to_dict()["payload"].get("compatibility_result")
+    if not isinstance(result, dict):
+        raise RuntimeError("EDA backend omitted the compatibility result")
+    return result
+
+
 @mcp.tool()
 def create_schematic_from_netlist(
     netlist: str,
@@ -1377,12 +1397,7 @@ def create_schematic_from_netlist(
             overwrite=overwrite,
         ),
     )
-    compatibility_result = execution.to_dict()["payload"].get(
-        "compatibility_result"
-    )
-    if not isinstance(compatibility_result, dict):
-        raise RuntimeError("Multisim backend omitted the compatibility result")
-    return compatibility_result
+    return _eda_compatibility_result(execution)
 
 
 def _markdown_text(value: object) -> str:

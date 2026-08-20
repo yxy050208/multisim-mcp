@@ -52,16 +52,17 @@ def _sha256(path: Path) -> str:
 def _artifact_set(
     design: CircuitDesign,
     operation: str,
-    output_directory: Path,
+    output_directory: Path | None,
     paths: list[Path],
 ) -> ArtifactSet:
     unique: dict[str, Path] = {}
     for path in paths:
         resolved = path.expanduser().resolve()
         if resolved.is_file():
-            unique[str(resolved).lower()] = resolved
+            unique[resolved.name.lower()] = resolved
     artifacts: list[Artifact] = []
-    for index, path in enumerate(sorted(unique.values(), key=lambda item: item.name.lower())):
+    ordered_paths = sorted(unique.values(), key=lambda item: item.name.lower())
+    for index, path in enumerate(ordered_paths):
         suffix = path.suffix.lower()
         kind, media_type = _ARTIFACT_TYPES.get(
             suffix, ("artifact", "application/octet-stream")
@@ -77,13 +78,21 @@ def _artifact_set(
                 sha256=_sha256(path),
             )
         )
-    output_key = hashlib.sha256(str(output_directory).encode("utf-8")).hexdigest()[:12]
+    storage_location = (
+        str(output_directory) if output_directory is not None else "backend-managed"
+    )
+    output_key = hashlib.sha256(storage_location.encode("utf-8")).hexdigest()[:12]
     return ArtifactSet(
         artifact_set_id=_derived_identifier(design.design_id, operation, output_key),
         design_id=design.design_id,
         producer="multisim",
         artifacts=tuple(artifacts),
-        metadata={"output_directory": str(output_directory)},
+        metadata={
+            "output_directory": (
+                str(output_directory) if output_directory is not None else None
+            ),
+            "storage_location": storage_location,
+        },
     )
 
 
@@ -140,8 +149,8 @@ class MultisimBackend:
                     severity="error",
                     code="source-netlist-required",
                     message=(
-                        "The current Multisim adapter requires source_netlist until "
-                        "the CircuitDesign compiler is introduced."
+                        "The Multisim adapter requires source_netlist for "
+                        "dialect-faithful execution."
                     ),
                 )
             )
@@ -231,14 +240,18 @@ class MultisimBackend:
         if not isinstance(request, SimulationRequest):
             raise ValueError("request must be SimulationRequest")
         netlist = self._validated_netlist(request.design)
-        root = _require_output_directory(request.output_directory)
+        root = (
+            _require_output_directory(request.output_directory)
+            if request.output_directory is not None
+            else None
+        )
         result = self._simulation_executor(
             netlist,
             request.commands,
-            output_dir=str(root),
+            output_dir=str(root) if root is not None else None,
             timeout=float(request.timeout_seconds),
             max_points=request.max_points,
-            unsafe_commands=False,
+            unsafe_commands=request.unsafe_commands,
             overwrite=request.overwrite,
         )
         success = result.get("success") is True
@@ -250,6 +263,11 @@ class MultisimBackend:
         result_artifacts = result.get("artifacts", [])
         if isinstance(result_artifacts, (list, tuple)):
             paths.extend(Path(item) for item in result_artifacts if isinstance(item, str))
+        artifact_root = root
+        if artifact_root is None:
+            work_dir = result.get("work_dir")
+            if isinstance(work_dir, str) and work_dir.strip():
+                artifact_root = Path(work_dir).expanduser().resolve()
         diagnostics = list(self.validate_design(request.design))
         if not success:
             diagnostics.append(
@@ -263,12 +281,16 @@ class MultisimBackend:
             backend_id=self.backend_id,
             operation="simulate",
             success=success,
-            artifacts=_artifact_set(request.design, "simulate", root, paths),
+            artifacts=_artifact_set(
+                request.design, "simulate", artifact_root, paths
+            ),
             diagnostics=tuple(diagnostics),
             payload={
+                "compatibility_result": result,
                 "commands": request.commands,
                 "max_points": request.max_points,
                 "timeout_seconds": float(request.timeout_seconds),
+                "unsafe_commands": request.unsafe_commands,
             },
         )
 

@@ -47,10 +47,11 @@ AI client / Visual Workbench
 - [x] 定义第一版 `CircuitDesign`、`DesignPatch` 和 `ArtifactSet`。
 - [x] 增加传输无关的后端注册/调度服务、可注入 Multisim 适配器和无 COM 假后端门禁。
 - [x] 增加显式受限 SPICE 转换器，并将首个原理图 MCP 工具接入兼容桥。
+- [x] 将独立 SPICE 仿真工具接入应用服务并保持安全命令策略和返回契约。
 - [ ] 把实验执行从 MCP 工具函数迁移到应用服务。
 - [ ] 将 Multisim COM 操作保留在独立 32 位 worker 中。
 - [ ] 为项目目录、实验目录和优化目录增加版本化 manifest。
-- [ ] 保持现有 51 个工具、19 个 Resource 模板和 5 个 Prompt 兼容。
+- [x] 保持现有 55 个工具、19 个 Resource 模板和 5 个 Prompt 兼容。
 - [x] 规划 DeepSeek 与 DeepSeek Harness 的分层适配。
 - [x] 增加 DeepSeek Harness 客户端配置生成器。
 - [x] 增加 `core`、`experiment`、`optimization` 和 `full` Tool Profile。
