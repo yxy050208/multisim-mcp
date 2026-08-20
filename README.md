@@ -221,6 +221,12 @@ C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 C:\path\to\python32\Scripts\multisim-mcp.exe model `
   --input .\prompt.txt `
   --json
+
+# 显式启用四个只读 EDA 工具分析安全 SPICE 网表（不会执行网表）
+C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
+  --input .\diagnosis-prompt.txt `
+  --netlist .\circuit.cir `
+  --json
 ```
 
 配置生成器默认只打印可复制片段；`--output` 写入新文件，除非再传入 `--force`，
@@ -236,8 +242,10 @@ OpenAI-compatible 服务；默认只预览，`--apply` 才原子写入，`--prob
 配置文件不会保存 API Key 值。完整变量表、手动配置和安全边界见
 [`模型 Provider 自助配置`](docs/MODEL_PROVIDER_CONFIGURATION.md)。
 第一版模型运行时支持非流式 Chat Completions、用量、取消、显式失败回退和白名单
-有界工具循环；CLI 本身不公开工具，提示词只从显式 stdin 或 UTF-8 文件读取。详见
-[`模型 Provider 运行时`](docs/MODEL_PROVIDER_RUNTIME.md)。
+有界工具循环；普通 `model` 命令不公开工具。独立的 `model-diagnose` 可对严格
+`CircuitDesign` JSON 或安全 SPICE 网表启用四个只读 EDA 工具，不执行仿真或修改设计。
+详见 [`模型 Provider 运行时`](docs/MODEL_PROVIDER_RUNTIME.md) 与
+[`只读 EDA 模型诊断`](docs/READ_ONLY_EDA_DIAGNOSIS.md)。
 仓库维护者可用 `python tools/check_deepseek_harness_compat.py --json` 验证固定的
 Harness 本地契约；版本与上游检查细节见适配说明。
 需要把集成作为 Harness 插件安装时，可使用

@@ -12,6 +12,9 @@
 - 新增白名单 `BoundedToolLoop`：每个工具必须同时提供定义、独立参数验证器和本地
   handler；全部参数先预检，再受轮次、调用数和结果大小限制执行，拒绝未知工具、重复
   调用 ID、未配对历史和未完成最终轮次。
+- 新增独立 `model-diagnose` 入口及四个固定只读 EDA 工具：支持严格 `CircuitDesign`
+  JSON 或仅解析不执行的安全 SPICE 网表，提供有界设计摘要、分页元件、网络连接与结构
+  检查；普通 `model` 仍无工具，原始网表、annotations、路径和后端操作均不公开。
 - 新增模型 Provider 自助配置：可从已知环境变量自动发现 DeepSeek、OpenAI、
   Ollama 和 OpenAI-compatible 服务，安全预览、原子合并写入、脱敏查看并显式探测
   模型列表；配置只保存环境变量引用，拒绝明文密钥和远程 HTTP。
@@ -65,6 +68,10 @@
   messages/tools/usage, per-request credential rotation, prompt cancellation,
   double-opt-in failover, a tool-free file/stdin CLI, and an allowlisted tool
   loop that requires independent argument validation for every handler.
+- Added a separate `model-diagnose` command with four fixed read-only EDA tools
+  over strict CircuitDesign JSON or safely parsed, never-executed SPICE input;
+  raw netlist text, annotations, paths, simulation, and mutation stay outside
+  the model tool surface.
 - Added secret-free model-provider discovery, preview, atomic merge, sanitized
   display, and explicit models-endpoint probes for DeepSeek, OpenAI, Ollama, and
   custom OpenAI-compatible services.

@@ -46,6 +46,17 @@ exposes no tools. Provider failover is disabled unless both fallback order and
 `--allow-failover` are explicit; a network failure after server-side processing
 can still result in a second billable request.
 
+`model-diagnose` is a separate explicit authorization boundary. It captures one
+strict `CircuitDesign` and exposes only summary, paginated component listing,
+single-net inspection, and structural checks. It accepts no tool paths, backend
+selection, commands, or write targets; it never returns raw source-netlist text
+and does not initialize Multisim or COM. Safe-SPICE input is parsed, never
+executed, and unsafe directives fail before a provider request. Structured
+component values, model names, net names, and topology requested through these
+tools are still sent to the selected provider. Treat proprietary designs as
+external-provider data unless a local provider is selected. Tool results are
+untrusted data and structural findings are not simulation or electrical proof.
+
 `BoundedToolLoop` does not automatically bridge MCP tools. Every local tool
 requires an allowlisted definition, a separate argument validator, and a
 handler. Argument preflight does not make multiple handlers one transaction;

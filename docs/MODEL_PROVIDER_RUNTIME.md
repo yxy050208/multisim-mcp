@@ -139,11 +139,31 @@ I/O 线程执行，调用方会及时收到 `ModelCancelled`；底层连接会�
 I/O 最迟受原请求超时约束且不会阻止进程退出。工具 handler 自身必须协作检查传入的
 `cancel_event`。
 
+## 只读 EDA 诊断入口
+
+`multisim-mcp model-diagnose` 现在是第一个正式工具化入口。它必须接收一个严格
+`CircuitDesign` JSON 或安全 SPICE 网表，随后只公开设计摘要、分页元件、单网络连接
+和结构性检查四个固定工具。普通 `model` 命令继续保持无工具。
+
+```powershell
+multisim-mcp model-diagnose `
+  --input .\prompt.txt `
+  --netlist .\circuit.cir `
+  --max-rounds 8 `
+  --max-tool-calls 16 `
+  --json
+```
+
+该入口不会启动 Multisim、执行网表、运行仿真或修改设计；原始网表、annotations 和
+文件路径不会进入工具结果。结构化元件/网络数据仍会按模型请求发送到所选 Provider，
+详细隐私边界、输入门禁与输出上限见
+[`READ_ONLY_EDA_DIAGNOSIS.md`](READ_ONLY_EDA_DIAGNOSIS.md)。
+
 ## 当前边界
 
-本阶段尚未提供流式输出、持久会话、图形界面、token/费用预算策略，也未把 Multisim
-或 EDA 应用服务预绑定成模型工具。下一阶段应先提供少量只读诊断工具，再接入带事务、
-审批和回滚的纠错/优化动作；不得把全部 MCP 工具无审查地复制到模型循环。
+本阶段尚未提供流式输出、持久会话、图形界面、token/费用预算策略、实验结果只读工具
+或后端诊断。下一阶段应先把已有实验/验收证据接入只读分析，再提供带预览、事务、审批
+和回滚的纠错/优化动作；不得把全部 MCP 工具无审查地复制到模型循环。
 
 ## English summary
 
@@ -151,7 +171,9 @@ The first transport-neutral runtime supports bounded, non-streaming
 OpenAI-compatible Chat Completions, normalized messages/tool calls/usage,
 per-request environment credential resolution, cooperative cancellation, and
 explicit retryable-only provider failover. The CLI reads prompts only from
-explicit stdin or UTF-8 files and exposes no tools. `BoundedToolLoop` requires
-an allowlisted definition, independent argument validator, and local handler
-for every tool. EDA bindings, streaming, persistence, UI, and budget policy are
-future workbench milestones.
+explicit stdin or UTF-8 files and exposes no tools. `model-diagnose` is a
+separate explicit entry point with four fixed read-only bindings over strict
+CircuitDesign JSON or safely parsed SPICE. It never exposes raw netlist text or
+runs a backend, although requested structured circuit data is sent to the
+selected provider. Streaming, persistence, transactional actions, UI, and
+budget policy remain future workbench milestones.

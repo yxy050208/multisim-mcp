@@ -132,7 +132,8 @@ DeepSeek API 是模型提供方；DeepSeek Harness 是代理运行时。适配�
 7. [ ] 将 bundle 通过 Trusted Publishing 发布到 npm；
 8. [x] 提供只保存环境变量引用的版本化 Provider 配置、自动发现和连接诊断；
 9. [x] 实现通用 `ModelProvider` 调用、取消、显式回退与白名单有界工具循环；
-10. [ ] 在工作台中绑定只读 EDA 诊断，再加入带审批/事务的纠错优化动作与流式 UI。
+10. [x] 绑定四个固定只读 EDA 工具，支持严格设计 JSON、安全网表和有界诊断 CLI；
+11. [ ] 接入只读实验/验收证据，再加入带审批/事务的纠错优化动作与流式 UI。
 
 DeepSeek API Key 不得传给 Multisim MCP。Harness 当前处于 Developer Preview，
 集成测试应固定已验证版本，并用非阻塞的上游兼容任务监控新版本。
@@ -153,7 +154,9 @@ optimization come first, followed by an ngspice backend, a read-only visual
 workbench, and then KiCad engineering outputs. DeepSeek API support remains a
 model-provider concern. Secret-free configuration, explicit connection probes,
 bounded Chat Completions, cancellation, opt-in failover, and an allowlisted tool
-loop are now available outside the EDA core. Binding read-only EDA diagnostics,
-transactional actions, streaming, and UI remains a workbench milestone.
+loop are now available outside the EDA core. Four fixed read-only EDA bindings
+now inspect strict CircuitDesign JSON or safely parsed SPICE without backend
+execution. Read-only experiment evidence, transactional actions, streaming,
+and UI remain workbench milestones.
 DeepSeek Harness support starts with MCP configuration, profiles, bounded
 artifact tools, a versioned skill bundle, and compatibility tests.

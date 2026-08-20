@@ -14,6 +14,7 @@ from multisim_mcp.cli import (
     LOCAL_PACK_SCHEMA_VERSION,
     REQUIRED_TEMPLATES,
     _local_pack_status,
+    _read_spice_design,
     _write_config,
     collect_doctor_report,
     main,
@@ -585,6 +586,172 @@ class ModelCliTest(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(payload["error"]["message"], "sanitized failure")
         self.assertFalse(payload["credential_values_exposed"])
+
+    def test_model_diagnose_runs_only_fixed_read_only_bindings(self) -> None:
+        captured: dict[str, object] = {}
+
+        class Run:
+            def to_dict(self) -> dict[str, object]:
+                return {
+                    "final_response": ModelCliTest._response().to_dict(),
+                    "rounds": 2,
+                    "tool_call_count": 1,
+                    "provider_ids": ["fixture", "fixture"],
+                    "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+                    "usage_complete": True,
+                    "transcript_message_count": 5,
+                }
+
+        class Loop:
+            def __init__(
+                self,
+                registry: object,
+                bindings: object,
+                **kwargs: object,
+            ) -> None:
+                captured["registry"] = registry
+                captured["tool_names"] = [
+                    item.definition.name for item in bindings
+                ]
+                captured["loop_kwargs"] = kwargs
+
+            def run(self, messages: object, **kwargs: object) -> Run:
+                captured["messages"] = messages
+                captured["run_kwargs"] = kwargs
+                return Run()
+
+        design = {
+            "schema_version": 1,
+            "design_id": "divider-v1",
+            "title": "Divider",
+            "revision": 0,
+            "components": [
+                {
+                    "refdes": "R1",
+                    "kind": "R",
+                    "nodes": ["in", "out"],
+                    "value": "1k",
+                    "model": None,
+                    "parameters": {},
+                    "annotations": {},
+                }
+            ],
+            "nets": ["in", "out"],
+            "parameters": {},
+            "model_references": [],
+            "annotations": {"private": "not returned"},
+            "source_netlist": "R1 in out 1k\n.end\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design_path = root / "design.json"
+            prompt_path = root / "prompt.txt"
+            design_path.write_text(json.dumps(design), encoding="utf-8")
+            prompt_path.write_text("Check the topology.", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("multisim_mcp.cli.read_provider_config", return_value={}),
+                patch(
+                    "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                    return_value="registry",
+                ),
+                patch("multisim_mcp.cli.BoundedToolLoop", Loop),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--input",
+                        str(prompt_path),
+                        "--design",
+                        str(design_path),
+                        "--provider",
+                        "fixture",
+                        "--max-rounds",
+                        "4",
+                        "--max-tool-calls",
+                        "6",
+                        "--json",
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["command"], "model-diagnose")
+        self.assertFalse(payload["design"]["source_netlist_exposed"])
+        self.assertNotIn("R1 in out 1k", output.getvalue())
+        self.assertEqual(
+            set(captured["tool_names"]),
+            {
+                "eda_get_design_summary",
+                "eda_list_components",
+                "eda_inspect_net",
+                "eda_run_structural_checks",
+            },
+        )
+        self.assertEqual(captured["loop_kwargs"], {"max_rounds": 4, "max_tool_calls": 6})
+        messages = captured["messages"]
+        self.assertEqual(messages[-1].content, "Check the topology.")
+        self.assertIn("untrusted data", messages[0].content)
+
+    def test_model_diagnose_rejects_duplicate_design_fields_before_provider(self) -> None:
+        duplicate = (
+            '{"schema_version":1,"design_id":"d","title":"one",'
+            '"title":"two","source_netlist":"R1 a 0 1k"}'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "duplicate.json"
+            path.write_text(duplicate, encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("sys.stdin", io.StringIO("inspect")),
+                patch("multisim_mcp.cli.read_provider_config") as read_config,
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--stdin",
+                        "--design",
+                        str(path),
+                        "--json",
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("duplicate field", payload["error"]["message"])
+        read_config.assert_not_called()
+
+    def test_model_diagnose_parses_safe_netlist_and_rejects_includes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            safe = root / "divider.cir"
+            unsafe = root / "include.cir"
+            safe.write_text(
+                "V1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+                encoding="utf-8",
+            )
+            unsafe.write_text(".include vendor.lib\n.end\n", encoding="utf-8")
+            design = _read_spice_design(str(safe))
+            self.assertEqual([item.refdes for item in design.components], ["V1", "R1", "R2"])
+            output = io.StringIO()
+            with (
+                patch("sys.stdin", io.StringIO("inspect")),
+                patch("multisim_mcp.cli.read_provider_config") as read_config,
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--stdin",
+                        "--netlist",
+                        str(unsafe),
+                        "--json",
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("invalid safe SPICE netlist", payload["error"]["message"])
+        read_config.assert_not_called()
 
 
 class HarnessSkillsCliTest(unittest.TestCase):

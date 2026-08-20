@@ -208,6 +208,10 @@ C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 # One explicit tool-free model request from a UTF-8 file.
 C:\path\to\python32\Scripts\multisim-mcp.exe model --input .\prompt.txt --json
 
+# Four fixed read-only EDA tools; the SPICE file is parsed but never executed.
+C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
+  --input .\diagnosis-prompt.txt --netlist .\circuit.cir --json
+
 # Unwrapped command/args/env JSON for another stdio client
 C:\path\to\python32\Scripts\multisim-mcp.exe config --client generic
 ```
@@ -237,9 +241,12 @@ MCP child process, and it performs network I/O only with explicit `--probe`.
 See [`docs/MODEL_PROVIDER_CONFIGURATION.md`](../docs/MODEL_PROVIDER_CONFIGURATION.md).
 The transport-neutral runtime adds bounded non-streaming Chat Completions,
 normalized usage, cooperative cancellation, double-opt-in failover, and an
-allowlisted library-level tool loop. The CLI deliberately exposes no tools and
-does not accept inline prompt arguments. See
-[`docs/MODEL_PROVIDER_RUNTIME.md`](../docs/MODEL_PROVIDER_RUNTIME.md).
+allowlisted library-level tool loop. The ordinary `model` command deliberately
+exposes no tools and accepts no inline prompt arguments. The separate
+`model-diagnose` command explicitly enables four read-only tools over strict
+CircuitDesign JSON or safely parsed SPICE, without starting a backend. See
+[`docs/MODEL_PROVIDER_RUNTIME.md`](../docs/MODEL_PROVIDER_RUNTIME.md) and
+[`docs/READ_ONLY_EDA_DIAGNOSIS.md`](../docs/READ_ONLY_EDA_DIAGNOSIS.md).
 
 Manual MCP client configuration:
 

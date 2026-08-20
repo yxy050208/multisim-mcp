@@ -208,6 +208,12 @@ C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 C:\path\to\python32\Scripts\multisim-mcp.exe model `
   --input .\prompt.txt `
   --json
+
+# Explicitly enable four read-only EDA tools over a safely parsed SPICE file.
+C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
+  --input .\diagnosis-prompt.txt `
+  --netlist .\circuit.cir `
+  --json
 ```
 
 The generator prints a copy-pasteable fragment by default. `--output` writes a
@@ -224,9 +230,12 @@ OpenAI-compatible services. It previews by default, writes only with `--apply`,
 and connects only with `--probe`; API key values are never stored. See the
 [bilingual provider configuration guide](docs/MODEL_PROVIDER_CONFIGURATION.md).
 The first provider runtime supports bounded non-streaming Chat Completions,
-usage, cancellation, explicit failover, and an allowlisted tool loop. The CLI
-exposes no tools and reads prompts only from explicit stdin or UTF-8 files. See
-the [runtime guide](docs/MODEL_PROVIDER_RUNTIME.md).
+usage, cancellation, explicit failover, and an allowlisted tool loop. The
+ordinary `model` command exposes no tools. The separate `model-diagnose`
+command enables four fixed read-only EDA tools over strict CircuitDesign JSON
+or safely parsed SPICE; it cannot simulate or mutate a design. See the
+[runtime guide](docs/MODEL_PROVIDER_RUNTIME.md) and
+[read-only diagnosis guide](docs/READ_ONLY_EDA_DIAGNOSIS.md).
 Repository maintainers can validate the pinned local Harness contract with
 `python tools/check_deepseek_harness_compat.py --json`.
 An independently installable source bundle is available under
