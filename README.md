@@ -233,7 +233,8 @@ Harness 本地契约；版本与上游检查细节见适配说明。
 从 alpha 升级请阅读 [`docs/MIGRATION_TO_1.0.md`](docs/MIGRATION_TO_1.0.md)；任务与
 实验恢复流程见 [`docs/RECOVERY.md`](docs/RECOVERY.md)。
 1.0 之后的纠错、优化、多 EDA 后端和可视化工作台计划见
-[`2.0 综合路线图`](docs/ROADMAP_TO_2.0.md)。
+[`2.0 综合路线图`](docs/ROADMAP_TO_2.0.md)。阶段 A 已加入第一版传输无关
+[`EDA 核心与后端边界`](docs/EDA_CORE.md)，现有 MCP 工具签名保持兼容。
 
 ## 仓库结构
 

@@ -6,6 +6,10 @@
 
 ### 中文
 
+- 新增第一版传输无关 EDA Core：严格版本化 `CircuitDesign`、`DesignPatch` 和
+  `ArtifactSet`，提供可逆有界补丁、模型来源和 SHA-256 产物清单。
+- 新增 `EdaBackend` 能力发现协议、后端注册/调度服务和可注入的 Multisim 适配器；
+  核心不依赖 MCP/COM，并以无 COM 假后端在 Python 3.10 与 32 位 Python 3.12 验证。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -32,6 +36,11 @@
 
 ### English
 
+- Added the first transport-neutral EDA core with strict versioned
+  `CircuitDesign`, reversible bounded `DesignPatch`, and hashed `ArtifactSet`
+  objects.
+- Added the `EdaBackend` capability protocol, backend dispatch service, and an
+  injectable Multisim adapter with no-COM tests on Python 3.10 and win32 3.12.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

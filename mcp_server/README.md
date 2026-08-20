@@ -92,6 +92,12 @@ Experimental:
 - Generated schematic probes are not enabled by default. Experiment data is
   obtained authoritatively from the same netlist through Multisim's engine.
 
+Platformization work now includes strict versioned `CircuitDesign`, `DesignPatch`,
+and `ArtifactSet` objects, the `EdaBackend` protocol, a transport-neutral
+application service, and an injectable Multisim adapter. See
+[`docs/EDA_CORE.md`](../docs/EDA_CORE.md). The current MCP tools retain their 1.0
+signatures while execution is migrated behind this boundary.
+
 ## Install
 
 Requirements:
