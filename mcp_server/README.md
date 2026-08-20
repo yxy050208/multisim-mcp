@@ -199,6 +199,12 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 # Install the five bilingual workflow skills in a Harness project.
 C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
 
+# Safely discover model-provider environment settings (preview only).
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --json
+
+# Atomically store references after reviewing them.
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
+
 # Unwrapped command/args/env JSON for another stdio client
 C:\path\to\python32\Scripts\multisim-mcp.exe config --client generic
 ```
@@ -222,6 +228,10 @@ Source-tree maintainers can run `python tools/check_deepseek_harness_compat.py
 The independently installable Harness bundle lives in
 [`integrations/deepseek-harness`](../integrations/deepseek-harness) and currently
 supports local source installation; it is not yet published to npm.
+The separate `configure` command prepares model-provider settings for the future
+workbench. It never copies credential values into its versioned JSON file or the
+MCP child process, and it performs network I/O only with explicit `--probe`.
+See [`docs/MODEL_PROVIDER_CONFIGURATION.md`](../docs/MODEL_PROVIDER_CONFIGURATION.md).
 
 Manual MCP client configuration:
 

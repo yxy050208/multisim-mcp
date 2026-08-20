@@ -197,6 +197,12 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 
 # Install the five bilingual experiment skills from a Harness project root.
 C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
+
+# Discover and safely preview model-provider settings (no write, no network).
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --json
+
+# Persist environment-variable references after reviewing the preview.
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 ```
 
 The generator prints a copy-pasteable fragment by default. `--output` writes a
@@ -208,6 +214,10 @@ credential boundary and compatibility baseline.
 omitting it preserves the 55-tool `full` compatibility mode. Artifact export is
 disabled unless `--artifact-export-dir` explicitly approves a destination root.
 The Harness skill installer preserves existing files unless `--force` is explicit.
+Model-provider self-configuration supports DeepSeek, OpenAI, Ollama, and custom
+OpenAI-compatible services. It previews by default, writes only with `--apply`,
+and connects only with `--probe`; API key values are never stored. See the
+[bilingual provider configuration guide](docs/MODEL_PROVIDER_CONFIGURATION.md).
 Repository maintainers can validate the pinned local Harness contract with
 `python tools/check_deepseek_harness_compat.py --json`.
 An independently installable source bundle is available under

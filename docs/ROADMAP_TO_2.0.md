@@ -130,7 +130,8 @@ DeepSeek API 是模型提供方；DeepSeek Harness 是代理运行时。适配�
 5. [x] 建立机器可读版本门禁和非阻塞上游兼容监控；
 6. [x] 提供独立、带版本门禁的 DeepSeek Harness bundle 源码；
 7. [ ] 将 bundle 通过 Trusted Publishing 发布到 npm；
-8. [ ] 独立平台需要内置模型时，再实现通用 `ModelProvider` 和 DeepSeek provider。
+8. [x] 提供只保存环境变量引用的版本化 Provider 配置、自动发现和连接诊断；
+9. [ ] 独立平台需要内置模型时，实现通用 `ModelProvider` 调用与工具循环运行时。
 
 DeepSeek API Key 不得传给 Multisim MCP。Harness 当前处于 Developer Preview，
 集成测试应固定已验证版本，并用非阻塞的上游兼容任务监控新版本。
@@ -149,6 +150,8 @@ The post-1.0 plan keeps MCP as the primary interface while extracting a
 transport-neutral EDA and optimization core. Bounded diagnosis and parameter
 optimization come first, followed by an ngspice backend, a read-only visual
 workbench, and then KiCad engineering outputs. DeepSeek API support remains a
-model-provider concern; DeepSeek Harness support starts with MCP configuration,
-profiles, bounded artifact tools, a versioned skill bundle, and compatibility
-tests.
+model-provider concern. A secret-free, versioned provider configuration and
+explicit connection probe are now available; actual chat and tool-loop runtime
+remains a workbench milestone. DeepSeek Harness support starts with MCP
+configuration, profiles, bounded artifact tools, a versioned skill bundle, and
+compatibility tests.

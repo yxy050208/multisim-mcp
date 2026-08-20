@@ -6,6 +6,9 @@
 
 ### 中文
 
+- 新增模型 Provider 自助配置：可从已知环境变量自动发现 DeepSeek、OpenAI、
+  Ollama 和 OpenAI-compatible 服务，安全预览、原子合并写入、脱敏查看并显式探测
+  模型列表；配置只保存环境变量引用，拒绝明文密钥和远程 HTTP。
 - 新增第一版传输无关 EDA Core：严格版本化 `CircuitDesign`、`DesignPatch` 和
   `ArtifactSet`，提供可逆有界补丁、模型来源和 SHA-256 产物清单。
 - 新增 `EdaBackend` 能力发现协议、后端注册/调度服务和可注入的 Multisim 适配器；
@@ -52,6 +55,9 @@
 
 ### English
 
+- Added secret-free model-provider discovery, preview, atomic merge, sanitized
+  display, and explicit models-endpoint probes for DeepSeek, OpenAI, Ollama, and
+  custom OpenAI-compatible services.
 - Added the first transport-neutral EDA core with strict versioned
   `CircuitDesign`, reversible bounded `DesignPatch`, and hashed `ArtifactSet`
   objects.

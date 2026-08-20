@@ -17,12 +17,23 @@ from multisim_mcp import __version__
 from multisim_mcp.com_worker_client import WORKER_PYTHON_ENV
 from multisim_mcp.experiment_resources import ARTIFACT_EXPORT_DIR_ENV
 from multisim_mcp.harness_skills import install_harness_skills
+from multisim_mcp.provider_config import (
+    PROVIDER_CONFIG_SCHEMA_VERSION,
+    build_provider,
+    default_provider_config_path,
+    discover_provider_config,
+    make_provider_config,
+    probe_provider_config,
+    read_provider_config,
+    write_provider_config,
+)
 from multisim_mcp.tool_profiles import TOOL_PROFILE_ENV, TOOL_PROFILES
 
 SCHEMA_VERSION = 1
 LOCAL_PACK_SCHEMA_VERSION = 2
 REQUIRED_TEMPLATES = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
 CLIENTS = ("claude-desktop", "codex", "deepseek-harness", "generic")
+MODEL_PROVIDERS = ("deepseek", "openai", "ollama", "openai-compatible")
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _HARNESS_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
@@ -681,6 +692,130 @@ def _run_server() -> None:
     _load_module("multisim_mcp.server").main()
 
 
+def _merge_provider_config(
+    current: dict[str, Any],
+    updates: dict[str, Any],
+    *,
+    prefer_updates: bool,
+) -> dict[str, Any]:
+    providers = dict(current["providers"])
+    providers.update(updates["providers"])
+    active = (
+        updates.get("active_provider")
+        if prefer_updates
+        else current.get("active_provider") or updates.get("active_provider")
+    )
+    return make_provider_config(list(providers.values()), active_provider=active)
+
+
+def _configure_provider(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """Preview, persist, or probe secret-free model-provider settings."""
+    target = (
+        Path(args.path).expanduser().resolve()
+        if args.path
+        else default_provider_config_path()
+    )
+    mode = "show" if args.show else "manual" if args.provider else "auto"
+    detected: list[str] = []
+    skipped: list[dict[str, Any]] = []
+
+    if mode == "show":
+        if args.apply or args.replace:
+            raise ValueError("--show cannot be combined with --apply or --replace")
+        manual_values = (
+            args.name,
+            args.base_url,
+            args.model,
+            args.models_path,
+            args.api_key_env,
+        )
+        if any(value is not None for value in manual_values) or args.no_api_key:
+            raise ValueError("manual provider options require --provider")
+        config = read_provider_config(target)
+    elif mode == "auto":
+        manual_values = (
+            args.name,
+            args.base_url,
+            args.model,
+            args.models_path,
+            args.api_key_env,
+        )
+        if any(value is not None for value in manual_values) or args.no_api_key:
+            raise ValueError("manual provider options require --provider")
+        discovery = discover_provider_config()
+        config = discovery["config"]
+        detected = discovery["detected"]
+        skipped = discovery["skipped"]
+    else:
+        key_env = "" if args.no_api_key else args.api_key_env
+        provider = build_provider(
+            args.provider,
+            provider_id=args.name,
+            base_url=args.base_url,
+            model=args.model,
+            api_key_env=key_env,
+            models_path=args.models_path,
+        )
+        config = make_provider_config([provider], active_provider=provider["id"])
+        detected = [provider["id"]]
+
+    output_config = config
+    written: Path | None = None
+    if args.apply:
+        if not config["providers"]:
+            raise ValueError(
+                "no complete provider was detected; set the documented environment "
+                "variables or configure one with --provider"
+            )
+        if target.exists() and not args.replace:
+            current = read_provider_config(target)
+            output_config = _merge_provider_config(
+                current,
+                config,
+                prefer_updates=mode == "manual",
+            )
+        written = write_provider_config(output_config, target)
+
+    probes: list[dict[str, Any]] = []
+    if args.probe is not None:
+        if not output_config["providers"]:
+            raise ValueError("no provider is available to probe")
+        selected = None if args.probe == "*" else args.probe
+        probes = probe_provider_config(
+            output_config,
+            provider_id=selected,
+            timeout=args.timeout,
+        )
+    success = all(item["success"] for item in probes) if probes else True
+    result = {
+        "schema_version": PROVIDER_CONFIG_SCHEMA_VERSION,
+        "command": "configure",
+        "success": success,
+        "mode": mode,
+        "applied": written is not None,
+        "path": str(target),
+        "config": output_config,
+        "detected": detected,
+        "skipped": skipped,
+        "probes": probes,
+        "credential_values_exposed": False,
+    }
+    return result, 0 if success else 1
+
+
+def _print_provider_human(result: dict[str, Any]) -> None:
+    if result["applied"]:
+        print(f"Provider config written: {result['path']}")
+    else:
+        print(json.dumps(result["config"], ensure_ascii=False, indent=2))
+    for skipped in result["skipped"]:
+        missing = ", ".join(skipped["missing"])
+        print(f"Skipped {skipped['provider']}: missing {missing}")
+    for probe in result["probes"]:
+        state = "OK" if probe["success"] else "FAIL"
+        print(f"[{state}] {probe['provider']}: {probe['status']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multisim-mcp",
@@ -719,6 +854,66 @@ def build_parser() -> argparse.ArgumentParser:
     config.add_argument("--name", default="multisim", help="MCP server name")
     config.add_argument(
         "--python", default=sys.executable, help="MCP frontend Python executable"
+    )
+
+    configure = subparsers.add_parser(
+        "configure",
+        help="discover and safely configure a model provider for the local workbench",
+    )
+    mode = configure.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--auto",
+        action="store_true",
+        help="discover complete settings from known environment variables (default)",
+    )
+    mode.add_argument(
+        "--show", action="store_true", help="show the stored, secret-free config"
+    )
+    mode.add_argument("--provider", choices=MODEL_PROVIDERS)
+    configure.add_argument(
+        "--name", help="provider ID (defaults to the provider preset name)"
+    )
+    configure.add_argument("--base-url", help="OpenAI-compatible API base URL")
+    configure.add_argument("--model", help="model ID")
+    configure.add_argument(
+        "--models-path", help="models endpoint path relative to the base URL"
+    )
+    credential = configure.add_mutually_exclusive_group()
+    credential.add_argument(
+        "--api-key-env",
+        help="environment variable containing the API key; the value is never stored",
+    )
+    credential.add_argument(
+        "--no-api-key",
+        action="store_true",
+        help="configure a provider that does not require authentication",
+    )
+    configure.add_argument(
+        "--path", help="provider config path (defaults to the per-user config path)"
+    )
+    configure.add_argument(
+        "--apply", action="store_true", help="atomically persist the previewed config"
+    )
+    configure.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace rather than merge an existing config (requires --apply)",
+    )
+    configure.add_argument(
+        "--probe",
+        nargs="?",
+        const="*",
+        metavar="PROVIDER_ID",
+        help="connect to all providers, or only the optional provider ID",
+    )
+    configure.add_argument(
+        "--timeout", type=float, default=5.0, help="probe timeout in seconds"
+    )
+    configure.add_argument(
+        "--json",
+        dest="json_command",
+        action="store_true",
+        help="emit a stable JSON result envelope",
     )
     config.add_argument(
         "--worker-python",
@@ -819,6 +1014,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(result["output_dir"])
         return 0
+    if args.command == "configure":
+        try:
+            if args.replace and not args.apply:
+                raise ValueError("--replace requires --apply")
+            if not 0.1 <= args.timeout <= 60:
+                raise ValueError("--timeout must be between 0.1 and 60 seconds")
+            result, exit_code = _configure_provider(args)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            if json_output:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": PROVIDER_CONFIG_SCHEMA_VERSION,
+                            "command": "configure",
+                            "success": False,
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            "credential_values_exposed": False,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                parser.error(str(exc))
+            return 2
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            _print_provider_human(result)
+        return exit_code
     if args.command == "config":
         try:
             content = render_client_config(

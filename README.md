@@ -210,6 +210,12 @@ C:\path\to\python32\Scripts\multisim-mcp.exe config `
 
 # 在 Harness 项目根安装五个双语实验 Skill
 C:\path\to\python32\Scripts\multisim-mcp.exe harness-skills --output .dsh/skills
+
+# 自动发现模型 Provider 并安全预览（不写文件、不联网）
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --json
+
+# 确认后写入仅含环境变量引用的配置
+C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 ```
 
 配置生成器默认只打印可复制片段；`--output` 写入新文件，除非再传入 `--force`，
@@ -220,6 +226,10 @@ DeepSeek 模型与官方 Harness 的分层、凭据边界和版本兼容性见
 省略时保持 55 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
 `--artifact-export-dir` 后可用，并且只能写入该目录之下。
 Harness Skill 安装默认不覆盖现有文件；需要恢复打包版本时显式增加 `--force`。
+模型 Provider 自助配置支持 DeepSeek、OpenAI、Ollama 和任意
+OpenAI-compatible 服务；默认只预览，`--apply` 才原子写入，`--probe` 才联网。
+配置文件不会保存 API Key 值。完整变量表、手动配置和安全边界见
+[`模型 Provider 自助配置`](docs/MODEL_PROVIDER_CONFIGURATION.md)。
 仓库维护者可用 `python tools/check_deepseek_harness_compat.py --json` 验证固定的
 Harness 本地契约；版本与上游检查细节见适配说明。
 需要把集成作为 Harness 插件安装时，可使用

@@ -298,6 +298,145 @@ class ConfigGeneratorTest(unittest.TestCase):
         run_server.assert_called_once_with()
 
 
+class ProviderConfigureCliTest(unittest.TestCase):
+    def test_auto_preview_does_not_write_or_expose_secret(self) -> None:
+        secret = "cli-secret-must-not-leak"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "providers.json"
+            output = io.StringIO()
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DEEPSEEK_API_KEY": secret},
+                    clear=True,
+                ),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    ["configure", "--auto", "--path", str(target), "--json"]
+                )
+            exists = target.exists()
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(exists)
+        self.assertFalse(payload["applied"])
+        self.assertEqual(payload["detected"], ["deepseek"])
+        self.assertNotIn(secret, output.getvalue())
+        self.assertEqual(
+            payload["config"]["providers"]["deepseek"]["credential"]["name"],
+            "DEEPSEEK_API_KEY",
+        )
+
+    def test_manual_apply_and_show_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "providers.json"
+            with redirect_stdout(io.StringIO()):
+                apply_exit = main(
+                    [
+                        "configure",
+                        "--provider",
+                        "ollama",
+                        "--model",
+                        "qwen3:8b",
+                        "--path",
+                        str(target),
+                        "--apply",
+                        "--json",
+                    ]
+                )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                show_exit = main(
+                    ["configure", "--show", "--path", str(target), "--json"]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(apply_exit, 0)
+        self.assertEqual(show_exit, 0)
+        self.assertEqual(payload["mode"], "show")
+        self.assertEqual(
+            payload["config"]["providers"]["ollama"]["model"], "qwen3:8b"
+        )
+        self.assertIsNone(
+            payload["config"]["providers"]["ollama"]["credential"]
+        )
+
+    def test_apply_merges_existing_providers_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "providers.json"
+            commands = (
+                [
+                    "configure",
+                    "--provider",
+                    "ollama",
+                    "--model",
+                    "qwen3:8b",
+                    "--path",
+                    str(target),
+                    "--apply",
+                    "--json",
+                ],
+                [
+                    "configure",
+                    "--provider",
+                    "deepseek",
+                    "--path",
+                    str(target),
+                    "--apply",
+                    "--json",
+                ],
+            )
+            for command in commands:
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(command), 0)
+            content = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(set(content["providers"]), {"ollama", "deepseek"})
+        self.assertEqual(content["active_provider"], "deepseek")
+
+    def test_probe_failure_returns_one_without_exposing_credential(self) -> None:
+        probe = {
+            "provider": "deepseek",
+            "success": False,
+            "status": "unreachable",
+            "error": "fixture",
+        }
+        output = io.StringIO()
+        with (
+            patch(
+                "multisim_mcp.cli.probe_provider_config", return_value=[probe]
+            ),
+            redirect_stdout(output),
+        ):
+            exit_code = main(
+                [
+                    "configure",
+                    "--provider",
+                    "deepseek",
+                    "--probe",
+                    "--json",
+                ]
+            )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertFalse(payload["success"])
+        self.assertFalse(payload["credential_values_exposed"])
+
+    def test_replace_requires_apply(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["configure", "--auto", "--replace", "--json"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("requires --apply", payload["error"]["message"])
+
+    def test_manual_options_require_provider_mode(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(["configure", "--model", "ignored", "--json"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("require --provider", payload["error"]["message"])
+
+
 class HarnessSkillsCliTest(unittest.TestCase):
     def test_harness_skills_json_installs_five_bundled_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
