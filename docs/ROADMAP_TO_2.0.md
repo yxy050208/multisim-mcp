@@ -46,6 +46,7 @@ AI client / Visual Workbench
 - [x] 定义 `EdaBackend` 能力接口和能力发现结果。
 - [x] 定义第一版 `CircuitDesign`、`DesignPatch` 和 `ArtifactSet`。
 - [x] 增加传输无关的后端注册/调度服务、可注入 Multisim 适配器和无 COM 假后端门禁。
+- [x] 增加显式受限 SPICE 转换器，并将首个原理图 MCP 工具接入兼容桥。
 - [ ] 把实验执行从 MCP 工具函数迁移到应用服务。
 - [ ] 将 Multisim COM 操作保留在独立 32 位 worker 中。
 - [ ] 为项目目录、实验目录和优化目录增加版本化 manifest。

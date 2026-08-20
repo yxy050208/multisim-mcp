@@ -50,12 +50,15 @@ from multisim_mcp.design_verification import (
     validate_measurement_requests,
     verify_requirements,
 )
+from multisim_mcp.eda_backend import SchematicRequest
+from multisim_mcp.eda_service import EdaApplicationService
 from multisim_mcp.experiment_sweep import plan_experiment_sweep as expand_sweep
 from multisim_mcp.multisim_client import (
     Ms14Codec,
     MultisimClient,
     runtime_diagnostics,
 )
+from multisim_mcp.multisim_backend import MultisimBackend
 from multisim_mcp.job_engine import (
     ExperimentJobManager,
     JobSubmission,
@@ -75,6 +78,7 @@ from multisim_mcp.schematic_builder import (
     template_search_paths,
 )
 from multisim_mcp.spice_raw import parse_raw, plot_svg, summarize_columns, write_csv
+from multisim_mcp.spice_adapter import circuit_design_from_spice
 from multisim_mcp.sweep_resources import (
     read_sweep_summary,
     read_sweep_text,
@@ -1324,6 +1328,13 @@ def _create_schematic_impl(
     return result
 
 
+def _eda_application_service() -> EdaApplicationService:
+    """Build the compatibility service without retaining MCP/COM transport state."""
+    return EdaApplicationService(
+        [MultisimBackend(_create_schematic_impl, _run_spice_netlist_impl)]
+    )
+
+
 @mcp.tool()
 def create_schematic_from_netlist(
     netlist: str,
@@ -1345,15 +1356,33 @@ def create_schematic_from_netlist(
     remain experimental. The high-level experiment tool obtains authoritative
     data from the same source netlist through Multisim's command engine.
     """
-    return _create_schematic_impl(
+    output_path = Path(output_ms14).expanduser().resolve()
+    if output_path.suffix.lower() != ".ms14":
+        raise ValueError("output_ms14 must end with .ms14")
+    design = circuit_design_from_spice(
         netlist,
-        output_ms14,
-        probe_nets,
-        include_experimental_probes,
-        open_after_build,
-        image_path,
-        overwrite,
+        title=output_path.stem,
     )
+    execution = _eda_application_service().create_schematic(
+        "multisim",
+        SchematicRequest(
+            design=design,
+            output_directory=str(output_path.parent),
+            file_stem=output_path.stem,
+            render_image=image_path is not None,
+            image_path=image_path,
+            open_after_build=open_after_build,
+            include_experimental_probes=include_experimental_probes,
+            probe_nets=tuple(probe_nets or ()),
+            overwrite=overwrite,
+        ),
+    )
+    compatibility_result = execution.to_dict()["payload"].get(
+        "compatibility_result"
+    )
+    if not isinstance(compatibility_result, dict):
+        raise RuntimeError("Multisim backend omitted the compatibility result")
+    return compatibility_result
 
 
 def _markdown_text(value: object) -> str:

@@ -172,7 +172,13 @@ class MultisimBackend:
         netlist = self._validated_netlist(request.design)
         root = _require_output_directory(request.output_directory)
         ms14 = root / f"{request.file_stem}.ms14"
-        image = root / f"{request.file_stem}.png" if request.render_image else None
+        image = (
+            Path(request.image_path).expanduser().resolve()
+            if request.image_path is not None
+            else root / f"{request.file_stem}.png"
+            if request.render_image
+            else None
+        )
         result = self._schematic_executor(
             netlist,
             str(ms14),
@@ -212,6 +218,7 @@ class MultisimBackend:
             artifacts=_artifact_set(request.design, "schematic", root, paths),
             diagnostics=tuple(diagnostics),
             payload={
+                "compatibility_result": result,
                 "editable_model_coverage": build.get("editable_model_coverage"),
                 "native_netlist_complete": verification.get(
                     "native_netlist_complete"

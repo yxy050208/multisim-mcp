@@ -185,6 +185,7 @@ class SchematicRequest:
     output_directory: str
     file_stem: str = "circuit"
     render_image: bool = True
+    image_path: str | None = None
     open_after_build: bool = False
     include_experimental_probes: bool = False
     probe_nets: tuple[str, ...] = ()
@@ -198,10 +199,20 @@ class SchematicRequest:
             "output_directory",
             _require_text(self.output_directory, "output_directory", maximum=8192),
         )
-        file_stem = _require_identifier(self.file_stem, "file_stem")
-        if ":" in file_stem:
-            raise ValueError("file_stem must not contain ':'")
+        file_stem = _require_text(self.file_stem, "file_stem", maximum=255)
+        if file_stem in {".", ".."} or any(
+            character in file_stem for character in ("/", "\\", ":")
+        ):
+            raise ValueError("file_stem must be a plain file name")
         object.__setattr__(self, "file_stem", file_stem)
+        if self.image_path is not None:
+            object.__setattr__(
+                self,
+                "image_path",
+                _require_text(self.image_path, "image_path", maximum=8192),
+            )
+            if not self.render_image:
+                raise ValueError("image_path requires render_image=True")
         object.__setattr__(
             self,
             "probe_nets",

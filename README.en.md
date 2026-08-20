@@ -232,8 +232,9 @@ Durable-job and artifact recovery procedures are documented in
 [the recovery guide](docs/RECOVERY.md).
 The diagnosis, optimization, multi-EDA, and visual-workbench direction is
 documented in the [2.0 roadmap](docs/ROADMAP_TO_2.0.md). The first transport-
-neutral [EDA core and backend boundary](docs/EDA_CORE.md) is now available while
-the existing MCP tool signatures remain compatible.
+neutral [EDA core and backend boundary](docs/EDA_CORE.md) and limited-SPICE
+adapter are now available. The first schematic tool is routed through the
+application service while the existing MCP tool signatures remain compatible.
 
 ## License
 

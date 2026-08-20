@@ -45,6 +45,9 @@ class EdaCoreTest(unittest.TestCase):
 
     def test_circuit_design_rejects_ambiguous_or_unversioned_state(self) -> None:
         component = CircuitComponent("R1", "R", ("a", "0"), value="1k")
+        with self.assertRaisesRegex(ValueError, "must not be empty"):
+            CircuitComponent("R2", "R", (), value="1k")
+        self.assertEqual(CircuitComponent("K1", "K", (), value="0.9").nodes, ())
         with self.assertRaisesRegex(ValueError, "duplicate component"):
             CircuitDesign(
                 design_id="duplicate",

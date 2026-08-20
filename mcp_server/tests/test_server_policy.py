@@ -74,6 +74,39 @@ class UnsafeToolGateTest(unittest.TestCase):
         self.assertTrue(result["success"])
 
 
+class EdaCompatibilityBridgeTest(unittest.TestCase):
+    def test_schematic_tool_uses_eda_service_without_changing_result(self) -> None:
+        netlist = "V1 in 0 5\nR1 in 0 1k\n.end\n"
+        native_result = {
+            "success": True,
+            "build": {"editable_model_coverage": {"status": "not_applicable"}},
+            "verification": {"native_netlist_complete": True},
+            "ms14": "placeholder.ms14",
+            "xml": "placeholder.ms14.xml",
+            "experimental_probes": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "bridge schematic.ms14"
+            image = Path(tmp) / "custom preview.png"
+            with patch.object(
+                server, "_create_schematic_impl", return_value=native_result
+            ) as executor:
+                result = server.create_schematic_from_netlist(
+                    netlist,
+                    str(output),
+                    probe_nets=["in"],
+                    image_path=str(image),
+                    open_after_build=False,
+                )
+
+        self.assertEqual(result, native_result)
+        args, kwargs = executor.call_args
+        self.assertEqual(args, (netlist, str(output.resolve())))
+        self.assertEqual(kwargs["probe_nets"], ["in"])
+        self.assertEqual(kwargs["image_path"], str(image.resolve()))
+        self.assertFalse(kwargs["open_after_build"])
+
+
 class ArtifactPreflightTest(unittest.TestCase):
     def test_high_level_workflow_rejects_empty_root_and_nonfinite_limits(self) -> None:
         netlist = "V1 a 0 1\nR1 a 0 1k\n.end\n"

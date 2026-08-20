@@ -37,18 +37,30 @@
 
 ## 当前兼容桥
 
-现有 1.0 MCP 工具尚未改签名，也尚未迁移执行路径。当前 Multisim 适配器要求
-`CircuitDesign.source_netlist`；仅包含结构化元件、没有源网表的设计会得到
-`source-netlist-required` 诊断。这是刻意保留的编译器边界，不能通过猜测重新生成
-可能改变语义的网表。
+`create_schematic_from_netlist` 是第一个迁移到应用服务的 1.0 MCP 工具。它的公开
+参数和返回结果保持不变，但内部先将网表导入 `CircuitDesign`，再通过
+`EdaApplicationService` 和 `MultisimBackend` 执行。该兼容桥已经通过真实
+Multisim 14.3 与双 LM324 宏模型回归。
+
+`multisim_mcp.spice_adapter` 提供两个方向清晰、失败关闭的转换边界：
+
+- `circuit_design_from_spice()` 先执行安全策略和语法解析，将解析后的元件、顶层简单
+  `.param` 和内联 `.model` / `.subckt` 摘要写入结构化设计，同时原样保留
+  `source_netlist` 作为权威输入；
+- `circuit_design_to_spice()` 默认返回已经验证的权威源网表。显式关闭
+  `prefer_source` 时，只编译当前受支持且信息完整的结构化元件；遇到未知类型、非法
+  token、缺失模型或不可表达参数会报错，不做静默猜测。
+
+模型引用目前只记录类型和 SHA-256，不保存或重建模型正文。因此，从纯结构化对象
+生成的网表只覆盖明确支持的元件子集；需要 `.model` / `.subckt` 正文的设计仍应携带
+原始 `source_netlist`。复杂表达式、续行 `.param` 和方言改写也不属于这一阶段。
 
 下一步按以下顺序迁移：
 
-1. 增加 `CircuitDesign` 与受限 SPICE 网表之间的显式转换器；
-2. 将完整实验事务移入应用服务，MCP 工具只做参数/结果适配；
-3. 将 Multisim COM 调用固定在独立 32 位 worker；
-4. 为工程目录、实验目录和优化目录写入版本化 manifest；
-5. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
+1. 将 `run_spice_netlist` 和完整实验事务移入应用服务，MCP 工具只做参数/结果适配；
+2. 将 Multisim COM 调用固定在独立 32 位 worker；
+3. 为工程目录、实验目录和优化目录写入版本化 manifest；
+4. 在同一服务接口后接入 ngspice，而不修改验证器和后续优化器。
 
 ## English summary
 
@@ -58,6 +70,8 @@ The first platformization slice introduces strict, versioned `CircuitDesign`,
 injectable `MultisimBackend`. The core imports neither MCP nor COM and is tested
 with deterministic no-COM executors on Python 3.10 and 32-bit Python 3.12.
 
-The existing MCP surface remains unchanged. Until a structure-to-SPICE compiler
-is added, the Multisim compatibility adapter intentionally requires the original
-`source_netlist` and reports a structured error instead of guessing one.
+The public MCP surface remains unchanged. `create_schematic_from_netlist` is the
+first tool routed through the application service and Multisim backend. The
+explicit SPICE adapter preserves a validated source netlist as authoritative and
+only compiles its documented structured subset when requested; unsupported or
+incomplete constructs fail closed instead of being guessed.

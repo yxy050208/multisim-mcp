@@ -10,6 +10,9 @@
   `ArtifactSet`，提供可逆有界补丁、模型来源和 SHA-256 产物清单。
 - 新增 `EdaBackend` 能力发现协议、后端注册/调度服务和可注入的 Multisim 适配器；
   核心不依赖 MCP/COM，并以无 COM 假后端在 Python 3.10 与 32 位 Python 3.12 验证。
+- 新增失败关闭的 `CircuitDesign` 与受限 SPICE 转换边界；
+  `create_schematic_from_netlist` 已作为首个工具通过应用服务执行，公开签名和返回结果
+  保持兼容，并通过真实 Multisim 14.3 与双 LM324 宏模型回归。
 - 根据五路波形课程设计真实回归，新增时域 `frequency` 与 `thd` 验收指标；支持测量
   窗口、边沿、阈值、迟滞、最少周期数、基波频率和谐波阶数，并将结果直接写入
   `verification.json` 与正式实验报告。
@@ -41,6 +44,9 @@
   objects.
 - Added the `EdaBackend` capability protocol, backend dispatch service, and an
   injectable Multisim adapter with no-COM tests on Python 3.10 and win32 3.12.
+- Added a fail-closed `CircuitDesign`/limited-SPICE conversion boundary and
+  routed `create_schematic_from_netlist` through the application service while
+  preserving its public contract, including a real dual-LM324 Multisim test.
 - Added time-domain `frequency` and `thd` verification metrics after a real
   five-output waveform-generator regression, including explicit measurement
   windows, edge/threshold/hysteresis controls, minimum cycles, fundamental

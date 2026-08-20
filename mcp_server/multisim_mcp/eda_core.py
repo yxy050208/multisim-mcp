@@ -122,11 +122,11 @@ class CircuitComponent:
         if not _REFDES.fullmatch(refdes):
             raise ValueError("component.refdes is invalid")
         kind = _require_identifier(self.kind, "component.kind")
-        if not self.nodes:
-            raise ValueError("component.nodes must not be empty")
         nodes = tuple(
             _require_text(node, "component.node", maximum=255) for node in self.nodes
         )
+        if not nodes and kind.upper() != "K":
+            raise ValueError("component.nodes must not be empty except for K coupling")
         value = self.value
         if value is not None:
             value = _require_text(value, "component.value", maximum=1024)
@@ -295,7 +295,10 @@ class CircuitDesign:
             raise ValueError(f"duplicate model references: {sorted(duplicate_models)}")
         source = self.source_netlist
         if source is not None:
-            source = _require_text(source, "source_netlist", maximum=4_000_000)
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("source_netlist must be a non-empty string")
+            if "\x00" in source or len(source) > 4_000_000:
+                raise ValueError("source_netlist is invalid or too long")
         if not components and source is None:
             raise ValueError("CircuitDesign requires components or source_netlist")
         object.__setattr__(self, "components", components)
