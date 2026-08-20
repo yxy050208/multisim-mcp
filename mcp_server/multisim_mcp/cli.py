@@ -17,6 +17,13 @@ from multisim_mcp import __version__
 from multisim_mcp.com_worker_client import WORKER_PYTHON_ENV
 from multisim_mcp.experiment_resources import ARTIFACT_EXPORT_DIR_ENV
 from multisim_mcp.harness_skills import install_harness_skills
+from multisim_mcp.model_provider import (
+    MAX_MESSAGE_CHARS,
+    ModelMessage,
+    ModelProtocolError,
+    ModelProviderRegistry,
+    ModelRuntimeError,
+)
 from multisim_mcp.provider_config import (
     PROVIDER_CONFIG_SCHEMA_VERSION,
     build_provider,
@@ -816,6 +823,76 @@ def _print_provider_human(result: dict[str, Any]) -> None:
         print(f"[{state}] {probe['provider']}: {probe['status']}")
 
 
+def _read_bounded_utf8(path: str, field_name: str) -> str:
+    source = Path(path).expanduser().resolve()
+    try:
+        with source.open("rb") as handle:
+            raw = handle.read(MAX_MESSAGE_CHARS * 4 + 1)
+    except OSError as exc:
+        raise ValueError(f"cannot read {field_name}: {exc}") from exc
+    if len(raw) > MAX_MESSAGE_CHARS * 4:
+        raise ValueError(f"{field_name} exceeds the size limit")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError(f"{field_name} must be UTF-8") from exc
+    if len(text) > MAX_MESSAGE_CHARS:
+        raise ValueError(f"{field_name} exceeds the size limit")
+    return text
+
+
+def _read_model_input(args: argparse.Namespace) -> str:
+    if args.input:
+        return _read_bounded_utf8(args.input, "model input")
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    raw = stream.read(MAX_MESSAGE_CHARS * 4 + 1)
+    if isinstance(raw, str):
+        text = raw
+    else:
+        if len(raw) > MAX_MESSAGE_CHARS * 4:
+            raise ValueError("model input exceeds the size limit")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeError as exc:
+            raise ValueError("model input must be UTF-8") from exc
+    if len(text) > MAX_MESSAGE_CHARS:
+        raise ValueError("model input exceeds the size limit")
+    return text
+
+
+def _run_model_command(args: argparse.Namespace) -> dict[str, Any]:
+    prompt = _read_model_input(args)
+    messages: list[ModelMessage] = []
+    if args.system_file:
+        messages.append(
+            ModelMessage(
+                "system", _read_bounded_utf8(args.system_file, "system prompt")
+            )
+        )
+    messages.append(ModelMessage("user", prompt))
+    config = read_provider_config(args.config_path)
+    registry = ModelProviderRegistry.from_config(config)
+    response = registry.complete(
+        messages,
+        provider_id=args.provider,
+        fallback_provider_ids=args.fallback,
+        allow_failover=args.allow_failover,
+        max_tokens=args.max_tokens,
+        temperature=args.temperature,
+        timeout=args.timeout,
+    )
+    if response.message.tool_calls:
+        raise ModelProtocolError(
+            "model returned tool calls to a command that exposes no tools"
+        )
+    return {
+        "schema_version": 1,
+        "command": "model",
+        "success": True,
+        "response": response.to_dict(),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="multisim-mcp",
@@ -910,6 +987,42 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=5.0, help="probe timeout in seconds"
     )
     configure.add_argument(
+        "--json",
+        dest="json_command",
+        action="store_true",
+        help="emit a stable JSON result envelope",
+    )
+
+    model = subparsers.add_parser(
+        "model",
+        help="make one explicit, tool-free model request from stdin or a UTF-8 file",
+    )
+    model_input = model.add_mutually_exclusive_group(required=True)
+    model_input.add_argument(
+        "--stdin",
+        action="store_true",
+        help="read the user message from standard input",
+    )
+    model_input.add_argument("--input", help="read the user message from a UTF-8 file")
+    model.add_argument("--system-file", help="optional UTF-8 system message file")
+    model.add_argument("--provider", help="provider ID (defaults to active_provider)")
+    model.add_argument(
+        "--fallback",
+        action="append",
+        default=[],
+        metavar="PROVIDER_ID",
+        help="explicit fallback provider; repeat to define order",
+    )
+    model.add_argument(
+        "--allow-failover",
+        action="store_true",
+        help="authorize fallback after retryable network, 408, 409, 429, or 5xx errors",
+    )
+    model.add_argument("--config-path", help="provider config path")
+    model.add_argument("--max-tokens", type=int)
+    model.add_argument("--temperature", type=float)
+    model.add_argument("--timeout", type=float, default=60.0)
+    model.add_argument(
         "--json",
         dest="json_command",
         action="store_true",
@@ -1043,6 +1156,45 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
             _print_provider_human(result)
+        return exit_code
+    if args.command == "model":
+        try:
+            if args.fallback and not args.allow_failover:
+                raise ValueError("--fallback requires --allow-failover")
+            if args.allow_failover and not args.fallback:
+                raise ValueError("--allow-failover requires at least one --fallback")
+            result = _run_model_command(args)
+        except KeyboardInterrupt:
+            error: Exception = ModelRuntimeError("model request was cancelled")
+            exit_code = 130
+        except (FileNotFoundError, OSError, ValueError, ModelRuntimeError) as exc:
+            error = exc
+            exit_code = 1 if isinstance(exc, ModelRuntimeError) else 2
+        else:
+            if json_output:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(result["response"]["message"]["content"])
+            return 0
+        if json_output:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "command": "model",
+                        "success": False,
+                        "error": {
+                            "type": type(error).__name__,
+                            "message": str(error),
+                        },
+                        "credential_values_exposed": False,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(f"model request failed: {error}", file=sys.stderr)
         return exit_code
     if args.command == "config":
         try:

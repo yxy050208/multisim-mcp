@@ -241,9 +241,12 @@ MCP Client 名称或 MCP SDK 范围发生变化时，它会写入 Job Summary，
 
 ## 独立平台中的 DeepSeek
 
-未来可视化工作台需要内置模型时，应通过通用 `ModelProvider` 接口接入
-DeepSeek。该接口负责消息、工具循环、用量和取消，不负责电路或仿真逻辑。
-同一 EDA Core 必须可以由 DeepSeek、其他模型或完全无模型的确定性脚本调用。
+第一版通用 `ModelProvider` 已通过 OpenAI-compatible Chat Completions 接入
+DeepSeek，负责严格消息、用量、取消、显式回退和有界工具循环，不负责电路或仿真
+逻辑。当前 CLI 不公开工具，库级工具循环也要求逐项白名单与独立参数验证；后续由
+可视化工作台绑定受约束的 EDA 应用服务。同一 EDA Core 仍必须可以由 DeepSeek、
+其他模型或完全无模型的确定性脚本调用。详见
+[`MODEL_PROVIDER_RUNTIME.md`](MODEL_PROVIDER_RUNTIME.md)。
 
 ## English summary
 
@@ -253,4 +256,6 @@ model credentials outside Multisim MCP. The current Harness bridge consumes MCP
 tools but not resources or prompts. Bounded artifact tools, tool profiles, and a
 five-skill project bundle now provide equivalent access. Pinned compatibility
 checks now cover the local contract, while real Windows Harness
-execution remains part of the release matrix.
+execution remains part of the release matrix. A separate bounded provider
+runtime now supports direct DeepSeek calls without coupling model formats to the
+EDA core.

@@ -19,6 +19,13 @@ from multisim_mcp.cli import (
     main,
     render_client_config,
 )
+from multisim_mcp.model_provider import (
+    ModelMessage,
+    ModelProviderError,
+    ModelResponse,
+    ModelUsage,
+    ToolCall,
+)
 
 
 class DoctorTest(unittest.TestCase):
@@ -435,6 +442,149 @@ class ProviderConfigureCliTest(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(exit_code, 2)
         self.assertIn("require --provider", payload["error"]["message"])
+
+
+class ModelCliTest(unittest.TestCase):
+    @staticmethod
+    def _response(*, tool_call: bool = False) -> ModelResponse:
+        calls = (
+            (ToolCall("call_1", "unexpected", {}),) if tool_call else ()
+        )
+        return ModelResponse(
+            provider_id="fixture",
+            requested_model="fixture-model",
+            model="fixture-model",
+            message=ModelMessage(
+                "assistant", "" if tool_call else "fixture answer", tool_calls=calls
+            ),
+            finish_reason="tool_calls" if tool_call else "stop",
+            usage=ModelUsage(2, 3, 5),
+        )
+
+    def test_model_reads_prompt_file_and_returns_stable_json(self) -> None:
+        captured: dict[str, object] = {}
+
+        class Registry:
+            def complete(self, messages: object, **kwargs: object) -> ModelResponse:
+                captured["messages"] = messages
+                captured["kwargs"] = kwargs
+                return ModelCliTest._response()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = Path(tmp) / "prompt.txt"
+            prompt.write_text("Analyze the divider.", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("multisim_mcp.cli.read_provider_config", return_value={}),
+                patch(
+                    "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                    return_value=Registry(),
+                ),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model",
+                        "--input",
+                        str(prompt),
+                        "--provider",
+                        "fixture",
+                        "--max-tokens",
+                        "200",
+                        "--json",
+                    ]
+                )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["response"]["message"]["content"], "fixture answer")
+        self.assertEqual(captured["messages"][0].content, "Analyze the divider.")
+        self.assertEqual(captured["kwargs"]["provider_id"], "fixture")
+        self.assertEqual(captured["kwargs"]["max_tokens"], 200)
+
+    def test_model_requires_explicit_failover_authorization(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = main(
+                [
+                    "model",
+                    "--stdin",
+                    "--fallback",
+                    "secondary",
+                    "--json",
+                ]
+            )
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("allow-failover", payload["error"]["message"])
+
+    def test_model_stdin_does_not_expose_any_tools(self) -> None:
+        class Registry:
+            def complete(self, messages: object, **kwargs: object) -> ModelResponse:
+                self.messages = messages
+                self.kwargs = kwargs
+                return ModelCliTest._response()
+
+        registry = Registry()
+        output = io.StringIO()
+        with (
+            patch("multisim_mcp.cli.read_provider_config", return_value={}),
+            patch(
+                "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                return_value=registry,
+            ),
+            patch("sys.stdin", io.StringIO("Hello from stdin")),
+            redirect_stdout(output),
+        ):
+            exit_code = main(["model", "--stdin"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output.getvalue().strip(), "fixture answer")
+        self.assertNotIn("tools", registry.kwargs)
+
+    def test_model_rejects_unrequested_tool_calls(self) -> None:
+        class Registry:
+            def complete(self, messages: object, **kwargs: object) -> ModelResponse:
+                return ModelCliTest._response(tool_call=True)
+
+        output = io.StringIO()
+        with (
+            patch("multisim_mcp.cli.read_provider_config", return_value={}),
+            patch(
+                "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                return_value=Registry(),
+            ),
+            patch("sys.stdin", io.StringIO("hello")),
+            redirect_stdout(output),
+        ):
+            exit_code = main(["model", "--stdin", "--json"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertIn("exposes no tools", payload["error"]["message"])
+
+    def test_model_provider_error_is_sanitized_and_exits_one(self) -> None:
+        class Registry:
+            def complete(self, messages: object, **kwargs: object) -> ModelResponse:
+                raise ModelProviderError(
+                    "sanitized failure",
+                    provider_id="fixture",
+                    retryable=False,
+                )
+
+        output = io.StringIO()
+        with (
+            patch("multisim_mcp.cli.read_provider_config", return_value={}),
+            patch(
+                "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                return_value=Registry(),
+            ),
+            patch("sys.stdin", io.StringIO("hello")),
+            redirect_stdout(output),
+        ):
+            exit_code = main(["model", "--stdin", "--json"])
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(payload["error"]["message"], "sanitized failure")
+        self.assertFalse(payload["credential_values_exposed"])
 
 
 class HarnessSkillsCliTest(unittest.TestCase):

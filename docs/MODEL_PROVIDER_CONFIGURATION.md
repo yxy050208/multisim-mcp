@@ -118,10 +118,11 @@ multisim-mcp configure --provider openai-compatible `
 
 ## 当前边界与后续阶段
 
-本阶段不直接发送聊天请求，不实现工具循环、用量统计或模型回退。下一阶段会在独立
-工作台边界实现通用 `ModelProvider` 运行时，并让 DeepSeek、OpenAI-compatible、
-Ollama 或完全无模型的确定性脚本调用同一 EDA Core。Provider 运行时仍不得让模型
-凭据进入 Multisim MCP 进程。
+第一版通用 `ModelProvider` 运行时、单次安全 CLI 调用、用量规范化、取消、显式失败
+回退和有界工具循环已经实现，详见
+[`MODEL_PROVIDER_RUNTIME.md`](MODEL_PROVIDER_RUNTIME.md)。当前尚未把 EDA 应用服务
+预绑定为模型工具，也没有流式 UI 或会话持久化。Provider 运行时仍不得让模型凭据
+进入 Multisim MCP server 或 COM worker。
 
 ## English summary
 
@@ -130,5 +131,6 @@ model-provider settings for the future local workbench. Configuration files
 contain environment-variable references only, never credential values. Preview
 is the default; `--apply` is required to write and `--probe` is required to make
 a network request. Existing providers are merged unless `--replace` is explicit.
-This release does not yet include a chat or agent runtime, and model credentials
-are never forwarded to the Multisim MCP or its COM worker.
+A separate bounded runtime now provides explicit chat calls and an allowlisted
+library-level tool loop; model credentials are never forwarded to the Multisim
+MCP server or its COM worker.

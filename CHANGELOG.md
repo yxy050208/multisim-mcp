@@ -6,6 +6,12 @@
 
 ### 中文
 
+- 新增传输无关模型运行时：支持 DeepSeek/OpenAI/Ollama 的有界非流式 Chat
+  Completions、严格消息/工具/用量对象、每请求密钥轮换、及时取消和双重授权失败回退；
+  `model` CLI 仅从显式 stdin/UTF-8 文件读取提示词且不公开工具。
+- 新增白名单 `BoundedToolLoop`：每个工具必须同时提供定义、独立参数验证器和本地
+  handler；全部参数先预检，再受轮次、调用数和结果大小限制执行，拒绝未知工具、重复
+  调用 ID、未配对历史和未完成最终轮次。
 - 新增模型 Provider 自助配置：可从已知环境变量自动发现 DeepSeek、OpenAI、
   Ollama 和 OpenAI-compatible 服务，安全预览、原子合并写入、脱敏查看并显式探测
   模型列表；配置只保存环境变量引用，拒绝明文密钥和远程 HTTP。
@@ -55,6 +61,10 @@
 
 ### English
 
+- Added a transport-neutral bounded Chat Completions runtime with normalized
+  messages/tools/usage, per-request credential rotation, prompt cancellation,
+  double-opt-in failover, a tool-free file/stdin CLI, and an allowlisted tool
+  loop that requires independent argument validation for every handler.
 - Added secret-free model-provider discovery, preview, atomic merge, sanitized
   display, and explicit models-endpoint probes for DeepSeek, OpenAI, Ollama, and
   custom OpenAI-compatible services.

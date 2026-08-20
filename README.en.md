@@ -203,6 +203,11 @@ C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --json
 
 # Persist environment-variable references after reviewing the preview.
 C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
+
+# Make one explicit, tool-free request from a UTF-8 file.
+C:\path\to\python32\Scripts\multisim-mcp.exe model `
+  --input .\prompt.txt `
+  --json
 ```
 
 The generator prints a copy-pasteable fragment by default. `--output` writes a
@@ -218,6 +223,10 @@ Model-provider self-configuration supports DeepSeek, OpenAI, Ollama, and custom
 OpenAI-compatible services. It previews by default, writes only with `--apply`,
 and connects only with `--probe`; API key values are never stored. See the
 [bilingual provider configuration guide](docs/MODEL_PROVIDER_CONFIGURATION.md).
+The first provider runtime supports bounded non-streaming Chat Completions,
+usage, cancellation, explicit failover, and an allowlisted tool loop. The CLI
+exposes no tools and reads prompts only from explicit stdin or UTF-8 files. See
+the [runtime guide](docs/MODEL_PROVIDER_RUNTIME.md).
 Repository maintainers can validate the pinned local Harness contract with
 `python tools/check_deepseek_harness_compat.py --json`.
 An independently installable source bundle is available under

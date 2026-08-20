@@ -205,6 +205,9 @@ C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --json
 # Atomically store references after reviewing them.
 C:\path\to\python32\Scripts\multisim-mcp.exe configure --auto --apply
 
+# One explicit tool-free model request from a UTF-8 file.
+C:\path\to\python32\Scripts\multisim-mcp.exe model --input .\prompt.txt --json
+
 # Unwrapped command/args/env JSON for another stdio client
 C:\path\to\python32\Scripts\multisim-mcp.exe config --client generic
 ```
@@ -232,6 +235,11 @@ The separate `configure` command prepares model-provider settings for the future
 workbench. It never copies credential values into its versioned JSON file or the
 MCP child process, and it performs network I/O only with explicit `--probe`.
 See [`docs/MODEL_PROVIDER_CONFIGURATION.md`](../docs/MODEL_PROVIDER_CONFIGURATION.md).
+The transport-neutral runtime adds bounded non-streaming Chat Completions,
+normalized usage, cooperative cancellation, double-opt-in failover, and an
+allowlisted library-level tool loop. The CLI deliberately exposes no tools and
+does not accept inline prompt arguments. See
+[`docs/MODEL_PROVIDER_RUNTIME.md`](../docs/MODEL_PROVIDER_RUNTIME.md).
 
 Manual MCP client configuration:
 
