@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from multisim_mcp import job_engine
 from multisim_mcp.job_engine import ExperimentJobManager, output_lease
 
 
@@ -109,6 +112,28 @@ def _wait_terminal(manager: ExperimentJobManager, job_id: str, seconds: float = 
 
 
 class DurableJobStateTest(unittest.TestCase):
+    def test_atomic_json_retries_transient_replace_denial(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "record.json"
+            real_replace = os.replace
+            attempts = 0
+
+            def transient_replace(source: str | bytes, destination: str | bytes) -> None:
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "simulated sharing violation", destination)
+                real_replace(source, destination)
+
+            with patch.object(job_engine.os, "replace", side_effect=transient_replace):
+                job_engine._atomic_json(target, {"state": "queued"})
+
+            self.assertEqual(attempts, 2)
+            self.assertEqual(
+                json.loads(target.read_text(encoding="utf-8")),
+                {"state": "queued"},
+            )
+
     def test_default_worker_inherits_frontend_import_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manager = ExperimentJobManager(Path(tmp) / "state", start=False)
@@ -220,8 +245,8 @@ class WorkerRecoveryTest(unittest.TestCase):
                 )
                 first_result = _wait_terminal(first_manager, first["job_id"])
                 second_result = _wait_terminal(second_manager, second["job_id"])
-                self.assertEqual(first_result["state"], "succeeded")
-                self.assertEqual(second_result["state"], "succeeded")
+                self.assertEqual(first_result["state"], "succeeded", first_result)
+                self.assertEqual(second_result["state"], "succeeded", second_result)
                 self.assertFalse(marker.with_suffix(".violation").exists())
             finally:
                 first_manager.shutdown()

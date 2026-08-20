@@ -76,7 +76,24 @@ def _atomic_json(path: Path, value: object) -> None:
             os.chmod(temporary, 0o600)
         except OSError:
             pass
-        os.replace(temporary, path)
+        # A second manager may briefly have the destination open while it
+        # refreshes the shared queue.  Windows then reports access denied or a
+        # sharing violation even though the atomic replace is otherwise valid.
+        # Retry only those transient errors and keep the delay bounded so real
+        # permission failures are still surfaced promptly.
+        delay = 0.005
+        for attempt in range(8):
+            try:
+                os.replace(temporary, path)
+                break
+            except OSError as exc:
+                transient = isinstance(exc, PermissionError) or getattr(
+                    exc, "winerror", None
+                ) in {5, 32, 33}
+                if not transient or attempt == 7:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.08)
     finally:
         temporary.unlink(missing_ok=True)
 
