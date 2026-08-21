@@ -93,8 +93,13 @@ adding an ignore rule does not remove a file that is already staged.
       in the local release audit.
 - [x] Push the release PR and wait for every public CI job to pass.
 - [x] Build and inspect the final wheel/sdist from the reviewed release commit.
-- [ ] Push annotated tag `v1.1.0` and verify Trusted Publishing on PyPI.
-- [ ] Publish matching MCP Registry metadata and GitHub Release artifacts.
+- [ ] Push annotated tag `v1.1.0` and verify it dereferences to the reviewed
+      `main` merge commit.
+- [ ] Manually dispatch `publish-pypi.yml` at `v1.1.0`, verify the workflow head
+      SHA, Trusted Publishing result, and PyPI distribution SHA-256 values.
+- [ ] Create the bilingual GitHub Release and attach only the exact verified
+      PyPI distributions when binary attachments are desired.
+- [ ] Publish matching MCP Registry metadata and verify official search results.
 - [ ] Re-check Glama and awesome-mcp-servers metadata after publication.
 
 ## DeepSeek Harness npm bundle 1.1.0
