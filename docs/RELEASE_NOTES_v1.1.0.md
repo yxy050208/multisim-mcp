@@ -54,7 +54,7 @@ MCP 前端也可运行在 64 位 Python，并通过 `MULTISIM_MCP_WORKER_PYTHON`
   3.10 上通过目录清单、实验管线和任务引擎核心回归。
 - `directory.manifest.json` 与正式实验 `manifest.json` 职责不同：前者约束目录级
   生命周期和全部产物完整性，后者继续保存实验复现语义。
-- 公开 CI 与最终 wheel/sdist 内容审计将在发布提交后再次执行；真实 Multisim 回归仍
+- 公开 CI 与最终 wheel/sdist 内容审计已通过；真实 Multisim 回归仍
   必须在安装并授权 NI 软件的本地 Windows 主机上完成。
 
 ## 升级说明
