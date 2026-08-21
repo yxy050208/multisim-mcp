@@ -19,8 +19,8 @@
 
 ## 开源发布状态
 
-`1.1.0` 是当前发布候选；发布后将与 PyPI 和
-`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目同步。由本地 NI
+`1.1.0` 是当前稳定发行版；PyPI 包和
+`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目使用同一版本号。由本地 NI
 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
