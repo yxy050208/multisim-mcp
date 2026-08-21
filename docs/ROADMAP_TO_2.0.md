@@ -51,7 +51,7 @@ AI client / Visual Workbench
 - [x] 把同步、验证和持久 worker 实验入口从 MCP 工具迁移到应用服务。
 - [x] 将事务发布/报告执行器从 `server.py` 提取为可注入独立流水线组件。
 - [x] 将 Multisim COM/编解码操作保留在独立 32 位 worker 中，支持 64 位前端。
-- [ ] 为项目目录、实验目录和优化目录增加版本化 manifest。
+- [x] 为项目目录、实验目录和优化目录增加版本化 manifest。
 - [x] 保持现有 55 个工具、19 个 Resource 模板和 5 个 Prompt 兼容。
 - [x] 规划 DeepSeek 与 DeepSeek Harness 的分层适配。
 - [x] 增加 DeepSeek Harness 客户端配置生成器。

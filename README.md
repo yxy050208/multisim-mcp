@@ -7,7 +7,7 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前稳定发行版为 `v1.0.0`。项目非 NI 官方产品，需要本机安装并授权
+> 当前稳定发行版为 `v1.1.0`。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
@@ -15,12 +15,13 @@
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.0.0)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.1.0)
 
 ## 开源发布状态
 
-`1.0.0` 已发布到 PyPI，并以 `io.github.yxy050208/multisim-mcp` 收录到官方
-MCP Registry。由本地 NI 样例提取的 XML 模板不属于
+`1.1.0` 是当前发布候选；发布后将与 PyPI 和
+`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目同步。由本地 NI
+样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
 
@@ -103,6 +104,7 @@ COM worker，服务重启后未完成任务会安全地重新排队。
 
 适配器语法与社区 JSON 接口见 [`docs/COMPONENT_ADAPTERS.md`](docs/COMPONENT_ADAPTERS.md)，
 真实版本边界见 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)。
+工作目录持久化格式见 [`docs/WORKSPACE_MANIFESTS.md`](docs/WORKSPACE_MANIFESTS.md)。
 1.0 真实回归覆盖适配器原理图打开/回导、变压器瞬态、继电器与功率器件工作点、
 晶振 AC、DFF 瞬态以及双语正式报告的完整事务发布。
 
@@ -116,6 +118,7 @@ COM worker，服务重启后未完成任务会安全地重新排队。
 - MCP stdio、运行环境诊断和报告生成。
 - 持久实验队列、进度/取消/超时、输出锁和崩溃/无响应 worker 恢复。
 - 版本化实验指标、严格 PASS/FAIL/未验证判定，以及四类确定性批量扫描。
+- 项目、实验和优化目录共用的版本化 manifest，支持修订、状态恢复和 SHA-256 完整性校验。
 
 实验性：
 
@@ -138,7 +141,7 @@ COM worker，服务重启后未完成任务会安全地重新排队。
 最简单的兼容部署仍是直接安装到 32 位 Python：
 
 ```powershell
-C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.0.0"
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.1.0"
 C:\path\to\python32\Scripts\multisim-mcp.exe
 ```
 
@@ -173,7 +176,7 @@ cd mcp_server
 模板包生成器会连接已授权的 Multisim，并新建一个临时空白电路以取得与当前安装版本
 一致的工程骨架；执行前请保存正在编辑的工作。alpha 版本生成的 schema 1 包需要重建。
 
-`v1.0.0` 提供安装诊断和配置生成命令。默认情况下它们不会启动
+`v1.1.0` 提供安装诊断和配置生成命令。默认情况下它们不会启动
 Multisim，也不会修改现有客户端配置：
 
 ```powershell

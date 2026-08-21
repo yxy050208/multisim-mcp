@@ -7,6 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from multisim_mcp.experiment_pipeline import MultisimExperimentPipeline
+from multisim_mcp.workspace_manifest import (
+    DIRECTORY_MANIFEST_NAME,
+    read_directory_manifest,
+)
 
 
 RAW_FIXTURE = """Title: fixture
@@ -38,6 +42,7 @@ ARTIFACT_NAMES = (
     "report.zh-CN.pdf",
     "report.en.pdf",
     "manifest.json",
+    DIRECTORY_MANIFEST_NAME,
 )
 
 
@@ -133,6 +138,14 @@ class ExperimentPipelineTest(unittest.TestCase):
             )
             self.assertFalse(
                 list(output.parent.glob(f".{output.name}.multisim-mcp-*"))
+            )
+            directory_manifest = read_directory_manifest(output)
+            self.assertEqual(directory_manifest.directory_kind, "experiment")
+            self.assertEqual(directory_manifest.state, "succeeded")
+            self.assertEqual(directory_manifest.metadata["verified"], False)
+            self.assertEqual(
+                {item.path for item in directory_manifest.artifacts},
+                set(ARTIFACT_NAMES) - {DIRECTORY_MANIFEST_NAME},
             )
 
         self.assertTrue(result["success"])

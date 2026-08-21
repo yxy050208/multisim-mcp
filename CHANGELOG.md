@@ -6,6 +6,19 @@
 
 ### 中文
 
+- 暂无。
+
+### English
+
+- No changes yet.
+
+## [1.1.0] - 2026-08-21
+
+### 中文
+
+- 新增统一 `directory.manifest.json`：项目、完整实验和参数扫描/优化目录共享严格
+  schema、生命周期状态、修订号、生成器版本及产物大小/SHA-256；默认完整性校验拒绝
+  路径越界、符号链接、未知字段和篡改，实验与扫描均在原子发布事务内生成。
 - 新增传输无关模型运行时：支持 DeepSeek/OpenAI/Ollama 的有界非流式 Chat
   Completions、严格消息/工具/用量对象、每请求密钥轮换、及时取消和双重授权失败回退；
   `model` CLI 仅从显式 stdin/UTF-8 文件读取提示词且不公开工具。
@@ -64,6 +77,10 @@
 
 ### English
 
+- Added one strict `directory.manifest.json` contract for project, experiment,
+  and sweep/optimization folders, with lifecycle state, revisions, producer
+  version, artifact sizes/SHA-256 hashes, fail-closed integrity checks, and
+  generation inside the existing atomic experiment and sweep transactions.
 - Added a transport-neutral bounded Chat Completions runtime with normalized
   messages/tools/usage, per-request credential rotation, prompt cancellation,
   double-opt-in failover, a tool-free file/stdin CLI, and an allowlisted tool

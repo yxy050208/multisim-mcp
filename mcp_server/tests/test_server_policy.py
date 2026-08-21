@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from multisim_mcp import server
+from multisim_mcp.workspace_manifest import read_directory_manifest
 
 
 class UnsafeToolGateTest(unittest.TestCase):
@@ -345,6 +346,10 @@ class VerificationAndSweepWorkflowTest(unittest.TestCase):
             data = (output / "data.csv").read_text(encoding="utf-8")
             self.assertIn("run_id,status,R1,vout", data)
             self.assertTrue((output / "runs" / "run-0002" / "result.raw").is_file())
+            directory_manifest = read_directory_manifest(output)
+            self.assertEqual(directory_manifest.directory_kind, "optimization")
+            self.assertEqual(directory_manifest.state, "succeeded")
+            self.assertEqual(directory_manifest.metadata["run_count"], 2)
 
     def test_plain_overwrite_does_not_retain_an_old_verification_verdict(self) -> None:
         def fake_schematic(*args: object, **kwargs: object) -> dict:

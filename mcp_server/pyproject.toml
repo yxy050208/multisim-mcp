@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multisim-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "Unofficial MCP server for NI Multisim Automation API"
 readme = "README.md"
 license = "MIT"

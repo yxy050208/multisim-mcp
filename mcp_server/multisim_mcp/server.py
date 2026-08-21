@@ -91,11 +91,16 @@ from multisim_mcp.sweep_resources import (
     read_sweep_summary,
     read_sweep_text,
     register_sweep,
+    sweep_id_for_output_dir,
 )
 from multisim_mcp.tool_profiles import (
     selected_tool_profile,
     tool_enabled,
     tool_profile_status,
+)
+from multisim_mcp.workspace_manifest import (
+    DIRECTORY_MANIFEST_NAME,
+    write_directory_manifest,
 )
 
 
@@ -1655,6 +1660,38 @@ def _run_experiment_sweep_impl(
                             *(values.get(name, "") for name in measurement_ids),
                         ]
                     )
+            sweep_artifacts: dict[str, str] = {}
+            for artifact_path in sorted(stage.rglob("*")):
+                if artifact_path.is_symlink():
+                    raise ValueError(
+                        "Sweep artifacts must not contain symbolic links: "
+                        f"{artifact_path.relative_to(stage).as_posix()}"
+                    )
+                if artifact_path.is_file():
+                    relative = artifact_path.relative_to(stage).as_posix()
+                    if relative == DIRECTORY_MANIFEST_NAME:
+                        continue
+                    sweep_artifacts[relative] = (
+                        "sweep-summary"
+                        if relative == "summary.json"
+                        else "sweep-data"
+                        if relative == "data.csv"
+                        else "run-artifact"
+                    )
+            write_directory_manifest(
+                stage,
+                directory_kind="optimization",
+                entity_id=sweep_id_for_output_dir(root),
+                state="succeeded",
+                artifacts=sweep_artifacts,
+                metadata={
+                    "operation": "experiment-sweep",
+                    "title": plan["title"],
+                    "mode": plan["mode"],
+                    "run_count": total,
+                    "seed": plan["seed"],
+                },
+            )
             notify("sweep_publish", 94, "Publishing the complete sweep transaction")
             backup = root.parent / f".{root.name}.backup-{uuid.uuid4().hex}"
             had_root = root.exists()

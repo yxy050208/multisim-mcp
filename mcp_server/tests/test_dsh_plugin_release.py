@@ -39,10 +39,10 @@ def existing_package(*, version: str = "0.9.0", repository: str | None = None) -
 
 def npm_pack_package() -> dict:
     return {
-        "id": "multisim-mcp-dsh-plugin@1.0.0",
+        "id": "multisim-mcp-dsh-plugin@1.1.0",
         "name": "multisim-mcp-dsh-plugin",
-        "version": "1.0.0",
-        "filename": "multisim-mcp-dsh-plugin-1.0.0.tgz",
+        "version": "1.1.0",
+        "filename": "multisim-mcp-dsh-plugin-1.1.0.tgz",
         "size": 100,
         "unpackedSize": 200,
         "files": [
@@ -56,7 +56,7 @@ def npm_pack_package() -> dict:
 
 class DshPluginReleaseTest(unittest.TestCase):
     def test_local_package_boundary_passes(self) -> None:
-        result = release.run_checks(REPO_ROOT, expected_version="1.0.0")
+        result = release.run_checks(REPO_ROOT, expected_version="1.1.0")
         self.assertTrue(result["success"])
         self.assertFalse(result["registry_checked"])
         self.assertIsNone(result["registry_state"])
@@ -64,7 +64,7 @@ class DshPluginReleaseTest(unittest.TestCase):
     def test_unclaimed_name_is_valid_for_first_publication(self) -> None:
         result = release.run_checks(
             REPO_ROOT,
-            expected_version="1.0.0",
+            expected_version="1.1.0",
             check_registry=True,
             registry_loader=lambda name, timeout: None,
         )
@@ -96,7 +96,7 @@ class DshPluginReleaseTest(unittest.TestCase):
 
     def test_existing_target_version_is_rejected(self) -> None:
         remote = existing_package(
-            version="1.0.0",
+            version="1.1.0",
             repository="https://github.com/yxy050208/multisim-mcp",
         )
         result = release.run_checks(
@@ -118,7 +118,7 @@ class DshPluginReleaseTest(unittest.TestCase):
         self.assertEqual(result["findings"][0]["check"], "registry-ownership")
 
     def test_requested_version_must_match_package(self) -> None:
-        result = release.run_checks(REPO_ROOT, expected_version="1.0.1")
+        result = release.run_checks(REPO_ROOT, expected_version="1.1.1")
         self.assertFalse(result["success"])
         self.assertEqual(result["findings"][0]["check"], "requested-version")
 
@@ -126,15 +126,15 @@ class DshPluginReleaseTest(unittest.TestCase):
         result = pack_check.validate_pack_result(
             [npm_pack_package()],
             expected_name="multisim-mcp-dsh-plugin",
-            expected_version="1.0.0",
+            expected_version="1.1.0",
         )
-        self.assertEqual(result["filename"], "multisim-mcp-dsh-plugin-1.0.0.tgz")
+        self.assertEqual(result["filename"], "multisim-mcp-dsh-plugin-1.1.0.tgz")
 
     def test_npm_12_object_pack_output_is_supported(self) -> None:
         result = pack_check.validate_pack_result(
             {"multisim-mcp-dsh-plugin": npm_pack_package()},
             expected_name="multisim-mcp-dsh-plugin",
-            expected_version="1.0.0",
+            expected_version="1.1.0",
         )
         self.assertEqual(result["files"], sorted(pack_check.EXPECTED_FILES))
 
@@ -145,7 +145,7 @@ class DshPluginReleaseTest(unittest.TestCase):
             pack_check.validate_pack_result(
                 {"multisim-mcp-dsh-plugin": package},
                 expected_name="multisim-mcp-dsh-plugin",
-                expected_version="1.0.0",
+                expected_version="1.1.0",
             )
 
 

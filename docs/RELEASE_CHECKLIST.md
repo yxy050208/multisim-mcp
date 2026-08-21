@@ -79,14 +79,32 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Publish matching MCP Registry metadata and GitHub Release artifacts.
 - [x] Verify Glama and awesome-mcp-servers directory metadata after publication.
 
-## DeepSeek Harness npm bundle 1.0.0
+## Required before v1.1.0
+
+- [x] Complete the versioned project/experiment/optimization directory manifest
+      contract and integrate it into atomic experiment and sweep publication.
+- [x] Synchronize `pyproject.toml`, `multisim_mcp.__version__`, and both
+      `server.json` version fields at `1.1.0`.
+- [x] Keep public protocol compatibility at 55 tools, 19 Resource templates,
+      and 5 prompts.
+- [x] Pass 271 COM-free tests on 32-bit Python plus the 64-bit core manifest,
+      pipeline, and job-engine regression set.
+- [x] Produce Chinese-first bilingual `RELEASE_NOTES_v1.1.0.md` and include it
+      in the local release audit.
+- [x] Push the release PR and wait for every public CI job to pass.
+- [x] Build and inspect the final wheel/sdist from the reviewed release commit.
+- [ ] Push annotated tag `v1.1.0` and verify Trusted Publishing on PyPI.
+- [ ] Publish matching MCP Registry metadata and GitHub Release artifacts.
+- [ ] Re-check Glama and awesome-mcp-servers metadata after publication.
+
+## DeepSeek Harness npm bundle 1.1.0
 
 - [x] Pin the official Harness CLI and MCP client compatibility baseline.
 - [x] Restrict the npm tarball to four reviewed files.
 - [x] Add a Registry ownership/version guard with unit tests.
 - [x] Add verify-only and stage-existing GitHub Actions paths.
 - [ ] Re-run the Registry guard immediately before the first publication.
-- [ ] Publish `multisim-mcp-dsh-plugin@1.0.0` interactively with maintainer 2FA.
+- [ ] Publish `multisim-mcp-dsh-plugin@1.1.0` interactively with maintainer 2FA.
 - [ ] Configure `publish-dsh-plugin.yml` as a stage-only npm Trusted Publisher.
 - [ ] Protect the GitHub `npm` Environment with required reviewers.
 - [ ] Disallow traditional publish tokens and verify package provenance on the
