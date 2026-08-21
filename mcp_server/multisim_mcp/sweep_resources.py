@@ -24,6 +24,11 @@ def _stable_id(root: Path) -> str:
     return "sweep-" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
+def sweep_id_for_output_dir(output_dir: str | Path) -> str:
+    """Return the stable opaque ID without registering or reading artifacts."""
+    return _stable_id(Path(output_dir).expanduser().resolve())
+
+
 def _safe_file(root: Path, name: str) -> Path:
     filename = _FILES.get(name)
     if filename is None:

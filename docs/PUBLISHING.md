@@ -69,8 +69,8 @@ English: public CI remains COM-free; run the real Multisim suite locally.
 git add <逐项审查过的路径>
 git diff --cached --check
 python tools/release_audit.py
-git commit -m "release: v1.0.0"
-git tag -a v1.0.0 -m "Multisim MCP v1.0.0"
+git commit -m "release: v1.1.0"
+git tag -a v1.1.0 -m "Multisim MCP v1.1.0"
 ```
 
 推送、创建 GitHub Release 和上传附件应在再次检查暂存内容后手动执行。不要上传当前
@@ -78,14 +78,14 @@ git tag -a v1.0.0 -m "Multisim MCP v1.0.0"
 
 English: tag only after a final staged-file audit; never attach the local template wheel.
 
-## 6. v1.0.0 发布顺序
+## 6. v1.1.0 发布顺序
 
 1. 推送发布提交并等待 `CI` 全部通过。
-2. 推送签注标签 `v1.0.0`，由 Trusted Publishing 工作流发布 PyPI 包。
+2. 推送签注标签 `v1.1.0`，由 Trusted Publishing 工作流发布 PyPI 包。
 3. 核对 PyPI 文件 SHA-256，再创建 GitHub Release；附件只使用公开工作流构建的
    code-only wheel/sdist，不使用本地模板开发包。
 4. 运行 MCP Registry 发布工作流，并确认 `io.github.yxy050208/multisim-mcp` 显示
-   `1.0.0`。
+   `1.1.0`。
 5. 核对 Glama、awesome-mcp-servers 等社区目录的仓库链接和徽章；目录更新不能先于
    可安装包和 Registry 元数据。
 

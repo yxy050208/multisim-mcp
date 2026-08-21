@@ -25,6 +25,7 @@ from .formal_report import export_formal_reports
 from .job_engine import output_lease
 from .safety import validate_analysis_commands, validate_spice_netlist
 from .spice_raw import parse_raw, plot_svg
+from .workspace_manifest import DIRECTORY_MANIFEST_NAME, write_directory_manifest
 
 
 Checkpoint = Callable[[str, int, str], None]
@@ -49,7 +50,27 @@ _BASE_ARTIFACT_NAMES = (
     "report.zh-CN.pdf",
     "report.en.pdf",
     "manifest.json",
+    DIRECTORY_MANIFEST_NAME,
 )
+
+_ARTIFACT_ROLES = {
+    "circuit.ms14": "schematic",
+    "circuit.ms14.xml": "schematic-source",
+    "schematic.png": "schematic-image",
+    "data.csv": "simulation-data",
+    "result.raw": "simulation-data",
+    "run.log": "log",
+    "run.txt": "analysis-commands",
+    "circuit.cir": "netlist",
+    "plot.svg": "plot",
+    "report.md": "report",
+    "report.zh-CN.html": "report",
+    "report.en.html": "report",
+    "report.zh-CN.pdf": "report",
+    "report.en.pdf": "report",
+    "manifest.json": "reproducibility-manifest",
+    "verification.json": "verification",
+}
 
 
 def _markdown_text(value: object) -> str:
@@ -413,7 +434,24 @@ class MultisimExperimentPipeline:
                 "plot.svg",
                 verification,
             )
-            self._report_exporter(stage, experiment_id_for_output_dir(root))
+            stable_experiment_id = experiment_id_for_output_dir(root)
+            self._report_exporter(stage, stable_experiment_id)
+            write_directory_manifest(
+                stage,
+                directory_kind="experiment",
+                entity_id=stable_experiment_id,
+                state="succeeded",
+                artifacts={
+                    name: _ARTIFACT_ROLES.get(name, "artifact")
+                    for name in manifest_names
+                    if name != DIRECTORY_MANIFEST_NAME
+                },
+                metadata={
+                    "title": title,
+                    "verified": requirements is not None,
+                    "requirement_count": len(requirements or ()),
+                },
+            )
 
             missing = [
                 str(stage / name)

@@ -8,7 +8,7 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> The current stable release is `v1.0.0`. This project is not affiliated
+> The current stable release is `v1.1.0`. This project is not affiliated
 > with or endorsed by NI. A
 > locally installed and licensed Multisim 14+ environment is required. The
 > COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
@@ -19,7 +19,7 @@ The completed development phases and release gates are recorded in the
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.0.0)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.1.0)
 
 ## End-to-end workflow
 
@@ -90,6 +90,8 @@ Stable:
   and crash/hang worker recovery.
 - versioned measurements, strict requirement verdicts, and four deterministic
   sweep modes.
+- versioned project, experiment, and optimization directory manifests with
+  revision tracking, lifecycle state, and SHA-256 integrity verification.
 
 Experimental but verified:
 
@@ -104,6 +106,8 @@ Experimental but verified:
 See [component coverage](docs/COMPONENT_COVERAGE.md) for precise boundaries.
 See [vendor macro-model compatibility](docs/VENDOR_SPICE_MODELS.md) for the
 editable-expansion and safe-file boundary.
+See [workspace manifests](docs/WORKSPACE_MANIFESTS.md) for the persistent
+directory schema and integrity contract.
 
 ## Public-release asset policy
 
@@ -135,7 +139,7 @@ See the [publishing guide](docs/PUBLISHING.md) and
 The simplest compatible deployment still installs into 32-bit Python:
 
 ```powershell
-C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.0.0"
+C:\path\to\python32\python.exe -m pip install "multisim-mcp==1.1.0"
 C:\path\to\python32\Scripts\multisim-mcp.exe
 ```
 
@@ -164,7 +168,7 @@ npm install --global electronics-workbench-decoder@0.2.0
 .\run_server.ps1
 ```
 
-Version `v1.0.0` includes diagnostic and configuration commands.
+Version `v1.1.0` includes diagnostic and configuration commands.
 By default, they do not start Multisim or modify an existing client
 configuration:
 
