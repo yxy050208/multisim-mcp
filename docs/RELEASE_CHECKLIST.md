@@ -91,8 +91,8 @@ adding an ignore rule does not remove a file that is already staged.
       pipeline, and job-engine regression set.
 - [x] Produce Chinese-first bilingual `RELEASE_NOTES_v1.1.0.md` and include it
       in the local release audit.
-- [ ] Push the release PR and wait for every public CI job to pass.
-- [ ] Build and inspect the final wheel/sdist from the reviewed release commit.
+- [x] Push the release PR and wait for every public CI job to pass.
+- [x] Build and inspect the final wheel/sdist from the reviewed release commit.
 - [ ] Push annotated tag `v1.1.0` and verify Trusted Publishing on PyPI.
 - [ ] Publish matching MCP Registry metadata and GitHub Release artifacts.
 - [ ] Re-check Glama and awesome-mcp-servers metadata after publication.
