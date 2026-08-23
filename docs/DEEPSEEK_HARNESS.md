@@ -173,12 +173,12 @@ dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.1.0"
 dsh --profile web --dump-config
 ```
 
-首次发布完成前，维护者应使用 `npm pack` 生成的 `.tgz` 做隔离安装验证；不要把
-仓库相对目录当作最终用户安装方式。npm 发布需要单独验证包名所有权、Trusted
-Publishing 和固定 Harness 版本，不能与 Python 包发布隐式绑定。配置只转发
-`MULTISIM_MCP_*` 和 Python 运行选项，不会把
+`multisim-mcp-dsh-plugin@1.1.0` 已于 2026-08-23 公开发布到 npm。发布后已从
+Registry 包名完成全新 profile 安装，验证 Cordis 组合、MCP 子进程启动和 Web
+HTTP 200。npm 发布仍与 Python 包独立；配置只转发 `MULTISIM_MCP_*` 和 Python
+运行选项，不会把
 `DEEPSEEK_API_KEY` 传入 MCP 子进程。
-首次发布、Registry 防抢注检查和后续 OIDC 暂存审批流程见
+Registry 归属检查和后续 OIDC 暂存审批流程见
 [`DeepSeek Harness 插件 npm 发布手册`](DEEPSEEK_HARNESS_NPM_RELEASE.md)。
 
 ## 官方 dsh 端到端烟雾测试

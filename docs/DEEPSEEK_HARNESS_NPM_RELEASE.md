@@ -4,6 +4,11 @@
 包、MCP Registry 和该 bundle 是三个独立发布物；版本当前保持同步，但不能由同一个
 上传步骤隐式联动。
 
+> 发布状态：`multisim-mcp-dsh-plugin@1.1.0` 已于 2026-08-23 使用维护者 2FA
+> 首次公开发布。Registry integrity 为
+> `sha512-tdZ2d3tw5lxe7Dg5aCTEZekw8tIb0jqk3d8j8o39BylKrEs+aPOiuXka1mNT4pYVLLdkzAZ6gEiRUHzf0pMEqQ==`。
+> 发布后已从 npm 包名完成隔离安装、Cordis 合成、MCP 启动和 Web HTTP 200 验证。
+
 ## 安全边界
 
 - 包名固定为 `multisim-mcp-dsh-plugin`，发布前必须再次查询 Registry；
@@ -79,9 +84,9 @@ Publisher；工作流文件名和 Environment 名必须完全一致。
 
 ## English summary
 
-The first publication must be performed interactively with maintainer 2FA,
-because npm does not allow staged publishing for a brand-new package. After the
-package exists, configure `publish-dsh-plugin.yml` as a stage-only trusted
-publisher bound to the `npm` GitHub Environment. Future CI runs use short-lived
-OIDC credentials to stage, while a maintainer still reviews and approves every
-release with 2FA. No long-lived npm publish token is stored in the repository.
+Version `1.1.0` was published interactively with maintainer 2FA on 2026-08-23
+and verified through a clean Registry install and live Harness startup. Configure
+`publish-dsh-plugin.yml` as a stage-only trusted publisher bound to the `npm`
+GitHub Environment. Future CI runs use short-lived OIDC credentials to stage,
+while a maintainer still reviews and approves every release with 2FA. No
+long-lived npm publish token is stored in the repository.

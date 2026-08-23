@@ -1,6 +1,7 @@
 # Multisim MCP + Skills
 
 [![Glama MCP server score](https://glama.ai/mcp/servers/yxy050208/multisim-mcp/badges/score.svg)](https://glama.ai/mcp/servers/yxy050208/multisim-mcp)
+[![DeepSeek Harness npm bundle](https://img.shields.io/npm/v/multisim-mcp-dsh-plugin.svg?label=dsh%20plugin)](https://www.npmjs.com/package/multisim-mcp-dsh-plugin)
 
 [中文（当前）](README.md) | [English](README.en.md)
 
@@ -15,6 +16,7 @@
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
+[DeepSeek Harness npm 插件](https://www.npmjs.com/package/multisim-mcp-dsh-plugin) ·
 [GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.1.0)
 
 ## 开源发布状态
@@ -253,8 +255,10 @@ OpenAI-compatible 服务；默认只预览，`--apply` 才原子写入，`--prob
 Harness 本地契约；版本与上游检查细节见适配说明。
 需要把集成作为 Harness 插件安装时，可使用
 [`integrations/deepseek-harness`](integrations/deepseek-harness) 中的独立 bundle；
-它目前支持本地源码安装，尚未发布到 npm。维护者的首次 2FA 发布与后续 OIDC
-暂存流程见 [`npm 发布手册`](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md)。
+`multisim-mcp-dsh-plugin@1.1.0` 已公开发布到 npm。固定版本安装命令为
+`dsh plugin --profile web add multisim-mcp-dsh-plugin@1.1.0`；维护者的发布后
+Trusted Publishing 与后续 OIDC 暂存流程见
+[`npm 发布手册`](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md)。
 
 手工 MCP 客户端配置：
 
