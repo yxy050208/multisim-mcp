@@ -593,7 +593,7 @@ def _toml_string(value: str) -> str:
 def _render_deepseek_harness_config(
     server_name: str, spec: dict[str, Any]
 ) -> str:
-    """Render a Cordis plugin row for the official DeepSeek Harness MCP client."""
+    """Render a Cordis insert patch for the official Harness MCP client."""
     if not _HARNESS_SERVER_NAME_RE.fullmatch(server_name):
         raise ValueError(
             "DeepSeek Harness server name must be 1-32 characters and contain "
@@ -603,30 +603,31 @@ def _render_deepseek_harness_config(
     # JSON string literals are valid YAML scalars and avoid path escaping bugs on
     # Windows. Keep this fragment dependency-free so it works in the 32-bit host.
     lines = [
-        f"- id: {_toml_string(f'mcp-{server_name}')}",
-        '  name: "@deepseek-ai/dsh-mcp-client"',
-        "  config:",
-        f"    serverName: {_toml_string(server_name)}",
-        '    transport: "stdio"',
-        f"    command: {_toml_string(spec['command'])}",
-        "    args:",
+        "- insert:",
+        f"    - id: {_toml_string(f'mcp-{server_name}')}",
+        '      name: "@deepseek-ai/dsh-mcp-client"',
+        "      config:",
+        f"        serverName: {_toml_string(server_name)}",
+        '        transport: "stdio"',
+        f"        command: {_toml_string(spec['command'])}",
+        "        args:",
     ]
-    lines.extend(f"      - {_toml_string(item)}" for item in spec["args"])
+    lines.extend(f"          - {_toml_string(item)}" for item in spec["args"])
     if spec.get("env"):
-        lines.append("    env:")
+        lines.append("        env:")
         lines.extend(
-            f"      {key}: {_toml_string(value)}"
+            f"          {key}: {_toml_string(value)}"
             for key, value in sorted(spec["env"].items())
         )
     lines.extend(
         [
-            "    failOnStartupError: true",
-            "    toolCallTimeoutMs: 120000",
-            "    reconnect:",
-            "      enabled: true",
-            "      initialDelayMs: 500",
-            "      maxDelayMs: 30000",
-            "      maxAttempts: 10",
+            "        failOnStartupError: true",
+            "        toolCallTimeoutMs: 120000",
+            "        reconnect:",
+            "          enabled: true",
+            "          initialDelayMs: 500",
+            "          maxDelayMs: 30000",
+            "          maxAttempts: 10",
         ]
     )
     return "\n".join(lines) + "\n"

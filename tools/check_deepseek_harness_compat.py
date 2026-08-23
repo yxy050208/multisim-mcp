@@ -204,6 +204,8 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
                 )
             )
         required_patch_fragments = (
+            "- insert:",
+            '- id: "mcp-multisim"',
             'name: "@deepseek-ai/dsh-mcp-client"',
             'serverName: "multisim"',
             'transport: "stdio"',
@@ -217,6 +219,17 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
                         "error", "bundle-patch", f"missing fragment: {fragment}"
                     )
                 )
+        if not re.search(
+            r'(?m)^- insert:\s*\r?\n\s+- id: "mcp-multisim"\s*$',
+            bundle_patch,
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "bundle-patch",
+                    "mcp-multisim must be nested under an insert operation",
+                )
+            )
         if "DEEPSEEK_API_KEY" in bundle_patch:
             findings.append(
                 _finding(

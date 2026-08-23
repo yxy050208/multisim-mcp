@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "verified_date": "2026-08-18",
+  "verified_date": "2026-08-23",
   "status": "developer-preview",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness",
     "root_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/package.json",
     "dsh_cli_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/apps/cli/package.json",
     "mcp_client_package_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/packages/mcp/mcp-client/package.json",
-    "harness_version": "0.1.0-rc.7",
+    "harness_version": "0.1.1-rc.2",
     "dsh_cli_package": "@deepseek-ai/dsh",
-    "dsh_cli_version": "0.1.0-rc.7",
+    "dsh_cli_version": "0.1.1-rc.2",
     "mcp_client_package": "@deepseek-ai/dsh-mcp-client",
-    "mcp_client_version": "0.1.0-rc.7",
+    "mcp_client_version": "0.1.1-rc.2",
     "node_engine": "^22.19.0 || >=24.0.0",
     "package_manager": "pnpm@11.7.0",
     "mcp_sdk_range": "^1.12.0"

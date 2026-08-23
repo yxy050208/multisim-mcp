@@ -9,9 +9,9 @@
 
 ## 当前兼容基线
 
-本说明核对日期为 2026-08-18。DeepSeek Harness 官方仓库仍标记为
+本说明核对日期为 2026-08-23。DeepSeek Harness 官方仓库仍标记为
 Developer Preview，并明确提示可能发生破坏性兼容变更。当前公开的
-`@deepseek-ai/dsh-mcp-client` 包版本为 `0.1.0-rc.7`。
+`@deepseek-ai/dsh-mcp-client` 已验证版本为 `0.1.1-rc.2`。
 
 已确认的 MCP Client 行为：
 
@@ -59,27 +59,28 @@ dsh --profile web --dump-config
 片段形状：
 
 ```yaml
-- id: "mcp-multisim"
-  name: "@deepseek-ai/dsh-mcp-client"
-  config:
-    serverName: "multisim"
-    transport: "stdio"
-    command: "C:\\path\\to\\python32\\python.exe"
-    args:
-      - "-m"
-      - "multisim_mcp.server"
-    env:
-      MULTISIM_MCP_ARTIFACT_EXPORT_DIR: "C:\\MultisimMcp\\exports"
-      MULTISIM_MCP_TEMPLATE_DIR: "C:\\MultisimMcp\\component-pack"
-      MULTISIM_MCP_TOOL_PROFILE: "experiment"
-      MULTISIM_MCP_WORKDIR: "C:\\msre_exp"
-    failOnStartupError: true
-    toolCallTimeoutMs: 120000
-    reconnect:
-      enabled: true
-      initialDelayMs: 500
-      maxDelayMs: 30000
-      maxAttempts: 10
+- insert:
+    - id: "mcp-multisim"
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: "multisim"
+        transport: "stdio"
+        command: "C:\\path\\to\\python32\\python.exe"
+        args:
+          - "-m"
+          - "multisim_mcp.server"
+        env:
+          MULTISIM_MCP_ARTIFACT_EXPORT_DIR: "C:\\MultisimMcp\\exports"
+          MULTISIM_MCP_TEMPLATE_DIR: "C:\\MultisimMcp\\component-pack"
+          MULTISIM_MCP_TOOL_PROFILE: "experiment"
+          MULTISIM_MCP_WORKDIR: "C:\\msre_exp"
+        failOnStartupError: true
+        toolCallTimeoutMs: 120000
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 30000
+          maxAttempts: 10
 ```
 
 Harness 的 `serverName` 当前只接受 1--32 个字母、数字、下划线或连字符；
@@ -164,17 +165,18 @@ Workflow seam 更适合由模型生成编排脚本和子代理的动态任务，
 仓库同时提供可独立安装的 bundle 源码：
 [`integrations/deepseek-harness`](../integrations/deepseek-harness)。它按照官方
 `dsh.bundle.patch` 约定声明 `cordis.patch.yml`，并把 MCP Client 依赖固定为
-`0.1.0-rc.7`。
+`0.1.1-rc.2`。
 
 ```powershell
 $env:MULTISIM_MCP_PYTHON = "C:\path\to\python32\python.exe"
-dsh plugin --profile web add .\integrations\deepseek-harness
+dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.1.0"
 dsh --profile web --dump-config
 ```
 
-当前 bundle 可以从源码路径安装，但尚未发布到 npm。正式 npm 发布需要单独验证
-包名所有权、Trusted Publishing 和固定 Harness 版本，不能与 Python 包发布隐式
-绑定。配置只转发 `MULTISIM_MCP_*` 和 Python 运行选项，不会把
+首次发布完成前，维护者应使用 `npm pack` 生成的 `.tgz` 做隔离安装验证；不要把
+仓库相对目录当作最终用户安装方式。npm 发布需要单独验证包名所有权、Trusted
+Publishing 和固定 Harness 版本，不能与 Python 包发布隐式绑定。配置只转发
+`MULTISIM_MCP_*` 和 Python 运行选项，不会把
 `DEEPSEEK_API_KEY` 传入 MCP 子进程。
 首次发布、Registry 防抢注检查和后续 OIDC 暂存审批流程见
 [`DeepSeek Harness 插件 npm 发布手册`](DEEPSEEK_HARNESS_NPM_RELEASE.md)。
@@ -188,7 +190,7 @@ python tools/smoke_deepseek_harness.py --json
 ```
 
 该脚本使用临时 `DSH_HOME`，删除子进程环境中的 `DEEPSEEK_API_KEY`，强制关闭
-Harness 遥测，并固定运行 `@deepseek-ai/dsh@0.1.0-rc.7`。它先验证配置组合，再
+Harness 遥测，并固定运行 `@deepseek-ai/dsh@0.1.1-rc.2`。它先验证配置组合，再
 启动 Web profile；由于 MCP 配置启用了 `failOnStartupError`，只有官方 MCP Client
 成功连接、完成初始工具同步并且 Web 服务就绪才算通过。脚本不执行模型请求，也不
 需要 DeepSeek API Key。
@@ -219,7 +221,7 @@ PDF、图片、raw 和 `.ms14` 默认只返回元数据与本地引用，不应�
 ## 版本门禁与上游监控
 
 仓库使用 [`compatibility/deepseek-harness.json`](../compatibility/deepseek-harness.json)
-记录已验证基线。当前固定值包括 Harness 与 MCP Client `0.1.0-rc.7`、Node
+记录已验证基线。当前固定值包括 Harness 与 MCP Client `0.1.1-rc.2`、Node
 `^22.19.0 || >=24.0.0`、pnpm `11.7.0` 和上游 MCP SDK `^1.12.0`。
 
 维护者可以执行确定性的本地契约检查；该命令不访问网络：

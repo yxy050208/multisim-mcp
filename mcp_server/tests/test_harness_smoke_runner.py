@@ -20,18 +20,18 @@ SPEC.loader.exec_module(smoke)
 
 
 class HarnessSmokeRunnerTest(unittest.TestCase):
-    def test_npx_command_pins_package_version(self) -> None:
-        with patch.object(smoke.shutil, "which", return_value="npx"):
-            command = smoke._npx_command("@deepseek-ai/dsh", "0.1.0-rc.7", "--version")
+    def test_pnpm_command_pins_package_version(self) -> None:
+        with patch.object(smoke.shutil, "which", return_value="pnpm"):
+            command = smoke._pnpm_command("@deepseek-ai/dsh", "0.1.1-rc.2", "--version")
         self.assertEqual(
             command,
-            ["npx", "--yes", "@deepseek-ai/dsh@0.1.0-rc.7", "--version"],
+            ["pnpm", "dlx", "@deepseek-ai/dsh@0.1.1-rc.2", "--version"],
         )
 
-    def test_npx_command_fails_when_node_is_missing(self) -> None:
+    def test_pnpm_command_fails_when_pnpm_is_missing(self) -> None:
         with patch.object(smoke.shutil, "which", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "npx is unavailable"):
-                smoke._npx_command("@deepseek-ai/dsh", "0.1.0-rc.7", "--version")
+            with self.assertRaisesRegex(RuntimeError, "pnpm is unavailable"):
+                smoke._pnpm_command("@deepseek-ai/dsh", "0.1.1-rc.2", "--version")
 
     def test_process_group_options_match_platform(self) -> None:
         options = smoke._process_group_options()
