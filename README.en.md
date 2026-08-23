@@ -1,6 +1,7 @@
 # Multisim MCP + Skills
 
 [![Glama MCP server score](https://glama.ai/mcp/servers/yxy050208/multisim-mcp/badges/score.svg)](https://glama.ai/mcp/servers/yxy050208/multisim-mcp)
+[![DeepSeek Harness npm bundle](https://img.shields.io/npm/v/multisim-mcp-dsh-plugin.svg?label=dsh%20plugin)](https://www.npmjs.com/package/multisim-mcp-dsh-plugin)
 
 [中文](README.md) | [English (current)](README.en.md)
 
@@ -242,11 +243,13 @@ or safely parsed SPICE; it cannot simulate or mutate a design. See the
 [read-only diagnosis guide](docs/READ_ONLY_EDA_DIAGNOSIS.md).
 Repository maintainers can validate the pinned local Harness contract with
 `python tools/check_deepseek_harness_compat.py --json`.
-An independently installable source bundle is available under
-[`integrations/deepseek-harness`](integrations/deepseek-harness); it has not yet
-been published to npm. Maintainers should follow the
-[npm release guide](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md) for the first 2FA
-publication and later OIDC-staged updates.
+The independently installable bundle under
+[`integrations/deepseek-harness`](integrations/deepseek-harness) is published as
+[`multisim-mcp-dsh-plugin@1.1.0`](https://www.npmjs.com/package/multisim-mcp-dsh-plugin).
+Install the pinned release with
+`dsh plugin --profile web add multisim-mcp-dsh-plugin@1.1.0`. Maintainers should
+follow the [npm release guide](docs/DEEPSEEK_HARNESS_NPM_RELEASE.md) for
+post-publication Trusted Publishing and later OIDC-staged updates.
 
 Manual MCP client configuration:
 

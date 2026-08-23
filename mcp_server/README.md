@@ -233,8 +233,11 @@ files by default, and only replaces them when `--force` is explicit.
 Source-tree maintainers can run `python tools/check_deepseek_harness_compat.py
 --json` from the repository root to validate the pinned Harness contract.
 The independently installable Harness bundle lives in
-[`integrations/deepseek-harness`](../integrations/deepseek-harness) and currently
-supports local source installation; it is not yet published to npm.
+[`integrations/deepseek-harness`](../integrations/deepseek-harness) and is
+published as
+[`multisim-mcp-dsh-plugin@1.1.0`](https://www.npmjs.com/package/multisim-mcp-dsh-plugin).
+Install it with
+`dsh plugin --profile web add multisim-mcp-dsh-plugin@1.1.0`.
 The separate `configure` command prepares model-provider settings for the future
 workbench. It never copies credential values into its versioned JSON file or the
 MCP child process, and it performs network I/O only with explicit `--probe`.

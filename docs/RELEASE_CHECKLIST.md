@@ -108,9 +108,12 @@ adding an ignore rule does not remove a file that is already staged.
 - [x] Restrict the npm tarball to four reviewed files.
 - [x] Add a Registry ownership/version guard with unit tests.
 - [x] Add verify-only and stage-existing GitHub Actions paths.
-- [ ] Re-run the Registry guard immediately before the first publication.
-- [ ] Publish `multisim-mcp-dsh-plugin@1.1.0` interactively with maintainer 2FA.
+- [x] Re-run the Registry guard immediately before the first publication.
+- [x] Publish `multisim-mcp-dsh-plugin@1.1.0` interactively with maintainer 2FA.
+- [x] Verify public Registry metadata, integrity, clean profile installation,
+      Cordis composition, MCP startup, and Web HTTP 200.
 - [ ] Configure `publish-dsh-plugin.yml` as a stage-only npm Trusted Publisher.
-- [ ] Protect the GitHub `npm` Environment with required reviewers.
+- [x] Protect the GitHub `npm` Environment with `yxy050208` as a required
+      reviewer.
 - [ ] Disallow traditional publish tokens and verify package provenance on the
       next staged release.
