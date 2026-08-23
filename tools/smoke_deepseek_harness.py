@@ -34,11 +34,14 @@ def _tail(path: Path, limit: int = 8000) -> str:
     return text[-limit:]
 
 
-def _npx_command(package: str, version: str, *args: str) -> list[str]:
-    executable = shutil.which("npx")
+def _pnpm_command(package: str, version: str, *args: str) -> list[str]:
+    executable = shutil.which("pnpm")
     if not executable:
-        raise RuntimeError("npx is unavailable; install Node.js 22.19+ or 24+")
-    return [executable, "--yes", f"{package}@{version}", *args]
+        raise RuntimeError(
+            "pnpm is unavailable; install the packageManager version pinned "
+            "by compatibility/deepseek-harness.json"
+        )
+    return [executable, "dlx", f"{package}@{version}", *args]
 
 
 def _process_group_options() -> dict[str, Any]:
@@ -105,6 +108,8 @@ def _run_bounded(
         cwd=cwd,
         env=env,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         **_process_group_options(),
@@ -164,7 +169,7 @@ def run_smoke(
         environment.pop("DEEPSEEK_API_KEY", None)
 
         version_check = _run_bounded(
-            _npx_command(package, version, "--version"),
+            _pnpm_command(package, version, "--version"),
             cwd=workspace,
             env=environment,
             timeout=install_timeout,
@@ -181,7 +186,7 @@ def run_smoke(
             )
 
         dump = _run_bounded(
-            _npx_command(
+            _pnpm_command(
                 package,
                 version,
                 "web",
@@ -203,12 +208,13 @@ def run_smoke(
                 raise RuntimeError(f"composed dsh config is missing {fragment!r}")
 
         port = _free_loopback_port()
-        command = _npx_command(
+        command = _pnpm_command(
             package,
             version,
             "web",
             "--patch",
             str(patch),
+            "--no-open",
             "--port",
             str(port),
         )

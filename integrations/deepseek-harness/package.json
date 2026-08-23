@@ -1,7 +1,7 @@
 {
   "name": "multisim-mcp-dsh-plugin",
   "version": "1.1.0",
-  "description": "DeepSeek Harness bundle for the Multisim MCP server",
+  "description": "DeepSeek Harness plugin for NI Multisim circuit generation, simulation, optimization, and lab reports via MCP",
   "license": "MIT",
   "type": "module",
   "publishConfig": {
@@ -17,9 +17,13 @@
   ],
   "keywords": [
     "dsh-plugin",
+    "deepseek",
     "deepseek-harness",
     "mcp",
     "multisim",
+    "ni-multisim",
+    "circuit-simulation",
+    "electronics",
     "eda"
   ],
   "repository": {
@@ -27,12 +31,12 @@
     "url": "git+https://github.com/yxy050208/multisim-mcp.git",
     "directory": "integrations/deepseek-harness"
   },
-  "homepage": "https://github.com/yxy050208/multisim-mcp#deepseek-harness",
+  "homepage": "https://github.com/yxy050208/multisim-mcp/tree/main/integrations/deepseek-harness",
   "bugs": {
     "url": "https://github.com/yxy050208/multisim-mcp/issues"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-mcp-client": "0.1.0-rc.7"
+    "@deepseek-ai/dsh-mcp-client": "0.1.1-rc.2"
   },
   "dsh": {
     "bundle": {

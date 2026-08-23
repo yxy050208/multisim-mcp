@@ -17,7 +17,7 @@
 
 ```powershell
 python tools/check_dsh_plugin_release.py `
-  --expected-version 1.0.0 `
+  --expected-version 1.1.0 `
   --check-registry `
   --json
 npm pack .\integrations\deepseek-harness --dry-run --json --ignore-scripts
@@ -26,7 +26,7 @@ npm pack .\integrations\deepseek-harness --dry-run --json --ignore-scripts
 发布守卫把 Registry 的 404 解释为“当前未被占用”，但这不是名称保留。首次发布前
 必须重新执行；如果 Registry 已出现同名包且其 repository 不是本项目，守卫会失败。
 
-## 首次发布 1.0.0
+## 首次发布 1.1.0
 
 npm 的 staged publishing 明确要求包已经存在，因此全新包不能使用
 `npm stage publish`。首次发布需要包所有者在可信本机完成，并使用账户 2FA：
@@ -35,7 +35,7 @@ npm 的 staged publishing 明确要求包已经存在，因此全新包不能使
 cd integrations\deepseek-harness
 npm login
 npm pack --json --ignore-scripts
-npm publish .\multisim-mcp-dsh-plugin-1.0.0.tgz --access public
+npm publish .\multisim-mcp-dsh-plugin-1.1.0.tgz --access public
 ```
 
 不要把一次性验证码写入脚本、文档或 shell 历史；让 npm 在交互提示中请求 2FA。
@@ -43,7 +43,7 @@ npm publish .\multisim-mcp-dsh-plugin-1.0.0.tgz --access public
 立即核对：
 
 ```powershell
-npm view multisim-mcp-dsh-plugin@1.0.0 `
+npm view multisim-mcp-dsh-plugin@1.1.0 `
   name version repository dist.integrity dist.shasum --json
 ```
 

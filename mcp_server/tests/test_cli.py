@@ -223,7 +223,8 @@ class ConfigGeneratorTest(unittest.TestCase):
             tool_profile="experiment",
             artifact_export_dir=r"C:\MultisimMcp\exports",
         )
-        self.assertIn('- id: "mcp-multisim_lab"', content)
+        self.assertTrue(content.startswith("- insert:\n"))
+        self.assertIn('    - id: "mcp-multisim_lab"', content)
         self.assertIn('name: "@deepseek-ai/dsh-mcp-client"', content)
         self.assertIn('serverName: "multisim_lab"', content)
         self.assertIn('transport: "stdio"', content)

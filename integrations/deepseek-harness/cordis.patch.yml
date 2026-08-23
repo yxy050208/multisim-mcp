@@ -1,23 +1,24 @@
-- id: "mcp-multisim"
-  name: "@deepseek-ai/dsh-mcp-client"
-  config:
-    serverName: "multisim"
-    transport: "stdio"
-    command: !!js process.env.MULTISIM_MCP_PYTHON ?? "python"
-    args:
-      - "-m"
-      - "multisim_mcp.server"
-    env:
-      PYTHONUTF8: "1"
-      PYTHONUNBUFFERED: "1"
-      MULTISIM_MCP_TOOL_PROFILE: !!js process.env.MULTISIM_MCP_TOOL_PROFILE ?? "experiment"
-      MULTISIM_MCP_TEMPLATE_DIR: !!js process.env.MULTISIM_MCP_TEMPLATE_DIR ?? ""
-      MULTISIM_MCP_WORKDIR: !!js process.env.MULTISIM_MCP_WORKDIR ?? ""
-      MULTISIM_MCP_ARTIFACT_EXPORT_DIR: !!js process.env.MULTISIM_MCP_ARTIFACT_EXPORT_DIR ?? ""
-    failOnStartupError: true
-    toolCallTimeoutMs: 120000
-    reconnect:
-      enabled: true
-      initialDelayMs: 500
-      maxDelayMs: 30000
-      maxAttempts: 10
+- insert:
+    - id: "mcp-multisim"
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: "multisim"
+        transport: "stdio"
+        command: !!js process.env.MULTISIM_MCP_PYTHON ?? "python"
+        args:
+          - "-m"
+          - "multisim_mcp.server"
+        env:
+          PYTHONUTF8: "1"
+          PYTHONUNBUFFERED: "1"
+          MULTISIM_MCP_TOOL_PROFILE: !!js process.env.MULTISIM_MCP_TOOL_PROFILE ?? "experiment"
+          MULTISIM_MCP_TEMPLATE_DIR: !!js process.env.MULTISIM_MCP_TEMPLATE_DIR ?? ""
+          MULTISIM_MCP_WORKDIR: !!js process.env.MULTISIM_MCP_WORKDIR ?? ""
+          MULTISIM_MCP_ARTIFACT_EXPORT_DIR: !!js process.env.MULTISIM_MCP_ARTIFACT_EXPORT_DIR ?? ""
+        failOnStartupError: true
+        toolCallTimeoutMs: 120000
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 30000
+          maxAttempts: 10

@@ -74,6 +74,12 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+      - name: Install pinned pnpm
+        shell: pwsh
+        run: |
+          $packageManager = python -c "import json; print(json.load(open('compatibility/deepseek-harness.json', encoding='utf-8'))['upstream']['package_manager'])"
+          npm install --global $packageManager --ignore-scripts
+          pnpm --version
       - name: Install Multisim MCP
         run: python -m pip install ./mcp_server
       - name: Run isolated official Harness smoke
