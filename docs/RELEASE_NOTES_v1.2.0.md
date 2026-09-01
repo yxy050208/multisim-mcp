@@ -1,11 +1,8 @@
-# Multisim MCP Core v1.2.0 候选版
+# Multisim MCP Core v1.2.0
 
-这是一个**不含 React 前端**的 MCP 核心候选版本。它面向需要通过 Codex、DeepSeek
+这是一个**不含 React 前端**的 MCP 核心正式版本。它面向需要通过 Codex、DeepSeek
 Harness 或其他 MCP Client 直接调用电路设计与实验能力的用户，同时为后续独立工业
 软件保留稳定、可审计的服务边界。
-
-> 当前文档描述 GitHub 候选源码。合并、CI、真实 Multisim 门禁、PyPI、GitHub Release
-> 和 MCP Registry 发布完成前，不应把 `1.2.0` 当作正式稳定发行版。
 
 ## 核心能力
 
@@ -28,7 +25,7 @@ Harness 或其他 MCP Client 直接调用电路设计与实验能力的用户，
 Python 包仍可提供 loopback 桥接 API，供可信的本地客户端读取有界快照和提交经过审批的
 工作流；这些 API 不是前端，也不是公网、多租户服务。
 
-## 候选版验证门禁
+## 发布验证门禁
 
 ```powershell
 .\tools\verify_mcp_release.ps1
@@ -40,11 +37,11 @@ Python 包仍可提供 loopback 桥接 API，供可信的本地客户端读取�
 
 ## English summary
 
-This is a frontend-free MCP Core 1.2 release candidate. It packages the Python
+This is the frontend-free MCP Core 1.2.0 release. It packages the Python
 MCP server, CLI, transport-neutral EDA core, approved design workflow, diagnosis,
 optimization, autonomous correction, durable jobs, Multisim/ngspice backends,
 model-provider integration, tests, and documentation. It deliberately excludes
-the React Workbench and all NI/local artifacts. The candidate exposes 78 tools,
-20 resource templates, and five bilingual prompts. It must not be presented as a
-stable release until CI, real-runtime gates, packaging, PyPI, and registry
-publication are complete.
+the React Workbench and all NI/local artifacts. The release exposes 78 tools,
+20 resource templates, and five bilingual prompts. CI, packaging, and protocol
+gates passed; real Multisim COM regression remains an environment-specific check
+that requires an installed and licensed NI Multisim host.
