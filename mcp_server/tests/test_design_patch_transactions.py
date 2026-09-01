@@ -382,7 +382,9 @@ class PatchTransactionTest(unittest.TestCase):
             real_link = os.link
 
             def race_link(source: object, destination: object) -> None:
-                if Path(destination) == output:
+                # Windows Python versions may resolve the user profile to an
+                # 8.3 path while the test fixture keeps the long spelling.
+                if Path(destination).resolve() == output.resolve():
                     output.write_text("unrelated", encoding="utf-8")
                 real_link(source, destination)
 

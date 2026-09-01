@@ -97,7 +97,7 @@ class NgspiceBackendTest(unittest.TestCase):
         self.assertTrue(execution.success)
         self.assertEqual(execution.payload["compatibility_result"]["point_count"], 3)
         self.assertEqual(
-            execution.payload["compatibility_result"]["output_dir"], str(root)
+            execution.payload["compatibility_result"]["output_dir"], str(root.resolve())
         )
         self.assertEqual(calls[0][0][1:4], ["-n", "-b", "-o"])
 

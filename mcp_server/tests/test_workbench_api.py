@@ -474,7 +474,10 @@ class WorkbenchApiTest(unittest.TestCase):
                     self.assertEqual(response.status, 200)
                     self.assertIn(b"<div id='root'>", response.read())
                 with urlopen(f"{base}/assets/app.js", timeout=3) as response:
-                    self.assertEqual(response.headers.get_content_type(), "text/javascript")
+                    self.assertIn(
+                        response.headers.get_content_type(),
+                        {"text/javascript", "application/javascript"},
+                    )
                 with urlopen(f"{base}/design", timeout=3) as response:
                     self.assertEqual(response.status, 200)
                     self.assertIn(b"<div id='root'>", response.read())
