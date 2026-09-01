@@ -8,24 +8,25 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前稳定发行版为 `v1.1.0`。项目非 NI 官方产品，需要本机安装并授权
+> 当前 GitHub 稳定发行版为 `v1.2.0`。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
-> 当前分支是 **MCP Core `v1.2.0` 候选版**：包含 Python MCP 服务、CLI、EDA
+> `v1.2.0` 是**不含 React 前端的 MCP Core 正式版**：包含 Python MCP 服务、CLI、EDA
 > 核心、模型/DeepSeek 适配、测试、文档及可选 loopback 桥接 API；不包含仍在独立
-> 开发的 React Workbench 前端。`v1.2.0` 尚未发布到 PyPI 或 MCP Registry。
+> 开发的 React Workbench 前端。PyPI 和 MCP Registry 仍保留 `v1.1.0`，待独立发布流程完成。
 
 四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [DeepSeek Harness npm 插件](https://www.npmjs.com/package/multisim-mcp-dsh-plugin) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.1.0)
+[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.2.0)
 
 ## 开源发布状态
 
-`1.1.0` 是当前稳定发行版；PyPI 包和
+`1.1.0` 仍是 PyPI 与官方 MCP Registry 的已发布版本；GitHub Release 已更新为
+`1.2.0`。PyPI 包和
 `io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目使用同一版本号。由本地 NI
 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
@@ -34,9 +35,9 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 请不要上传 `analysis/`、`.ms14`、解码 XML、类型库转储、实验输出或当前包含 142 个
 本地模板的开发 wheel。完整发布步骤见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
-`1.2.0` 候选核心将公共面扩展为 78 个工具、20 个资源模板和 5 个双语提示词，新增
+`1.2.0` 正式核心将公共面扩展为 78 个工具、20 个资源模板和 5 个双语提示词，新增
 审批式设计规划、诊断/补丁评估、全局优化、自主纠错、Multisim/ngspice 差分验证与
-可恢复作业。详情见 [`v1.2.0 候选说明`](docs/RELEASE_NOTES_v1.2.0.md)。
+可恢复作业。详情见 [`v1.2.0 发布说明`](docs/RELEASE_NOTES_v1.2.0.md)。
 
 ## 已实现的完整闭环
 
