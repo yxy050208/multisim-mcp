@@ -15,6 +15,7 @@
           MULTISIM_MCP_TEMPLATE_DIR: !!js process.env.MULTISIM_MCP_TEMPLATE_DIR ?? ""
           MULTISIM_MCP_WORKDIR: !!js process.env.MULTISIM_MCP_WORKDIR ?? ""
           MULTISIM_MCP_ARTIFACT_EXPORT_DIR: !!js process.env.MULTISIM_MCP_ARTIFACT_EXPORT_DIR ?? ""
+          MULTISIM_MCP_MODEL_ROOT: !!js process.env.MULTISIM_MCP_MODEL_ROOT ?? ""
         failOnStartupError: true
         toolCallTimeoutMs: 120000
         reconnect:

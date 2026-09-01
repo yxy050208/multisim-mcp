@@ -1,0 +1,8 @@
+* Native Multisim-compatible DFF carrier used as explicit reference input
+VCC vcc 0 5
+VD d 0 PULSE(0 5 0 1n 1n 50u 100u)
+VPR pr 0 5
+VCLR clr 0 5
+VCLK clk 0 PULSE(0 5 0 1n 1n 5u 10u)
+XU1 d pr clr clk q nq 0 vcc 7474N
+.end

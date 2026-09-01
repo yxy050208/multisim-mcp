@@ -68,6 +68,18 @@ ARTIFACT_EXPORT_DIR_ENV: Final = "MULTISIM_MCP_ARTIFACT_EXPORT_DIR"
 _ARTIFACTS: Final[dict[str, tuple[str, str, bool]]] = {
     "report": ("report.md", "text/markdown", False),
     "schematic": ("schematic.png", "image/png", True),
+    "schematic_svg": ("schematic.svg", "image/svg+xml", False),
+    "backend": ("backend.json", "application/json", False),
+    "spice_compatibility": (
+        "spice-compatibility.json",
+        "application/json",
+        False,
+    ),
+    "digital_observation": (
+        "digital-observation.json",
+        "application/json",
+        False,
+    ),
     "data": ("data.csv", "text/csv", False),
     "plot": ("plot.svg", "image/svg+xml", False),
     "netlist": ("circuit.cir", "text/x-spice", False),
@@ -88,10 +100,10 @@ _RESOURCE_PATHS: Final[dict[str, str]] = {
     "formal_pdf_zh": "formal-pdf-zh",
     "formal_pdf_en": "formal-pdf-en",
     "reproducibility_manifest": "reproducibility-manifest",
+    "spice_compatibility": "spice-compatibility",
+    "digital_observation": "digital-observation",
 }
-_REQUIRED_FILES: Final = (
-    "circuit.ms14",
-    "circuit.ms14.xml",
+_COMMON_REQUIRED_FILES: Final = (
     "schematic.png",
     "data.csv",
     "result.raw",
@@ -101,6 +113,17 @@ _REQUIRED_FILES: Final = (
     "plot.svg",
     "report.md",
 )
+_MULTISIM_REQUIRED_FILES: Final = (
+    "circuit.ms14",
+    "circuit.ms14.xml",
+    *_COMMON_REQUIRED_FILES,
+)
+_PORTABLE_REQUIRED_FILES: Final = (
+    "schematic.svg",
+    "backend.json",
+    *_COMMON_REQUIRED_FILES,
+)
+_RESOURCE_ARTIFACT_NAMES: Final = frozenset(_ARTIFACTS) - {"schematic_svg", "backend"}
 
 _registry: dict[str, Path] = {}
 _registry_lock = threading.RLock()
@@ -148,12 +171,42 @@ def _safe_artifact(root: Path, filename: str) -> Path:
     return resolved
 
 
+def _experiment_backend(root: Path) -> str:
+    path = root / "backend.json"
+    if not path.exists():
+        return "multisim"
+    safe = _safe_artifact(root, "backend.json")
+    if safe.stat().st_size > 64 * 1024:
+        raise ValueError("Experiment backend metadata exceeds 64 KiB")
+    try:
+        value = json.loads(safe.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Experiment backend metadata is invalid JSON") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("Experiment backend metadata must use schema_version 1")
+    backend_id = value.get("backend_id")
+    if not isinstance(backend_id, str) or not re.fullmatch(
+        r"[a-z][a-z0-9-]{0,63}", backend_id
+    ):
+        raise ValueError("Experiment backend metadata has an invalid backend_id")
+    return backend_id
+
+
+def _required_files(root: Path) -> tuple[str, ...]:
+    return (
+        _MULTISIM_REQUIRED_FILES
+        if _experiment_backend(root) == "multisim"
+        else _PORTABLE_REQUIRED_FILES
+    )
+
+
 def register_experiment(output_dir: str) -> ExperimentResourceIndex:
     """Register a complete high-level experiment and return opaque resource URIs."""
     root = Path(output_dir).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Experiment output directory does not exist: {root}")
-    for filename in _REQUIRED_FILES:
+    required_files = _required_files(root)
+    for filename in required_files:
         path = _safe_artifact(root, filename)
         if path.stat().st_size <= 0:
             raise ValueError(f"Experiment artifact is empty: {filename}")
@@ -164,7 +217,7 @@ def register_experiment(output_dir: str) -> ExperimentResourceIndex:
     available = {
         name: definition
         for name, definition in _ARTIFACTS.items()
-        if (root / definition[0]).is_file()
+        if name in _RESOURCE_ARTIFACT_NAMES and (root / definition[0]).is_file()
     }
     return {
         "success": True,
@@ -242,7 +295,7 @@ def experiment_manifest(experiment_id: str) -> dict[str, Any]:
         filename: (name, mime_type)
         for name, (filename, mime_type, _) in _ARTIFACTS.items()
     }
-    filenames = [*_REQUIRED_FILES]
+    filenames = [*_required_files(root)]
     for filename, _, _ in _ARTIFACTS.values():
         if filename not in filenames and (root / filename).is_file():
             filenames.append(filename)
@@ -257,13 +310,16 @@ def experiment_manifest(experiment_id: str) -> dict[str, Any]:
                 "size": path.stat().st_size,
                 "sha256": _sha256_file(path),
                 "resource_uri": (
-                    _resource_uri(experiment_id, logical[0]) if logical else None
+                    _resource_uri(experiment_id, logical[0])
+                    if logical and logical[0] in _RESOURCE_ARTIFACT_NAMES
+                    else None
                 ),
             }
         )
     return {
         "schema_version": 1,
         "experiment_id": experiment_id,
+        "backend_id": _experiment_backend(root),
         "artifacts": artifacts,
     }
 
@@ -284,6 +340,7 @@ def list_artifacts(experiment_id: str) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "experiment_id": experiment_id,
+        "backend_id": manifest["backend_id"],
         "artifact_count": len(artifacts),
         "total_size": sum(int(item["size"]) for item in artifacts),
         "artifacts": artifacts,
@@ -420,6 +477,8 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
             compact_requirements: list[dict[str, Any]] = []
             allowed_fields = (
                 "id",
+                "metric",
+                "signal",
                 "status",
                 "value",
                 "unit",
@@ -433,6 +492,40 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
                 if not isinstance(raw, dict):
                     continue
                 item = {key: raw[key] for key in allowed_fields if key in raw}
+                measurement = raw.get("measurement")
+                if isinstance(measurement, dict):
+                    measurement_fields = {
+                        "value": "value",
+                        "unit": "unit",
+                        "status": "measurement_status",
+                    }
+                    for source_key, target_key in measurement_fields.items():
+                        if target_key not in item and source_key in measurement:
+                            item[target_key] = measurement[source_key]
+                criterion = raw.get("criterion")
+                if isinstance(criterion, dict):
+                    for key in (
+                        "operator",
+                        "target",
+                        "lower",
+                        "upper",
+                        "allowed_absolute_error",
+                        "tolerance_abs",
+                        "tolerance_percent",
+                    ):
+                        if key not in item and key in criterion:
+                            item[key] = criterion[key]
+                comparison = raw.get("comparison")
+                if isinstance(comparison, dict):
+                    for key in (
+                        "theoretical_value",
+                        "simulated_value",
+                        "absolute_error",
+                        "absolute_error_magnitude",
+                        "relative_error_percent",
+                    ):
+                        if key in comparison:
+                            item[key] = comparison[key]
                 for key, value in list(item.items()):
                     if not isinstance(value, (str, int, float, bool, type(None))):
                         del item[key]
@@ -475,6 +568,70 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
                 "valid_json": False,
                 "error": str(exc),
             }
+    compatibility: dict[str, Any] = {"available": False}
+    if "spice_compatibility" in artifact_names:
+        try:
+            parsed_compatibility = json.loads(
+                read_text_artifact(experiment_id, "spice_compatibility")
+            )
+            if not isinstance(parsed_compatibility, dict):
+                raise ValueError("SPICE compatibility root must be an object")
+            dialect = parsed_compatibility.get("dialect")
+            backend = parsed_compatibility.get("backend")
+            summary = parsed_compatibility.get("summary")
+            compatibility = {
+                "available": True,
+                "valid_json": True,
+                "dialect": (
+                    dialect.get("name") if isinstance(dialect, dict) else None
+                ),
+                "dialect_source": (
+                    dialect.get("source") if isinstance(dialect, dict) else None
+                ),
+                "backend_id": (
+                    backend.get("backend_id") if isinstance(backend, dict) else None
+                ),
+                "compatibility_status": (
+                    backend.get("compatibility_status")
+                    if isinstance(backend, dict)
+                    else None
+                ),
+                "solver_version": (
+                    backend.get("solver_version")
+                    if isinstance(backend, dict)
+                    else None
+                ),
+                "risk_level": (
+                    summary.get("risk_level") if isinstance(summary, dict) else None
+                ),
+                "provenance_complete": (
+                    summary.get("provenance_complete")
+                    if isinstance(summary, dict)
+                    else None
+                ),
+                "model_count": (
+                    summary.get("model_count") if isinstance(summary, dict) else None
+                ),
+                "unknown_license_count": (
+                    summary.get("unknown_license_count")
+                    if isinstance(summary, dict)
+                    else None
+                ),
+                "netlist_sha256": (
+                    parsed_compatibility.get("netlist", {}).get("sha256")
+                    if isinstance(parsed_compatibility.get("netlist"), dict)
+                    else None
+                ),
+                "model_fingerprint_sha256": parsed_compatibility.get(
+                    "model_fingerprint_sha256"
+                ),
+            }
+        except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
+            compatibility = {
+                "available": True,
+                "valid_json": False,
+                "error": str(exc)[:500],
+            }
     return {
         "schema_version": 1,
         "experiment_id": experiment_id,
@@ -484,6 +641,7 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
         "report_truncated": report["truncated"],
         "measurements": measurement_summary,
         "verification": verification or {"available": False},
+        "spice_compatibility": compatibility,
         "artifacts": [
             {
                 "name": item["name"],

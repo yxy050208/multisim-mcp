@@ -303,11 +303,40 @@ def validate_experiment_spec(spec: ExperimentSpec) -> dict[str, Any]:
     }
 
 
+def _signal_candidates(name: str) -> tuple[str, ...]:
+    """Return exact and Multisim-safe aliases for one requested signal.
+
+    Multisim's raw writer renders a node such as ``path-03`` as
+    ``V(path)-03``.  The source netlist and the workbench both use the
+    canonical SPICE spelling ``V(path-03)``; accepting this deterministic
+    display alias keeps verified measurements useful without changing the raw
+    evidence or masking unrelated names.
+    """
+    normalized = name.strip().casefold()
+    candidates = [normalized]
+    match = re.fullmatch(r"([vi])\(([^()]+)\)", normalized)
+    if match and "-" in match.group(2):
+        prefix, suffix = match.group(2).rsplit("-", 1)
+        if prefix and suffix:
+            candidates.append(f"{match.group(1)}({prefix})-{suffix}")
+    return tuple(dict.fromkeys(candidates))
+
+
 def _column_index(parsed: dict[str, Any], name: str) -> tuple[int | None, str | None]:
     columns = [str(item) for item in parsed.get("columns", [])]
-    if name in columns:
-        return columns.index(name), None
-    matches = [index for index, column in enumerate(columns) if column.casefold() == name.casefold()]
+    for candidate in _signal_candidates(name):
+        if candidate in (column.casefold() for column in columns):
+            return next(
+                index
+                for index, column in enumerate(columns)
+                if column.casefold() == candidate
+            ), None
+    requested = set(_signal_candidates(name))
+    matches = [
+        index
+        for index, column in enumerate(columns)
+        if column.casefold() in requested
+    ]
     if len(matches) == 1:
         return matches[0], None
     if len(matches) > 1:

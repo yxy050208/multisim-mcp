@@ -39,6 +39,42 @@ the high-level `run_circuit_experiment` tool whenever the requested schematic
 uses its supported component subset; it keeps the generated design, Multisim
 simulation, exported data, plot, and report tied to one source netlist.
 
+For a new design, use the planning gate before writing a netlist: call
+`plan_design_options`, wait for the user's `plan_id`/`option_id` choice, then
+call `select_design_option`, `prepare_design_specification`, and (after the
+specification approval) `prepare_netlist_draft`. Resolve candidate families
+with `resolve_component_requirements`; once concrete ratings and model
+provenance have been reviewed, call `approve_component_resolution`. That
+approval only authorizes a later compiler and never by itself creates SPICE,
+files, a schematic, or a simulation.
+
+For the bounded `signal-passive` template, call `compile_executable_netlist` next and
+show its pin-level `CircuitDesign`, calculated values, and SPICE preview. Before any
+schematic or experiment stage, call `approve_executable_netlist` with explicit
+component/topology/value/SPICE confirmations. This approval only authorizes schematic
+planning; it does not authorize file writes, stimuli, analysis commands, or simulation.
+To generate the approved schematic, pass the complete compiler response as
+`executable_netlist`, the approval artifact as `netlist_approval`, and the preview's exact
+`spice_netlist` as `netlist` to `create_schematic_from_netlist`; it revalidates the handoff and
+rejects changed SPICE text.
+Then call `approve_simulation_plan` with the same preview and netlist approval plus the reviewed
+`ExperimentSpec` (safe commands, measurements, and limits). Pass all three artifacts to
+`run_verified_circuit_experiment`; it revalidates the netlist, commands, and measurement contract
+before creating the schematic or starting Multisim.
+When the workbench handoff JSON is available, `multisim-mcp execute-handoff --handoff <file>
+--root <project> --json` provides a validation-only path; after explicit user confirmation,
+add `--confirm` to execute schematic generation followed by the verified experiment. It rejects
+root escapes, mismatched approvals, and existing artifacts by default.
+For a long-running handoff, use `--submit --confirm` after validation; the CLI creates the
+approved schematic first and then queues the verified experiment for the durable worker.
+For a durable long-running job, pass the same three artifacts and reviewed requirements to
+`submit_circuit_experiment`; the isolated worker persists and revalidates them before execution.
+After an approved run, verify the resulting `directory.manifest.json` through
+`inspect-project`. The manifest should contain only the sanitized `approval_provenance`
+identity, and a workbench result refresh should match its path, integrity, and approval/netlist/
+compiled/spec digests before treating it as the current run. Legacy or direct experiments without
+that identity remain evidence-only.
+
 ## 1. Clarify the design
 
 Collect from the user:
@@ -111,6 +147,13 @@ Returned data shape depends on the analysis:
 
 Compute mean, min, max, rise/fall, bandwidth, gain, or FFT as required. Keep the raw data in a file when the user asks for a report.
 `run_spice_netlist` returns its own parsed columns and CSV; use those directly when the schematic-level analysis tools are not applicable.
+
+When a concrete reversible `DesignPatch` has already been proposed, prefer
+`evaluate_design_patch` over an informal rerun. It evaluates the unchanged
+baseline and exactly one in-memory candidate under the same hard requirements,
+retains before/after diagnoses and the inverse patch, and never applies the
+candidate automatically. Treat `adoption_eligible` as evidence for a separate
+approval step, not as permission to overwrite the design.
 
 ## 6. Produce the report
 

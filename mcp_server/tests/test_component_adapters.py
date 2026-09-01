@@ -52,6 +52,31 @@ XDAC digital analog2 high 0 @DAC1
         self.assertIn("B1 digital 0", executable)
         self.assertNotIn("@DFF", executable)
 
+    def test_ngspice_uses_ternary_conditionals_without_changing_multisim_default(self) -> None:
+        text = "VDD high 0 5\nXADC analog digital high 0 @ADC1 THRESHOLD=.6\n.end\n"
+        multisim = prepare_simulation_netlist(text)
+        ngspice = prepare_simulation_netlist(text, ngspice_compatible=True)
+        self.assertIn("if(", multisim)
+        self.assertNotIn("if(", ngspice.casefold())
+        self.assertIn(" ? ", ngspice)
+
+    def test_execution_deck_canonicalizes_ground_aliases_without_rewriting_subckt_ports(self) -> None:
+        text = (
+            "V1 in gnd 1\n"
+            "R1 in ground 1k\n"
+            ".subckt AMP input gnd output\n"
+            "RAMP input gnd 1k\n"
+            ".ends AMP\n"
+            "X1 in gnd out AMP\n"
+            ".end\n"
+        )
+        executable = prepare_simulation_netlist(text)
+        self.assertIn("V1 in 0 1", executable)
+        self.assertIn("R1 in 0 1k", executable)
+        self.assertIn(".subckt AMP input gnd output", executable)
+        self.assertIn("RAMP input gnd 1k", executable)
+        self.assertIn("X1 in 0 out AMP", executable)
+
     def test_rejects_unknown_parameters_and_non_finite_values(self) -> None:
         with self.assertRaises(ValueError):
             expand_component_adapters("X1 a b @CRYSTAL UNKNOWN=1\n")

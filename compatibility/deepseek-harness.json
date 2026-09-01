@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "verified_date": "2026-08-23",
+  "verified_date": "2026-08-28",
   "status": "developer-preview",
   "upstream": {
     "repository": "https://github.com/deepseek-ai/deepseek-harness",
@@ -25,12 +25,16 @@
     "skill_discovery_root": ".dsh/skills",
     "bundle_package": "multisim-mcp-dsh-plugin",
     "bundle_version": "1.1.0",
+    "compatible_core_versions": [
+      "1.1.0",
+      "1.2.0"
+    ],
     "bundle_path": "integrations/deepseek-harness",
     "tool_profiles": {
-      "core": 26,
-      "experiment": 39,
-      "optimization": 40,
-      "full": 55
+      "core": 29,
+      "experiment": 55,
+      "optimization": 60,
+      "full": 78
     },
     "skills": [
       "multisim-create-experiment",

@@ -12,6 +12,10 @@
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
+> 当前分支是 **MCP Core `v1.2.0` 候选版**：包含 Python MCP 服务、CLI、EDA
+> 核心、模型/DeepSeek 适配、测试、文档及可选 loopback 桥接 API；不包含仍在独立
+> 开发的 React Workbench 前端。`v1.2.0` 尚未发布到 PyPI 或 MCP Registry。
+
 四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
@@ -29,6 +33,10 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 请不要上传 `analysis/`、`.ms14`、解码 XML、类型库转储、实验输出或当前包含 142 个
 本地模板的开发 wheel。完整发布步骤见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+
+`1.2.0` 候选核心将公共面扩展为 78 个工具、20 个资源模板和 5 个双语提示词，新增
+审批式设计规划、诊断/补丁评估、全局优化、自主纠错、Multisim/ngspice 差分验证与
+可恢复作业。详情见 [`v1.2.0 候选说明`](docs/RELEASE_NOTES_v1.2.0.md)。
 
 ## 已实现的完整闭环
 

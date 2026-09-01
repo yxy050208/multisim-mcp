@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import tempfile
 import unittest
@@ -37,6 +39,8 @@ ARTIFACT_NAMES = (
     "circuit.cir",
     "plot.svg",
     "report.md",
+    "spice-compatibility.json",
+    "digital-observation.json",
     "report.zh-CN.html",
     "report.en.html",
     "report.zh-CN.pdf",
@@ -147,11 +151,54 @@ class ExperimentPipelineTest(unittest.TestCase):
                 {item.path for item in directory_manifest.artifacts},
                 set(ARTIFACT_NAMES) - {DIRECTORY_MANIFEST_NAME},
             )
+            compatibility = json.loads(
+                (output / "spice-compatibility.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                compatibility["backend"]["backend_id"], "multisim"
+            )
+            observation = json.loads(
+                (output / "digital-observation.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(observation["overall_status"], "not-applicable")
+            self.assertEqual(result["simulation"]["digital_observation"], observation)
+            self.assertEqual(
+                compatibility["netlist"]["sha256"],
+                hashlib.sha256(
+                    "V1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.end\n".encode()
+                ).hexdigest(),
+            )
 
         self.assertTrue(result["success"])
         self.assertEqual(result["experiment_id"], "exp-pipeline-test")
         self.assertEqual(progress[0], ("preflight", 3))
         self.assertEqual(progress[-1], ("complete", 100))
+
+    def test_pipeline_records_approved_plan_provenance_in_manifest(self) -> None:
+        provenance = {
+            "schema_version": 1,
+            "kind": "multisim-mcp-approved-simulation-provenance",
+            "simulation_plan_approval_id": "simulation-approval-fixture",
+            "simulation_plan_approval_digest": "a" * 64,
+            "netlist_approval_id": "netlist-approval-fixture",
+            "netlist_approval_digest": "b" * 64,
+            "compiled_id": "compiled-fixture",
+            "compiled_digest": "c" * 64,
+            "design_id": "design-fixture",
+            "design_digest": "d" * 64,
+            "spice_sha256": "e" * 64,
+            "spec_digest": "f" * 64,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "approved-experiment"
+            self._pipeline().run(
+                "V1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+                "op",
+                str(output),
+                approval_provenance=provenance,
+            )
+            manifest = read_directory_manifest(output)
+            self.assertEqual(manifest.metadata["approval_provenance"], provenance)
 
     def test_mid_publish_failure_restores_every_previous_artifact(self) -> None:
         real_replace = os.replace

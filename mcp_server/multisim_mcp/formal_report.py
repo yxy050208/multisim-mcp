@@ -62,9 +62,41 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _backend_metadata(root: Path) -> dict[str, Any]:
+    metadata = _load_json(root / "backend.json") or {}
+    backend_id = metadata.get("backend_id")
+    display_name = metadata.get("display_name")
+    return {
+        "backend_id": backend_id if isinstance(backend_id, str) else "multisim",
+        "display_name": (
+            display_name
+            if isinstance(display_name, str) and display_name.strip()
+            else "NI Multisim"
+        ),
+    }
+
+
+def _schematic_artifact(root: Path) -> tuple[Path, str]:
+    svg = _contained_file(root, "schematic.svg", required=False)
+    if svg is not None:
+        return svg, "image/svg+xml"
+    png = _contained_file(root, "schematic.png")
+    assert png is not None
+    return png, "image/png"
+
+
 def _html_report(root: Path, language: str, summaries: list[dict[str, Any]], verification: dict[str, Any] | None) -> str:
     zh = language == "zh-CN"
-    title = "Multisim 电路实验报告" if zh else "Multisim Circuit Experiment Report"
+    backend = _backend_metadata(root)
+    title = (
+        "Multisim 电路实验报告"
+        if zh and backend["backend_id"] == "multisim"
+        else "电路实验报告"
+        if zh
+        else "Multisim Circuit Experiment Report"
+        if backend["backend_id"] == "multisim"
+        else "Circuit Experiment Report"
+    )
     labels = {
         "overview": "实验概览" if zh else "Experiment overview",
         "schematic": "电路图" if zh else "Schematic",
@@ -72,6 +104,8 @@ def _html_report(root: Path, language: str, summaries: list[dict[str, Any]], ver
         "measurements": "数据摘要" if zh else "Data summary",
         "verification": "指标验证" if zh else "Requirement verification",
         "source": "可复现输入" if zh else "Reproducible inputs",
+        "compatibility": "SPICE 兼容性与模型来源" if zh else "SPICE compatibility and model provenance",
+        "digital_observation": "数字输出观测证据" if zh else "Digital output observation evidence",
         "artifact": "原始 Markdown 报告" if zh else "Original Markdown report",
     }
     rows = "".join(
@@ -89,9 +123,50 @@ def _html_report(root: Path, language: str, summaries: list[dict[str, Any]], ver
     original = (root / "report.md").read_text(encoding="utf-8", errors="replace")
     netlist = (root / "circuit.cir").read_text(encoding="utf-8", errors="replace")
     commands = (root / "run.txt").read_text(encoding="utf-8", errors="replace")
+    compatibility = _load_json(root / "spice-compatibility.json") or {}
+    digital_observation = _load_json(root / "digital-observation.json") or {}
+    compatibility_summary = compatibility.get("summary", {})
+    compatibility_dialect = compatibility.get("dialect", {})
+    compatibility_backend = compatibility.get("backend", {})
+    compatibility_summary = compatibility_summary if isinstance(compatibility_summary, dict) else {}
+    compatibility_dialect = compatibility_dialect if isinstance(compatibility_dialect, dict) else {}
+    compatibility_backend = compatibility_backend if isinstance(compatibility_backend, dict) else {}
+    compatibility_rows = "".join(
+        f"<tr><td>{html.escape(label)}</td><td>{html.escape(str(value))}</td></tr>"
+        for label, value in (
+            ("Dialect", compatibility_dialect.get("name", "not recorded")),
+            ("Dialect source", compatibility_dialect.get("source", "not recorded")),
+            ("Static status", compatibility_backend.get("compatibility_status", "not recorded")),
+            ("Solver version", compatibility_backend.get("solver_version") or "not captured"),
+            ("Risk", compatibility_summary.get("risk_level", "not recorded")),
+            ("Models", compatibility_summary.get("model_count", 0)),
+            ("Unknown licenses", compatibility_summary.get("unknown_license_count", 0)),
+            ("Provenance complete", compatibility_summary.get("provenance_complete", False)),
+        )
+    )
+    observation_rows = "".join(
+        "<tr>"
+        + "".join(
+            f"<td>{html.escape(str(item.get(key) or '—'))}</td>"
+            for key in ("component", "pin", "net", "status", "claim", "raw_column")
+        )
+        + "</tr>"
+        for item in digital_observation.get("signals", [])
+        if isinstance(item, dict)
+    )
+    observation_routing = digital_observation.get("routing", {})
+    if isinstance(observation_routing, dict) and observation_routing.get("mode") == "explicit-rerun":
+        routing_note = (
+            "Explicit fallback recommendation: rerun with "
+            f"{observation_routing.get('recommended_backend', 'ngspice')}. "
+            f"{observation_routing.get('reason', '')}"
+        )
+    else:
+        routing_note = "Automatic backend switching is disabled."
     generated = datetime.now(timezone.utc).isoformat()
-    schematic_uri = "data:image/png;base64," + base64.b64encode(
-        (root / "schematic.png").read_bytes()
+    schematic_path, schematic_mime = _schematic_artifact(root)
+    schematic_uri = f"data:{schematic_mime};base64," + base64.b64encode(
+        schematic_path.read_bytes()
     ).decode("ascii")
     plot_uri = "data:image/svg+xml;base64," + base64.b64encode(
         (root / "plot.svg").read_bytes()
@@ -104,12 +179,14 @@ h1{{border-bottom:3px solid #2563eb;padding-bottom:12px}} h2{{margin-top:32px;co
 table{{border-collapse:collapse;width:100%;font-size:14px}} th,td{{border:1px solid #d7deea;padding:7px;text-align:left}} th{{background:#eff6ff}}
 pre{{white-space:pre-wrap;background:#f6f8fb;padding:16px;border-radius:8px;overflow:auto}} .meta{{color:#526079}} footer{{margin-top:40px;border-top:1px solid #d7deea;padding-top:12px;color:#526079}}
 </style></head><body><h1>{title}</h1>
-<p class="meta">Multisim MCP {html.escape(__version__)} · {html.escape(generated)}</p>
+<p class="meta">Multisim MCP {html.escape(__version__)} · {html.escape(str(backend['display_name']))} · {html.escape(generated)}</p>
 <h2>{labels['overview']}</h2><pre>{html.escape(original[:12000])}</pre>
 <h2>{labels['schematic']}</h2><img src="{schematic_uri}" alt="schematic">
 <h2>{labels['plot']}</h2><img src="{plot_uri}" alt="plot">
 <h2>{labels['measurements']}</h2><table><thead><tr><th>Signal</th><th>N</th><th>First</th><th>Last</th><th>Min</th><th>Max</th><th>Mean</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>{labels['verification']}</h2><table><thead><tr><th>ID</th><th>Status</th><th>Value</th><th>Target</th><th>Unit</th><th>Reason</th></tr></thead><tbody>{verdict_rows}</tbody></table>
+<h2>{labels['compatibility']}</h2><table><tbody>{compatibility_rows}</tbody></table>
+<h2>{labels['digital_observation']}</h2><p>{html.escape(str(digital_observation.get('overall_status', 'not-applicable')))}</p><p>{html.escape(routing_note)}</p><table><thead><tr><th>Component</th><th>Pin</th><th>Net</th><th>Status</th><th>Claim</th><th>Raw column</th></tr></thead><tbody>{observation_rows}</tbody></table>
 <h2>{labels['source']}</h2><h3>SPICE</h3><pre>{html.escape(netlist)}</pre><h3>Commands</h3><pre>{html.escape(commands)}</pre>
 <footer>{labels['artifact']} · manifest.json contains SHA-256 hashes for reproducibility.</footer></body></html>"""
 
@@ -189,8 +266,22 @@ def _write_pdf(path: Path, title: str, lines: list[str], cjk: bool) -> None:
 
 def _pdf_lines(root: Path, language: str, summaries: list[dict[str, Any]], verification: dict[str, Any] | None) -> list[str]:
     zh = language == "zh-CN"
-    title = "Multisim 电路实验报告" if zh else "Multisim Circuit Experiment Report"
-    lines = [title, "", ("由 Multisim MCP 自动生成" if zh else "Generated automatically by Multisim MCP"), ""]
+    backend = _backend_metadata(root)
+    title = (
+        "Multisim 电路实验报告"
+        if zh and backend["backend_id"] == "multisim"
+        else "电路实验报告"
+        if zh
+        else "Multisim Circuit Experiment Report"
+        if backend["backend_id"] == "multisim"
+        else "Circuit Experiment Report"
+    )
+    generated = (
+        f"由 Multisim MCP 自动生成 · {backend['display_name']}"
+        if zh
+        else f"Generated automatically by Multisim MCP · {backend['display_name']}"
+    )
+    lines = [title, "", generated, ""]
     markdown = (root / "report.md").read_text(encoding="utf-8", errors="replace")
     overview = re.sub(r"(?m)^#{1,6}\s*", "", markdown[:3000])
     overview = re.sub(r"[`*_>|]", "", overview)
@@ -207,6 +298,59 @@ def _pdf_lines(root: Path, language: str, summaries: list[dict[str, Any]], verif
             lines.extend(_wrap_text(f"{item.get('id', '')}: {item.get('status', '')} value={item.get('value', '')} target={item.get('target', '')} {item.get('unit', '')}", 82 if zh else 92))
     else:
         lines.append("未提供验证要求。" if zh else "No verification requirements were provided.")
+    compatibility = _load_json(root / "spice-compatibility.json") or {}
+    digital_observation = _load_json(root / "digital-observation.json") or {}
+    compatibility_summary = compatibility.get("summary", {})
+    compatibility_dialect = compatibility.get("dialect", {})
+    compatibility_backend = compatibility.get("backend", {})
+    compatibility_summary = compatibility_summary if isinstance(compatibility_summary, dict) else {}
+    compatibility_dialect = compatibility_dialect if isinstance(compatibility_dialect, dict) else {}
+    compatibility_backend = compatibility_backend if isinstance(compatibility_backend, dict) else {}
+    lines.extend(["", "SPICE 兼容性与模型来源" if zh else "SPICE compatibility and model provenance"])
+    lines.extend(
+        _wrap_text(
+            (
+                f"dialect={compatibility_dialect.get('name', 'not recorded')}; "
+                f"static_status={compatibility_backend.get('compatibility_status', 'not recorded')}; "
+                f"solver_version={compatibility_backend.get('solver_version') or 'not captured'}; "
+                f"models={compatibility_summary.get('model_count', 0)}; "
+                f"unknown_licenses={compatibility_summary.get('unknown_license_count', 0)}; "
+                f"provenance_complete={compatibility_summary.get('provenance_complete', False)}"
+            ),
+            82 if zh else 92,
+        )
+    )
+    observation_routing = digital_observation.get("routing", {})
+    if isinstance(observation_routing, dict) and observation_routing.get("mode") == "explicit-rerun":
+        lines.extend(
+            _wrap_text(
+                (
+                    f"explicit_fallback_backend={observation_routing.get('recommended_backend', 'ngspice')}; "
+                    "automatic_switch=False; "
+                    f"reason={observation_routing.get('reason', '')}"
+                ),
+                82 if zh else 92,
+            )
+        )
+    lines.extend(["", "数字输出观测证据" if zh else "Digital output observation evidence"])
+    lines.extend(
+        _wrap_text(
+            f"overall_status={digital_observation.get('overall_status', 'not-applicable')}; "
+            f"observed={((digital_observation.get('counts') or {}).get('observed', 0))}; "
+            f"unobserved={((digital_observation.get('counts') or {}).get('unobserved', 0))}",
+            82 if zh else 92,
+        )
+    )
+    for item in digital_observation.get("signals", []):
+        if isinstance(item, dict):
+            lines.extend(
+                _wrap_text(
+                    f"{item.get('component', '')}.{item.get('pin', '')} "
+                    f"net={item.get('net', '')} status={item.get('status', '')} "
+                    f"claim={item.get('claim', '')} raw={item.get('raw_column') or '—'}",
+                    82 if zh else 92,
+                )
+            )
     lines.extend(["", "电路网表" if zh else "Circuit netlist"])
     for netlist_line in (root / "circuit.cir").read_text(
         encoding="utf-8", errors="replace"
@@ -219,12 +363,14 @@ def _pdf_lines(root: Path, language: str, summaries: list[dict[str, Any]], verif
 def export_formal_reports(root: Path, experiment_id: str) -> dict[str, Any]:
     """Write bilingual HTML/PDF reports plus a deterministic artifact manifest."""
     root = root.resolve()
-    required = ("report.md", "schematic.png", "plot.svg", "result.raw", "circuit.cir", "run.txt")
+    required = ("report.md", "plot.svg", "result.raw", "circuit.cir", "run.txt")
     for name in required:
         _contained_file(root, name)
+    _schematic_artifact(root)
     _contained_file(root, "verification.json", required=False)
     summaries = summarize_columns(parse_raw(str(root / "result.raw")))
     verification = _load_json(root / "verification.json")
+    compatibility = _load_json(root / "spice-compatibility.json")
     outputs = {
         "html_zh": root / "report.zh-CN.html",
         "html_en": root / "report.en.html",
@@ -237,8 +383,9 @@ def export_formal_reports(root: Path, experiment_id: str) -> dict[str, Any]:
             raise ValueError(f"formal report output must be a regular file: {path.name}")
     _atomic_text(outputs["html_zh"], _html_report(root, "zh-CN", summaries, verification))
     _atomic_text(outputs["html_en"], _html_report(root, "en", summaries, verification))
-    _write_pdf(outputs["pdf_zh"], "Multisim 电路实验报告", _pdf_lines(root, "zh-CN", summaries, verification), True)
-    _write_pdf(outputs["pdf_en"], "Multisim Circuit Experiment Report", _pdf_lines(root, "en", summaries, verification), False)
+    backend = _backend_metadata(root)
+    _write_pdf(outputs["pdf_zh"], "电路实验报告", _pdf_lines(root, "zh-CN", summaries, verification), True)
+    _write_pdf(outputs["pdf_en"], "Circuit Experiment Report", _pdf_lines(root, "en", summaries, verification), False)
     artifact_rows = []
     for path in sorted(
         item
@@ -246,13 +393,46 @@ def export_formal_reports(root: Path, experiment_id: str) -> dict[str, Any]:
         if item.is_file() and not item.is_symlink() and item.name != "manifest.json"
     ):
         artifact_rows.append({"filename": path.name, "size": path.stat().st_size, "sha256": _sha256(path)})
+    compatibility_netlist = (
+        compatibility.get("netlist", {})
+        if isinstance(compatibility, dict)
+        and isinstance(compatibility.get("netlist"), dict)
+        else {}
+    )
+    compatibility_summary = (
+        compatibility.get("summary", {})
+        if isinstance(compatibility, dict)
+        and isinstance(compatibility.get("summary"), dict)
+        else {}
+    )
     manifest = {
         "schema_version": 1,
         "experiment_id": experiment_id,
         "generator": {"name": "multisim-mcp", "version": __version__},
         "runtime": {"python": platform.python_version(), "platform": platform.platform()},
+        "backend": backend,
+        "spice_compatibility": (
+            {
+                "artifact": "spice-compatibility.json",
+                "netlist_sha256": compatibility_netlist.get("sha256"),
+                "model_fingerprint_sha256": compatibility.get(
+                    "model_fingerprint_sha256"
+                ),
+                "risk_level": compatibility_summary.get("risk_level"),
+                "provenance_complete": compatibility_summary.get("provenance_complete"),
+            }
+            if compatibility is not None
+            else None
+        ),
         "artifacts": artifact_rows,
-        "reproduce": {"netlist": "circuit.cir", "commands": "run.txt", "raw_data": "result.raw"},
+        "reproduce": {
+            "netlist": "circuit.cir",
+            "commands": "run.txt",
+            "raw_data": "result.raw",
+            "spice_compatibility": (
+                "spice-compatibility.json" if compatibility is not None else None
+            ),
+        },
     }
     _atomic_text(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     return {"schema_version": 1, "experiment_id": experiment_id, "reports": {name: str(path) for name, path in outputs.items()}, "manifest": str(manifest_path)}

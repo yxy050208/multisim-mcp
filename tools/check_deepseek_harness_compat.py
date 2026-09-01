@@ -90,6 +90,18 @@ def load_compatibility_manifest(path: Path) -> dict[str, Any]:
     ):
         if not isinstance(contract.get(key), str) or not contract[key]:
             raise ValueError(f"contract is missing {key}")
+    compatible_core_versions = contract.get("compatible_core_versions")
+    if (
+        not isinstance(compatible_core_versions, list)
+        or not compatible_core_versions
+        or any(
+            not isinstance(version, str)
+            or not re.fullmatch(r"\d+\.\d+\.\d+", version)
+            for version in compatible_core_versions
+        )
+        or len(compatible_core_versions) != len(set(compatible_core_versions))
+    ):
+        raise ValueError("contract must contain unique compatible_core_versions")
     try:
         re.compile(contract["server_name_pattern"])
     except (KeyError, re.error) as exc:
@@ -195,12 +207,12 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
             r'(?m)^version\s*=\s*"([^"]+)"\s*$', pyproject
         )
         python_version = version_match.group(1) if version_match else None
-        if bundle_manifest.get("version") != python_version:
+        if python_version not in contract["compatible_core_versions"]:
             findings.append(
                 _finding(
                     "error",
-                    "bundle-version-sync",
-                    "Harness bundle and Python package versions must match",
+                    "bundle-core-compatibility",
+                    "Python package version is not declared compatible with the Harness bundle",
                 )
             )
         required_patch_fragments = (

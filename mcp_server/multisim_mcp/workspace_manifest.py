@@ -25,7 +25,18 @@ MAX_MANIFEST_BYTES: Final = 8 * 1024 * 1024
 MAX_METADATA_BYTES: Final = 1024 * 1024
 
 _MANIFEST_TYPE: Final = "multisim-mcp-directory"
-_DIRECTORY_KINDS: Final = frozenset({"project", "experiment", "optimization"})
+_DIRECTORY_KINDS: Final = frozenset(
+    {
+        "project",
+        "experiment",
+        "optimization",
+        "global-optimization",
+        "autonomous-correction",
+        "benchmark-suite",
+        "comparison",
+        "patch-evaluation",
+    }
+)
 _STATES: Final = frozenset(
     {"planned", "active", "running", "succeeded", "failed", "cancelled", "archived"}
 )
@@ -237,7 +248,9 @@ class DirectoryManifest:
             raise ValueError(f"DirectoryManifest manifest_type must be {_MANIFEST_TYPE}")
         object.__setattr__(self, "manifest_id", _identifier(self.manifest_id, "manifest_id"))
         if self.directory_kind not in _DIRECTORY_KINDS:
-            raise ValueError("directory_kind must be project, experiment, or optimization")
+            raise ValueError(
+                "directory_kind is not supported"
+            )
         object.__setattr__(self, "entity_id", _identifier(self.entity_id, "entity_id"))
         if self.state not in _STATES:
             raise ValueError(f"unsupported directory manifest state: {self.state!r}")
@@ -350,7 +363,9 @@ def write_directory_manifest(
     workspace = _root_directory(root)
     normalized_id = _identifier(entity_id, "entity_id")
     if directory_kind not in _DIRECTORY_KINDS:
-        raise ValueError("directory_kind must be project, experiment, or optimization")
+        raise ValueError(
+            "directory_kind is not supported"
+        )
     if isinstance(artifacts, Mapping):
         requested = list(artifacts.items())
     else:

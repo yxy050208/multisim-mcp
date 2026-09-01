@@ -15,12 +15,24 @@ and create reproducible reports.
 > COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
 > 32-bit or 64-bit Python.
 
+> This branch is the **MCP Core `v1.2.0` release candidate**. It contains the
+> Python MCP server, CLI, EDA core, model/DeepSeek adapters, tests, documentation,
+> and optional loopback bridge APIs. It deliberately excludes the independently
+> developed React Workbench. `v1.2.0` is not yet published to PyPI or the MCP
+> Registry.
+
 The completed development phases and release gates are recorded in the
 [1.0 roadmap](docs/ROADMAP_TO_1.0.md).
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.1.0)
+
+The `v1.2.0` candidate exposes 78 tools, 20 resource templates, and five
+bilingual prompts. It adds approval-gated design planning, diagnosis and patch
+evaluation, global optimization, autonomous correction, Multisim/ngspice
+differential validation, and recoverable jobs. See the
+[candidate release notes](docs/RELEASE_NOTES_v1.2.0.md).
 
 ## End-to-end workflow
 

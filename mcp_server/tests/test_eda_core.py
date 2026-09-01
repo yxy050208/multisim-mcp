@@ -130,6 +130,30 @@ class EdaCoreTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must change"):
             PatchOperation("set_parameter", "gain", 1, 1, "No change")
 
+    def test_topology_patch_operations_have_semantic_inverses(self) -> None:
+        component = {
+            "refdes": "R2",
+            "kind": "R",
+            "nodes": ["out", "0"],
+            "value": "10k",
+            "model": None,
+            "parameters": {},
+            "annotations": {},
+        }
+        add_component = PatchOperation(
+            "add_component", "R2", None, component, "Add a load"
+        )
+        remove_component = add_component.inverse()
+        self.assertEqual(remove_component.operation, "remove_component")
+        self.assertEqual(remove_component.before["refdes"], "R2")
+        self.assertIsNone(remove_component.after)
+
+        add_net = PatchOperation("add_net", "sense", None, "sense", "Add net")
+        remove_net = add_net.inverse()
+        self.assertEqual(remove_net.operation, "remove_net")
+        self.assertEqual(remove_net.before, "sense")
+        self.assertIsNone(remove_net.after)
+
     def test_artifact_set_round_trip_rejects_duplicate_names(self) -> None:
         artifact = Artifact(
             artifact_id="filter-v1:simulate:1",

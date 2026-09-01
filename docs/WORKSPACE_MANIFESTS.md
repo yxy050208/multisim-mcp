@@ -1,7 +1,7 @@
 # 版本化工作目录 Manifest / Versioned Workspace Manifests
 
 Multisim MCP 使用根目录下固定名称 `directory.manifest.json` 描述可长期恢复和审计的
-项目、实验与优化目录。该文件属于传输无关的 EDA Core：MCP、本地 API、未来的可视化
+项目、实验、优化与设计比较目录。该文件属于传输无关的 EDA Core：MCP、本地 API、未来的可视化
 工作台和不同 EDA 后端共享同一格式。
 
 ## 适用目录
@@ -9,9 +9,19 @@ Multisim MCP 使用根目录下固定名称 `directory.manifest.json` 描述可�
 - `project`：电路设计、模型引用、补丁和项目级附件；
 - `experiment`：一次原理图生成、仿真、验收和报告事务；
 - `optimization`：参数扫描、候选比较及后续的有界优化运行。
+- `global-optimization`：参数/拓扑混合搜索、Pareto 前沿和候选级恢复证据。
+- `autonomous-correction`：模型规划的多轮纠错、严格改进选择和轮次级恢复证据。
+- `benchmark-suite`：跨电路族基准摘要及其嵌套实验/优化产物。
+- `comparison`：多个完整电路设计或拓扑的统一验收与确定性排名。
 
 当前完整实验和参数扫描会在事务发布前自动生成 manifest。项目目录和未来优化器可直接
 调用 `write_directory_manifest` 使用同一契约。
+
+受控审批实验还可在 `metadata.approval_provenance` 写入
+`multisim-mcp-approved-simulation-provenance` 摘要。它只包含 simulation-plan、网表、
+compiled、设计和 ExperimentSpec 的稳定 ID/SHA-256；完整规格、审阅备注、输出路径和
+审批令牌不会进入 manifest。工作台回读结果时会同时校验路径、manifest 完整性和该摘要，
+因此旧实验或未带归属摘要的直接执行结果不会被自动标为当前审批结果。
 
 ## Schema 1
 

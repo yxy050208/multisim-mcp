@@ -20,8 +20,25 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _REFDES = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _PATCH_OPERATIONS: Final = frozenset(
-    {"set_component_value", "set_parameter", "set_annotation"}
+    {
+        "set_component_value",
+        "set_component_nodes",
+        "set_component_model",
+        "add_component",
+        "remove_component",
+        "replace_component",
+        "add_net",
+        "remove_net",
+        "set_parameter",
+        "set_annotation",
+    }
 )
+_INVERSE_PATCH_OPERATION: Final = {
+    "add_component": "remove_component",
+    "remove_component": "add_component",
+    "add_net": "remove_net",
+    "remove_net": "add_net",
+}
 
 JsonScalar = str | int | float | bool | None
 JsonValue = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
@@ -406,7 +423,7 @@ class PatchOperation:
 
     def inverse(self) -> "PatchOperation":
         return PatchOperation(
-            operation=self.operation,
+            operation=_INVERSE_PATCH_OPERATION.get(self.operation, self.operation),
             target=self.target,
             before=self.after,
             after=self.before,

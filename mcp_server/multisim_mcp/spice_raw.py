@@ -12,6 +12,7 @@ import html
 import math
 import os
 import re
+from copy import deepcopy
 from typing import Any
 
 
@@ -71,13 +72,15 @@ def parse_raw(path: str) -> dict[str, Any]:
             elif in_variables and re.match(r"^\d+\s", stripped):
                 # variables section rows: index, name, type, plotname
                 parts = stripped.split()
-                if len(parts) >= 4:
+                if len(parts) >= 3:
                     variables.append(
                         {
                             "index": int(parts[0]),
                             "name": parts[1],
                             "type": parts[2],
-                            "plot": " ".join(parts[3:]),
+                            # Multisim appends a display label while ngspice's
+                            # ASCII raw format commonly stops after name/type.
+                            "plot": " ".join(parts[3:]) if len(parts) >= 4 else parts[1],
                         }
                     )
             continue
@@ -168,6 +171,108 @@ def parse_raw(path: str) -> dict[str, Any]:
         result["imaginary_rows"] = imaginary_rows
         result["phase_rows"] = phase_rows
     return result
+
+
+def limit_points(parsed: dict[str, Any], max_points: int) -> dict[str, Any]:
+    """Return a deterministic endpoint-preserving subset of parsed raw data."""
+    if isinstance(max_points, bool) or not isinstance(max_points, int) or max_points < 1:
+        raise ValueError("max_points must be a positive integer")
+    rows = parsed.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("parsed raw data must contain rows")
+    count = len(rows)
+    if count <= max_points:
+        return deepcopy(parsed)
+    if max_points == 1:
+        indices = [0]
+    else:
+        indices = [round(index * (count - 1) / (max_points - 1)) for index in range(max_points)]
+    limited = deepcopy(parsed)
+    for key in ("rows", "real_rows", "imaginary_rows", "phase_rows"):
+        values = parsed.get(key)
+        if values is not None:
+            if not isinstance(values, list) or len(values) != count:
+                raise ValueError(f"parsed raw data has inconsistent {key}")
+            limited[key] = [deepcopy(values[index]) for index in indices]
+    limited["n_points"] = len(indices)
+    header = limited.get("header")
+    if not isinstance(header, dict):
+        raise ValueError("parsed raw data must contain a header")
+    header["n_points"] = len(indices)
+    return limited
+
+
+def _format_raw_number(value: float) -> str:
+    rendered = float(value)
+    if not math.isfinite(rendered):
+        raise ValueError("SPICE raw output contains a non-finite value")
+    return f"{rendered:.17g}"
+
+
+def write_ascii_raw(path: str, parsed: dict[str, Any]) -> str:
+    """Write the parser's canonical SPICE3 ASCII representation."""
+    header = parsed.get("header")
+    variables = parsed.get("variables")
+    rows = parsed.get("rows")
+    if not isinstance(header, dict) or not isinstance(variables, list) or not isinstance(rows, list):
+        raise ValueError("parsed raw data is incomplete")
+    if not variables or not rows:
+        raise ValueError("SPICE raw output must contain variables and points")
+    complex_mode = "complex" in str(header.get("flags", "")).casefold()
+    real_rows = parsed.get("real_rows")
+    imaginary_rows = parsed.get("imaginary_rows")
+    if complex_mode and (
+        not isinstance(real_rows, list)
+        or not isinstance(imaginary_rows, list)
+        or len(real_rows) != len(rows)
+        or len(imaginary_rows) != len(rows)
+    ):
+        raise ValueError("complex SPICE raw output is missing real/imaginary rows")
+
+    lines = [
+        f"Title: {header.get('title', 'SPICE experiment')}",
+    ]
+    if header.get("date"):
+        lines.append(f"Date: {header['date']}")
+    lines.extend(
+        [
+            f"Plotname: {header.get('plotname', 'Analysis')}",
+            f"Flags: {'complex' if complex_mode else 'real'}",
+            f"No. Variables: {len(variables)}",
+            f"No. Points: {len(rows)}",
+            "Variables:",
+        ]
+    )
+    for index, variable in enumerate(variables):
+        if not isinstance(variable, dict):
+            raise ValueError("SPICE raw variable metadata must be objects")
+        name = str(variable.get("name", f"var{index}"))
+        kind = str(variable.get("type", "unknown"))
+        label = str(variable.get("plot", name))
+        if any(char in value for value in (name, kind, label) for char in "\r\n\t"):
+            raise ValueError("SPICE raw variable metadata contains control characters")
+        lines.append(f"{index}\t{name}\t{kind}\t{label}")
+    lines.append("Values:")
+    width = len(variables)
+    for row_index, row in enumerate(rows):
+        if not isinstance(row, list) or len(row) != width:
+            raise ValueError("SPICE raw row width does not match variables")
+        encoded: list[str] = []
+        for column_index in range(width):
+            if complex_mode:
+                encoded.append(
+                    _format_raw_number(real_rows[row_index][column_index])
+                    + ","
+                    + _format_raw_number(imaginary_rows[row_index][column_index])
+                )
+            else:
+                encoded.append(_format_raw_number(row[column_index]))
+        lines.append(f"{row_index}\t{encoded[0]}")
+        lines.extend(f"\t{value}" for value in encoded[1:])
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
+    return path
 
 
 def write_csv(path: str, parsed: dict[str, Any]) -> str:

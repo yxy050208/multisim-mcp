@@ -1,4 +1,4 @@
-"""COM-free tests for versioned project/experiment/optimization manifests."""
+"""COM-free tests for versioned persistent workspace manifests."""
 
 from __future__ import annotations
 
@@ -20,7 +20,16 @@ class DirectoryManifestTest(unittest.TestCase):
     def test_round_trip_for_every_directory_kind(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
-            for kind in ("project", "experiment", "optimization"):
+            for kind in (
+                "project",
+                "experiment",
+                "optimization",
+                "global-optimization",
+                "autonomous-correction",
+                "benchmark-suite",
+                "comparison",
+                "patch-evaluation",
+            ):
                 with self.subTest(kind=kind):
                     root = base / kind
                     nested = root / "artifacts"

@@ -214,6 +214,32 @@ def default_job_dir() -> Path:
     return (base / "multisim-mcp" / "jobs").resolve()
 
 
+def _restore_result_resources(
+    spec: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any]:
+    """Restore transport resource handles for job kinds that publish them."""
+    job_kind = str(spec.get("job_kind", "experiment"))
+    if job_kind == "sweep":
+        from multisim_mcp.sweep_resources import register_sweep
+
+        registered = register_sweep(str(result["output_dir"]))
+        result["sweep_id"] = registered["sweep_id"]
+        result["resources"] = registered["resources"]
+    elif job_kind == "experiment":
+        from multisim_mcp.experiment_resources import register_experiment
+
+        registered = register_experiment(str(result["output_dir"]))
+        result["experiment_id"] = registered["experiment_id"]
+        result["resources"] = registered["resources"]
+    elif job_kind not in {
+        "optimization",
+        "global_optimization",
+        "autonomous_correction",
+    }:
+        raise ValueError(f"Unsupported durable job kind: {job_kind}")
+    return result
+
+
 class ExperimentJobManager:
     """A single-worker persistent queue with crash and hang containment."""
 
@@ -291,20 +317,9 @@ class ExperimentJobManager:
                 self._records[job_id] = record
                 if state == "succeeded" and Path(str(record.get("output_dir", ""))).is_dir():
                     try:
-                        if record.get("spec", {}).get("job_kind") == "sweep":
-                            from multisim_mcp.sweep_resources import register_sweep
-
-                            registered = register_sweep(str(record["output_dir"]))
-                            id_key = "sweep_id"
-                        else:
-                            from multisim_mcp.experiment_resources import register_experiment
-
-                            registered = register_experiment(str(record["output_dir"]))
-                            id_key = "experiment_id"
                         if isinstance(record.get("result"), dict):
-                            record["result"][id_key] = registered[id_key]
-                            record["result"]["resources"] = registered["resources"]
-                    except (OSError, ValueError):
+                            _restore_result_resources(record["spec"], record["result"])
+                    except (KeyError, OSError, ValueError):
                         pass
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 # A corrupt record is isolated; other durable jobs remain usable.
@@ -351,6 +366,30 @@ class ExperimentJobManager:
         now = _utc_now()
         with self._lock:
             self._refresh_records()
+            normalized_spec = {**spec, "output_dir": output_dir}
+            approval_id = normalized_spec.get("approval_id")
+            if isinstance(approval_id, str) and approval_id:
+                existing = next(
+                    (
+                        item
+                        for item in self._records.values()
+                        if isinstance(item.get("spec"), dict)
+                        and item["spec"].get("approval_id") == approval_id
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    if existing.get("spec") != normalized_spec:
+                        raise RuntimeError(
+                            "approval_id is already bound to a different durable job"
+                        )
+                    return {
+                        "success": True,
+                        "job_id": existing["job_id"],
+                        "state": existing["state"],
+                        "status_uri": existing["status_uri"],
+                        "output_dir": existing["output_dir"],
+                    }
             conflict = next(
                 (
                     item
@@ -367,7 +406,6 @@ class ExperimentJobManager:
                     f"{conflict['job_id']}"
                 )
             job_id = f"job-{uuid.uuid4().hex}"
-            normalized_spec = {**spec, "output_dir": output_dir}
             record: dict[str, Any] = {
                 "schema_version": JOB_SCHEMA_VERSION,
                 "job_id": job_id,
@@ -718,18 +756,7 @@ class ExperimentJobManager:
                     result = worker_result.get("result")
                     if isinstance(result, dict):
                         try:
-                            if spec.get("job_kind") == "sweep":
-                                from multisim_mcp.sweep_resources import register_sweep
-
-                                registered = register_sweep(str(result["output_dir"]))
-                                id_key = "sweep_id"
-                            else:
-                                from multisim_mcp.experiment_resources import register_experiment
-
-                                registered = register_experiment(str(result["output_dir"]))
-                                id_key = "experiment_id"
-                            result[id_key] = registered[id_key]
-                            result["resources"] = registered["resources"]
+                            _restore_result_resources(spec, result)
                         except (KeyError, OSError, ValueError) as exc:
                             self._finish_failure(
                                 job_id,
@@ -749,6 +776,12 @@ class ExperimentJobManager:
                             message=(
                                 "Sweep completed"
                                 if spec.get("job_kind") == "sweep"
+                                else "Global optimization completed"
+                                if spec.get("job_kind") == "global_optimization"
+                                else "Autonomous correction completed"
+                                if spec.get("job_kind") == "autonomous_correction"
+                                else "Optimization completed"
+                                if spec.get("job_kind") == "optimization"
                                 else "Experiment completed"
                             ),
                             updated_at=_utc_now(),

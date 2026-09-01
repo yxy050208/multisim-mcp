@@ -139,6 +139,59 @@ class ArtifactAccessTest(unittest.TestCase):
         self.assertNotIn("value", result["requirements"][0])
         self.assertEqual(result["counts"], {"pass": 30})
 
+    def test_summary_flattens_deterministic_verification_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_experiment(root)
+            (root / "verification.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "overall_status": "pass",
+                        "counts": {"pass": 1, "fail": 0, "unverified": 0},
+                        "requirements": [
+                            {
+                                "id": "output-frequency",
+                                "metric": "frequency",
+                                "signal": "V(out)",
+                                "status": "pass",
+                                "measurement": {
+                                    "status": "measured",
+                                    "value": 20000.0,
+                                    "unit": "Hz",
+                                    "details": {"private": "ignored"},
+                                },
+                                "criterion": {
+                                    "operator": "between",
+                                    "lower": 19000.0,
+                                    "upper": 21000.0,
+                                },
+                                "comparison": {
+                                    "theoretical_value": 20000.0,
+                                    "simulated_value": 20000.0,
+                                    "relative_error_percent": 0.0,
+                                },
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            experiment_id = register_experiment(str(root))["experiment_id"]
+            item = summarize_experiment(experiment_id)["verification"]["result"][
+                "requirements"
+            ][0]
+
+        self.assertEqual(item["metric"], "frequency")
+        self.assertEqual(item["signal"], "V(out)")
+        self.assertEqual(item["measurement_status"], "measured")
+        self.assertEqual(item["value"], 20000.0)
+        self.assertEqual(item["unit"], "Hz")
+        self.assertEqual(item["operator"], "between")
+        self.assertEqual(item["lower"], 19000.0)
+        self.assertEqual(item["relative_error_percent"], 0.0)
+        self.assertNotIn("details", item)
+
     def test_export_requires_an_approved_root_and_is_atomic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as out:
             root = Path(tmp)
