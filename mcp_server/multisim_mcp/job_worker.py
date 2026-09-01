@@ -73,11 +73,80 @@ def main() -> int:
     try:
         # Importing here keeps protocol introspection independent from worker startup.
         from multisim_mcp.server import (
+            _design_optimization_service,
+            _experiment_application_service,
+            _global_optimization_service,
             _run_circuit_experiment_impl,
             _run_experiment_sweep_impl,
         )
+        from multisim_mcp.eda_core import CircuitDesign
+        from multisim_mcp.simulation_approvals import (
+            build_experiment_approval_provenance,
+            validate_simulation_plan_approval,
+        )
 
-        if spec.get("job_kind") == "sweep":
+        if spec.get("job_kind") == "autonomous_correction":
+            from multisim_mcp.autonomous_correction import (
+                AutonomousDesignCorrectionService,
+                ModelRepairPlanner,
+            )
+            from multisim_mcp.model_provider import ModelProviderRegistry
+
+            registry = ModelProviderRegistry.from_config(dict(spec["provider_config"]))
+            planner = ModelRepairPlanner(
+                registry,
+                provider_id=spec.get("provider"),
+                fallback_provider_ids=tuple(spec.get("fallback_providers", [])),
+                allow_failover=bool(spec.get("allow_failover", False)),
+                timeout=float(spec.get("model_timeout", 60.0)),
+            )
+            result = AutonomousDesignCorrectionService(
+                _experiment_application_service(), planner
+            ).run(
+                CircuitDesign.from_dict(spec["design"]),
+                dict(spec["autonomous_correction_spec"]),
+                str(spec["output_dir"]),
+                timeout_per_experiment=float(
+                    spec.get("timeout_per_experiment", 120.0)
+                ),
+                max_points=int(spec.get("max_points", 2000)),
+                checkpoint=checkpoint,
+                cancel_requested=cancel_path.exists,
+                resume=True,
+            )
+            if result.get("status") == "cancelled":
+                raise InterruptedError("Autonomous correction cancellation requested")
+        elif spec.get("job_kind") == "global_optimization":
+            result = _global_optimization_service().run(
+                CircuitDesign.from_dict(spec["design"]),
+                dict(spec["global_optimization_spec"]),
+                str(spec["output_dir"]),
+                timeout_per_experiment=float(
+                    spec.get("timeout_per_experiment", 120.0)
+                ),
+                max_points=int(spec.get("max_points", 2000)),
+                checkpoint=checkpoint,
+                cancel_requested=cancel_path.exists,
+                resume=True,
+            )
+            if result.get("status") == "cancelled":
+                raise InterruptedError("Global optimization cancellation requested")
+        elif spec.get("job_kind") == "optimization":
+            result = _design_optimization_service().run(
+                CircuitDesign.from_dict(spec["design"]),
+                dict(spec["optimization_spec"]),
+                str(spec["output_dir"]),
+                timeout_per_experiment=float(
+                    spec.get("timeout_per_experiment", 120.0)
+                ),
+                max_points=int(spec.get("max_points", 2000)),
+                checkpoint=checkpoint,
+                cancel_requested=cancel_path.exists,
+                resume=True,
+            )
+            if result.get("status") == "cancelled":
+                raise InterruptedError("Optimization cancellation requested")
+        elif spec.get("job_kind") == "sweep":
             result = _run_experiment_sweep_impl(
                 spec=dict(spec["sweep_spec"]),
                 output_dir=str(spec["output_dir"]),
@@ -89,6 +158,39 @@ def main() -> int:
                 owner=str(request["job_id"]),
             )
         else:
+            approved_handoff = all(
+                spec.get(name) is not None
+                for name in (
+                    "executable_netlist",
+                    "netlist_approval",
+                    "simulation_plan_approval",
+                )
+            )
+            if any(
+                spec.get(name) is not None
+                for name in (
+                    "executable_netlist",
+                    "netlist_approval",
+                    "simulation_plan_approval",
+                )
+            ) and not approved_handoff:
+                raise ValueError(
+                    "persisted experiment approval handoff is incomplete"
+                )
+            if approved_handoff:
+                validated_approval = validate_simulation_plan_approval(
+                    dict(spec["executable_netlist"]),
+                    dict(spec["netlist_approval"]),
+                    {
+                        "schema_version": 1,
+                        "title": str(spec.get("title", "Multisim experiment")),
+                        "netlist": str(spec["netlist"]),
+                        "commands": str(spec["commands"]),
+                        "requirements": spec.get("requirements", []),
+                        "theoretical_values": spec.get("theoretical_values", {}),
+                    },
+                    dict(spec["simulation_plan_approval"]),
+                )
             result = _run_circuit_experiment_impl(
                 netlist=str(spec["netlist"]),
                 commands=str(spec["commands"]),
@@ -102,7 +204,24 @@ def main() -> int:
                 owner=str(request["job_id"]),
                 requirements=spec.get("requirements"),
                 theoretical_values=spec.get("theoretical_values"),
+                approval_provenance=(
+                    build_experiment_approval_provenance(validated_approval)
+                    if approved_handoff
+                    else None
+                ),
             )
+            if approved_handoff:
+                approval = dict(spec["simulation_plan_approval"])
+                result["simulation_plan_approval"] = {
+                    "approval_id": approval["approval_id"],
+                    "approval_digest": approval["approval_digest"],
+                    "netlist_approval_id": approval["netlist_approval_id"],
+                    "netlist_approval_digest": approval[
+                        "netlist_approval_digest"
+                    ],
+                    "state": approval["state"],
+                    "simulation_started": bool(result.get("success")),
+                }
         _atomic_json(result_path, {"success": True, "result": result})
         return 0
     except InterruptedError as exc:

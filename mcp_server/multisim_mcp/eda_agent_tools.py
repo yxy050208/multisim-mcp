@@ -444,8 +444,19 @@ def create_readonly_eda_bindings(design: CircuitDesign) -> tuple[ToolBinding, ..
     return ReadOnlyEdaTools(design).bindings()
 
 
+def run_readonly_structural_checks(
+    design: CircuitDesign,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    """Run the same deterministic structural checks without a model tool loop."""
+    result = ReadOnlyEdaTools(design)._structural_checks({}, cancel_event)
+    assert isinstance(result, dict)
+    return result
+
+
 __all__ = [
     "READ_ONLY_EDA_TOOL_SCHEMA_VERSION",
     "ReadOnlyEdaTools",
     "create_readonly_eda_bindings",
+    "run_readonly_structural_checks",
 ]

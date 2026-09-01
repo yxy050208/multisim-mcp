@@ -158,6 +158,27 @@ class DesignVerificationTest(unittest.TestCase):
         )
         self.assertIn("not present", result["requirements"][2]["reason"])
 
+    def test_multisim_hyphenated_node_display_alias_is_measurable(self) -> None:
+        parsed = {
+            "columns": ["V(rail)-positive", "V(path)-03"],
+            "rows": [[5.0, 0.8333333333]],
+        }
+        result = verify_requirements(
+            parsed,
+            [
+                {
+                    "id": "output",
+                    "metric": "min",
+                    "signal": "V(path-03)",
+                    "operator": "approximately",
+                    "target": 0.8333333333,
+                    "tolerance_abs": 1e-9,
+                }
+            ],
+        )
+        self.assertEqual(result["overall_status"], "pass")
+        self.assertEqual(result["requirements"][0]["measurement"]["status"], "measured")
+
     def test_experiment_spec_rejects_ambiguous_or_nonfinite_contracts(self) -> None:
         spec = {
             "schema_version": 1,

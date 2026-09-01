@@ -84,6 +84,27 @@ Path(request['result_path']).write_text(
 )
 """
 
+SUCCESS_OPTIMIZATION_WORKER = r"""
+import json, sys
+from pathlib import Path
+request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+root = Path(request['spec']['output_dir'])
+root.mkdir(parents=True, exist_ok=True)
+summary = root / 'optimization.json'
+summary.write_text(json.dumps({'schema_version': 1, 'status': 'optimized'}), encoding='utf-8')
+result = {
+    'schema_version': 1,
+    'success': True,
+    'status': 'optimized',
+    'optimization_id': 'optimization-test',
+    'output_dir': str(root),
+    'summary': str(summary),
+}
+Path(request['result_path']).write_text(
+    json.dumps({'success': True, 'result': result}), encoding='utf-8'
+)
+"""
+
 
 def _spec(output_dir: str, **overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
@@ -167,6 +188,26 @@ class DurableJobStateTest(unittest.TestCase):
             finally:
                 manager.shutdown()
 
+    def test_approval_bound_submission_is_idempotent_after_queue_persist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager = ExperimentJobManager(root / "state", start=False)
+            try:
+                first_spec = _spec(
+                    str(root / "out"),
+                    approval_id="search-approval-1234567890abcdef1234567890abcdef",
+                    search_plan_spec_sha256="a" * 64,
+                )
+                first = manager.submit(first_spec)
+                replay = manager.submit(dict(first_spec))
+                self.assertEqual(replay["job_id"], first["job_id"])
+                changed = dict(first_spec)
+                changed["search_plan_spec_sha256"] = "b" * 64
+                with self.assertRaisesRegex(RuntimeError, "bound to a different"):
+                    manager.submit(changed)
+            finally:
+                manager.shutdown()
+
     def test_interrupted_running_job_is_requeued_on_restart(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state"
@@ -200,6 +241,40 @@ class DurableJobStateTest(unittest.TestCase):
 
 
 class WorkerRecoveryTest(unittest.TestCase):
+    def test_optimization_results_survive_restart_without_resource_registration(
+        self,
+    ) -> None:
+        cases = {
+            "optimization": "Optimization completed",
+            "global_optimization": "Global optimization completed",
+            "autonomous_correction": "Autonomous correction completed",
+        }
+        for job_kind, expected_message in cases.items():
+            with self.subTest(job_kind=job_kind), tempfile.TemporaryDirectory() as tmp:
+                state = Path(tmp) / "state"
+                manager = ExperimentJobManager(
+                    state,
+                    worker_command=[sys.executable, "-c", SUCCESS_OPTIMIZATION_WORKER],
+                )
+                try:
+                    submitted = manager.submit(
+                        _spec(str(Path(tmp) / job_kind), job_kind=job_kind)
+                    )
+                    complete = _wait_terminal(manager, submitted["job_id"])
+                    self.assertEqual(complete["state"], "succeeded")
+                    self.assertEqual(complete["message"], expected_message)
+                    self.assertEqual(complete["result"]["status"], "optimized")
+                    self.assertNotIn("experiment_id", complete["result"])
+                finally:
+                    manager.shutdown()
+                restored = ExperimentJobManager(state, start=False)
+                try:
+                    after_restart = restored.get(submitted["job_id"])
+                    self.assertEqual(after_restart["state"], "succeeded")
+                    self.assertEqual(after_restart["result"]["status"], "optimized")
+                finally:
+                    restored.shutdown()
+
     def test_sweep_worker_registers_and_restores_sweep_resources(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             state = Path(tmp) / "state"

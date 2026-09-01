@@ -101,20 +101,58 @@ Multisim license -> local Multisim installation -> 32-bit worker
 ## 模型与工具规模
 
 DeepSeek Chat Completions 当前允许最多 128 个函数工具，函数名最长 64 个
-字符。Multisim MCP 1.0 的 51 个工具可以被加载，但完整 schema 会占用模型
+字符。Multisim MCP 的 78 个工具可以被加载，但完整 schema 会占用模型
 上下文，也会降低工具选择稳定性。当前已经提供以下服务端 Tool Profile：
 
 | Profile | 工具数 | 用途 |
 | --- | ---: | --- |
-| `core` | 26 | 诊断、连接、电路检查、文件和基础仿真 |
-| `experiment` | 39 | 电路生成、实验任务、测量、验证、报告和产物访问 |
-| `optimization` | 40 | 参数调整、基础仿真、指标验证、实验扫描和产物访问 |
-| `full` | 55 | 完整兼容模式，也是默认值 |
+| `core` | 29 | 确定性设计诊断、连接、电路检查、SPICE 兼容性审计、文件和基础仿真 |
+| `experiment` | 55 | 设计诊断、技术方案规划、方案选择、电气规格准备、逻辑网表草案、器件候选与额定值解析、器件解析明确审批、受限引脚级网表预览、网表人工确认、仿真计划审批、电路生成、行为级参考实验、实验任务、SPICE 审计、测量、验证、报告和产物访问 |
+| `optimization` | 60 | 设计诊断、技术方案规划、方案选择、电气规格准备、逻辑网表草案、器件候选与额定值解析、器件解析明确审批、受限引脚级网表预览、网表人工确认、仿真计划审批、同步/持久自治纠错、参数/拓扑全局优化、完整设计比较、SPICE 审计、基础仿真、指标验证、实验扫描和产物访问 |
+| `full` | 78 | 完整兼容模式，也是默认值 |
 
 通过配置生成器的 `--tool-profile` 设置，或手工设置
 `MULTISIM_MCP_TOOL_PROFILE`。Profile 在服务端生成稳定的 `tools/list`；没有被
 选择的工具不会注册到该进程，但原有 Python 内部调用保持不变。`runtime_status`
 会返回当前 profile、工具数和可选 profile。
+
+Harness bundle 默认使用 `experiment`，因此需要让 Agent 发现有预算参数优化时，应在
+启动 profile 前设置 `MULTISIM_MCP_TOOL_PROFILE=optimization`（或 `full`）。
+对于新需求，Agent 应先调用 `plan_design_options` 展示 2--4 个技术方案并等待用户
+确认 `plan_id` 与 `option_id`，再调用 `select_design_option` 校验摘要并锁定交接，随后
+用 `prepare_design_specification` 补齐并审阅电气参数；用户明确确认规格摘要后，调用
+`prepare_netlist_draft` 查看不可执行的逻辑模块网络、待选器件和派生约束，再用
+`resolve_component_requirements` 查看候选族、额定值计算和模型来源状态；完成选择后用
+`approve_component_resolution` 绑定人工审阅凭证。这些前置工具都不生成 SPICE、原理图、
+文件或仿真。审批完成后，仅当方案在支持矩阵中时调用 `compile_executable_netlist` 生成
+内存中的引脚级 `CircuitDesign` / SPICE 预览；当前只支持 `signal-passive`，结果必须再经
+`approve_executable_netlist` 人工确认，且不能直接仿真。契约和示例见
+[`DESIGN_PLANNING.md`](DESIGN_PLANNING.md)。
+成图时把完整编译预览作为 `executable_netlist`、审批凭证作为 `netlist_approval`，并将
+预览中的 `spice_netlist` 原样传给 `create_schematic_from_netlist`；它会在写入 `.ms14` 前
+重新验证摘要，缺少凭证或网表被改动会失败关闭，成功也不会启动仿真。
+随后用 `approve_simulation_plan` 将同一网表审批绑定到经过安全校验的 `ExperimentSpec`，
+明确确认分析命令、测量信号和验收限制；执行时把三份凭证交给
+`run_verified_circuit_experiment`，入口会在成图和仿真前再次验证，任何改动都会失败关闭。
+`optimize_design` 会写完整实验与优化证据，但不会修改源设计；选中的补丁仍需在模型外
+通过本机审批流程提交。它支持 E12/E24/E48/E96 范围、料号/库存/单价和采购硬约束；
+较长搜索应使用 `submit_design_optimization`，随后通过现有 job 工具查询、取消或重试。
+MCP 重新连接后任务记录和候选级检查点仍可恢复。规范见
+[`DESIGN_OPTIMIZATION.md`](DESIGN_OPTIMIZATION.md)。
+对已枚举但无法直接导出数字输出的本地 `DFF8/7474N` 载体，可在
+`experiment` profile 中使用 `build_behavioral_reference` 预览转换，或使用
+`run_behavioral_reference` 一步显式转换并运行 ngspice 行为级参考。该路径不会修改
+源设计、不会静默切换后端，也不构成原生 74LS74 时序/电气等价证据。
+`compare_design_variants` 同样位于 `optimization` / `full`，用于在一个验收计划下比较
+2–16 个完整设计或拓扑，不会自动采纳排名第一的版本。规范见
+[`DESIGN_COMPARISON.md`](DESIGN_COMPARISON.md)。
+`diagnose_design` 在四个 profile 中都可发现；它不调用模型、不启动 COM，也不修改
+设计。附加实验目录时，只有目录 manifest 完整且保存的规范化网表与输入设计匹配，
+才会使用验收、日志和工作点证据。详见
+[`DESIGN_DIAGNOSIS.md`](DESIGN_DIAGNOSIS.md)。
+`evaluate_design_patch` 位于 `experiment` / `optimization` / `full`。它固定运行原设计与
+一个明确内存候选，在同一硬性验收计划下输出前后诊断、逆补丁和完整证据，但不自动
+采用候选。详见 [`DESIGN_PATCH_EVALUATION.md`](DESIGN_PATCH_EVALUATION.md)。
 
 Tool Profile 是上下文与工作流优化机制，不是安全权限系统。任意命令、路径边界、
 输出目录和危险功能仍由现有安全策略独立控制。

@@ -19,6 +19,28 @@ from .schematic_builder import (
 
 
 _SPICE_TOKEN = re.compile(r"^[^\s\x00]+$")
+_MODEL_COMPONENT_KINDS = frozenset(
+    {
+        "D",
+        "S",
+        "QNPN",
+        "QPNP",
+        "MNMOS",
+        "MPMOS",
+        "JN",
+        "JP",
+        "ZN",
+        "ZP",
+        "W",
+        "O",
+        "U",
+    }
+) | frozenset(DIGITAL_MODEL_KINDS.values())
+
+# Native vendor-backed carriers are emitted as portable X instances when a
+# structured design is rebuilt.  They do not require an inline .model record;
+# the user-local Multisim component pack supplies their native identity.
+_NATIVE_CARRIER_KINDS = frozenset({"TIMER8", "DFF8"})
 
 
 def _stable_design_id(netlist: str) -> str:
@@ -292,6 +314,17 @@ def _component_to_spice(component: CircuitComponent) -> str:
         return " ".join(
             [refdes, *_nodes(component, count), _require_model(component), *parameters]
         )
+    if kind in _NATIVE_CARRIER_KINDS:
+        if len(component.nodes) != 8:
+            raise ValueError(f"{refdes} native carrier requires 8 nodes")
+        return " ".join(
+            [
+                refdes if refdes[:1].upper() == "X" else f"X{refdes}",
+                *(_token(node, f"{refdes}.node") for node in component.nodes),
+                _require_model(component),
+                *parameters,
+            ]
+        )
     if kind == "OPAMP5" or kind.startswith("XSUB"):
         if not 2 <= len(component.nodes) <= 16:
             raise ValueError(f"{refdes} subcircuit requires 2 to 16 nodes")
@@ -341,6 +374,72 @@ def _parameter_lines(design: CircuitDesign) -> list[str]:
     return lines
 
 
+def _referenced_inline_definitions(design: CircuitDesign) -> list[str]:
+    """Recover safe inline model support when structured edits rebuild source.
+
+    A stale authoritative source netlist cannot be reused after a component or
+    topology edit.  Primitive ``.model`` records and referenced subcircuits are
+    nevertheless part of the component semantics, so retain them from the
+    already validated source rather than silently emitting an unbound device.
+    """
+    source = design.source_netlist
+    if source is None:
+        return []
+    validate_spice_netlist(source)
+    model_names = {
+        str(component.model).casefold()
+        for component in design.components
+        if component.model is not None
+        and component.kind.upper() in _MODEL_COMPONENT_KINDS
+        and _SPICE_TOKEN.fullmatch(str(component.model))
+    }
+    uses_subcircuit = any(
+        component.model is not None
+        and (
+            component.kind.upper() == "OPAMP5"
+            or component.kind.upper().startswith("XSUB")
+            or component.kind.upper() in {"XFG3", "OSC6"}
+        )
+        for component in design.components
+    )
+    if not model_names and not uses_subcircuit:
+        return []
+
+    lines = _logical_lines(source)
+    retained: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        lowered = line.lower()
+        if lowered.startswith(".model"):
+            parts = line.split(maxsplit=2)
+            if len(parts) >= 3 and parts[1].casefold() in model_names:
+                retained.append(line)
+            index += 1
+            continue
+        if uses_subcircuit and lowered.startswith(".func"):
+            retained.append(line)
+            index += 1
+            continue
+        if uses_subcircuit and lowered.startswith(".subckt"):
+            depth = 0
+            while index < len(lines):
+                nested = lines[index]
+                nested_lower = nested.lower()
+                retained.append(nested)
+                if nested_lower.startswith(".subckt"):
+                    depth += 1
+                elif nested_lower.startswith(".ends"):
+                    depth -= 1
+                    if depth == 0:
+                        index += 1
+                        break
+                index += 1
+            continue
+        index += 1
+    return retained
+
+
 def circuit_design_to_spice(
     design: CircuitDesign,
     *,
@@ -358,7 +457,11 @@ def circuit_design_to_spice(
     ]
     if not component_lines:
         raise ValueError("structured CircuitDesign contains no compilable components")
-    lines = [*_parameter_lines(design), *component_lines]
+    lines = [
+        *_parameter_lines(design),
+        *_referenced_inline_definitions(design),
+        *component_lines,
+    ]
     lines.append(".end")
     netlist = "\n".join(lines) + "\n"
     validate_spice_netlist(netlist)

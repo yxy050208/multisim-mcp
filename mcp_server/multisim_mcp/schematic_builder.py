@@ -332,6 +332,31 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         ),
         432, 657, 180,
     ),
+    # Verified native LM555CN carrier. The files are intentionally supplied
+    # by the user-local component pack, not bundled with this open-source
+    # project. The order below is the terminal order in the extracted
+    # Multisim SPICE template: GND, TRI, OUT, RST, CON, THR, DIS, VCC.
+    "TIMER8": ComponentDefinition(
+        "TIMER8", "timer8_element.xml", "sym_timer8.xml",
+        (
+            "timer8_port3.xml", "timer8_port7.xml", "timer8_port4.xml",
+            "timer8_port5.xml", "timer8_port1.xml", "timer8_port6.xml",
+            "timer8_port2.xml", "timer8_port8.xml",
+        ),
+        432, 837, 180, "native-timer",
+    ),
+    # Verified native 7474N single-section carrier. The extracted component
+    # exposes the A-section's eight logical pins; the local pack must be
+    # derived from the user's licensed QuizShowVariants sample.
+    "DFF8": ComponentDefinition(
+        "DFF8", "dff8_element.xml", "sym_dff8.xml",
+        (
+            "dff8_port2.xml", "dff8_port5.xml", "dff8_port4.xml",
+            "dff8_port1.xml", "dff8_port3.xml", "dff8_port6.xml",
+            "dff8_port7.xml", "dff8_port8.xml",
+        ),
+        846, 1017, 180, "native-d-flip-flop",
+    ),
     "GND": ComponentDefinition(
         "GND", "gnd_element.xml", "sym_gnd.xml", ("gnd_port.xml",),
         234, 594, 135,
@@ -404,6 +429,8 @@ NATIVE_MODEL_ALIASES: dict[str, frozenset[str]] = {
     "MNMOS": frozenset({"NMOS"}),
     "MPMOS": frozenset({"PMOS"}),
     "OPAMP5": frozenset({"OPAMP5", "IDEALOPAMP"}),
+    "TIMER8": frozenset({"TIMER8", "LM555CN", "LM555", "NE555", "HE555"}),
+    "DFF8": frozenset({"DFF8", "7474N", "7474", "74LS74N", "74LS74D"}),
 }
 
 
@@ -1220,6 +1247,47 @@ def parse_netlist(text: str) -> ParsedNetlist:
                         parameters=instance_parameters,
                     )
                 )
+            elif len(nodes) == 8 and model.upper() in {
+                "TIMER8", "LM555CN", "LM555", "NE555", "HE555",
+            }:
+                parsed.components.append(
+                    ComponentSpec(
+                        kind="TIMER8",
+                        # Multisim's native timer carrier is a U-device even
+                        # though the portable SPICE instance uses the X
+                        # prefix. Normalize XU1 -> U1 so the exported native
+                        # netlist retains the vendor macro instead of treating
+                        # it as an unresolved generic subcircuit.
+                        refdes=(
+                            refdes[1:]
+                            if refdes[:1].upper() == "X"
+                            and len(refdes) > 1
+                            else refdes
+                        ),
+                        nodes=nodes,
+                        model=model,
+                        parameters=instance_parameters,
+                    )
+                )
+            elif len(nodes) == 8 and model.upper() in {
+                "DFF8", "7474N", "7474", "74LS74N", "74LS74D",
+            }:
+                parsed.components.append(
+                    ComponentSpec(
+                        kind="DFF8",
+                        # Multisim's extracted 7474 section is a U-device;
+                        # normalize portable XU1 notation to native U1.
+                        refdes=(
+                            refdes[1:]
+                            if refdes[:1].upper() == "X"
+                            and len(refdes) > 1
+                            else refdes
+                        ),
+                        nodes=nodes,
+                        model=model,
+                        parameters=instance_parameters,
+                    )
+                )
             elif len(nodes) == 5 and model.upper() in {
                 "OPAMP5",
                 "IDEALOPAMP",
@@ -1272,10 +1340,145 @@ def parse_netlist(text: str) -> ParsedNetlist:
     return parsed
 
 
-def prepare_simulation_netlist(text: str) -> str:
-    """Translate the schematic A-device shorthand into executable XSPICE."""
+def _split_expression_arguments(value: str) -> list[str]:
+    """Split a function-style expression at top-level commas."""
+    arguments: list[str] = []
+    start = 0
+    depth = 0
+    for index, character in enumerate(value):
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("unbalanced expression parentheses")
+        elif character == "," and depth == 0:
+            arguments.append(value[start:index].strip())
+            start = index + 1
+    if depth != 0:
+        raise ValueError("unbalanced expression parentheses")
+    arguments.append(value[start:].strip())
+    return arguments
+
+
+def _rewrite_ngspice_conditionals(text: str) -> str:
+    """Rewrite legacy ``if(condition,yes,no)`` expressions to ngspice ternaries."""
+
+    def rewrite(value: str) -> str:
+        rendered: list[str] = []
+        index = 0
+        while index < len(value):
+            candidate = value[index : index + 3].casefold()
+            previous = value[index - 1] if index else ""
+            if candidate == "if(" and not (
+                previous.isalnum() or previous in "_."
+            ):
+                open_index = index + 2
+                depth = 1
+                close_index = open_index + 1
+                while close_index < len(value) and depth:
+                    if value[close_index] == "(":
+                        depth += 1
+                    elif value[close_index] == ")":
+                        depth -= 1
+                    close_index += 1
+                if depth:
+                    raise ValueError("unbalanced conditional expression")
+                arguments = _split_expression_arguments(
+                    value[open_index + 1 : close_index - 1]
+                )
+                if len(arguments) != 3 or any(not argument for argument in arguments):
+                    raise ValueError(
+                        "ngspice conditional expressions require three arguments"
+                    )
+                condition, when_true, when_false = (
+                    rewrite(argument) for argument in arguments
+                )
+                rendered.append(
+                    f"({condition} ? {when_true} : {when_false})"
+                )
+                index = close_index
+                continue
+            rendered.append(value[index])
+            index += 1
+        return "".join(rendered)
+
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("*", ";", "#")):
+            lines.append(line)
+        else:
+            lines.append(rewrite(line))
+    return "\n".join(lines)
+
+
+def _conditional_expression(
+    condition: str,
+    when_true: str,
+    when_false: str,
+    *,
+    ngspice_compatible: bool,
+) -> str:
+    if ngspice_compatible:
+        return f"({condition} ? {when_true} : {when_false})"
+    return f"if({condition},{when_true},{when_false})"
+
+
+_GROUND_ALIAS = re.compile(
+    r"(?<![A-Za-z0-9_])(?:gnd|ground)(?![A-Za-z0-9_])", re.IGNORECASE
+)
+
+
+def _canonicalize_ground_aliases(lines: Sequence[str]) -> list[str]:
+    """Map common ground aliases to SPICE node ``0`` for execution decks.
+
+    Multisim's command engine is stricter than the schematic importer: it
+    accepts a ground element in the generated diagram, but the sourced SPICE
+    deck must expose node ``0``. Keep subcircuit declarations and model
+    definitions untouched so an intentional local port/model named ``gnd`` is
+    not rewritten. The source netlist remains unchanged; this only affects the
+    backend execution copy and its audit evidence.
+    """
+    rendered: list[str] = []
+    subcircuit_depth = 0
+    for line in lines:
+        stripped = line.lstrip()
+        lowered = stripped.casefold()
+        if lowered.startswith(".subckt"):
+            subcircuit_depth += 1
+            rendered.append(line)
+            continue
+        if lowered.startswith(".ends"):
+            subcircuit_depth = max(0, subcircuit_depth - 1)
+            rendered.append(line)
+            continue
+        if (
+            not stripped
+            or stripped.startswith(("*", ";", "#"))
+            or lowered.startswith((".model", ".func"))
+            or subcircuit_depth
+        ):
+            rendered.append(line)
+            continue
+        rendered.append(_GROUND_ALIAS.sub("0", line))
+    return rendered
+
+
+def prepare_simulation_netlist(
+    text: str, *, ngspice_compatible: bool = False
+) -> str:
+    """Translate schematic A-device shorthand into executable XSPICE.
+
+    Multisim's historical expression dialect uses ``if(condition,yes,no)``;
+    ngspice's behavioral-source parser uses the equivalent C-style ternary
+    expression. Keep the Multisim spelling as the default and opt into the
+    ngspice form only from the ngspice backend.
+    """
     text = expand_component_adapters(text)
-    logical_lines = _logical_netlist_lines(text)
+    if ngspice_compatible:
+        text = _rewrite_ngspice_conditionals(text)
+    logical_lines = _canonicalize_ground_aliases(_logical_netlist_lines(text))
     existing_models: set[str] = set()
     for line in logical_lines:
         parts = line.split()
@@ -1359,7 +1562,12 @@ def prepare_simulation_netlist(text: str) -> str:
                     if kind == "DNOT4":
                         input_a, output, high, low = nodes
                         condition = f"V({input_a})>((V({high})+V({low}))/2)"
-                        expression = f"if({condition},V({low}),V({high}))"
+                        expression = _conditional_expression(
+                            condition,
+                            f"V({low})",
+                            f"V({high})",
+                            ngspice_compatible=ngspice_compatible,
+                        )
                     else:
                         input_a, input_b, output, high, low = nodes
                         threshold = f"((V({high})+V({low}))/2)"
@@ -1368,17 +1576,87 @@ def prepare_simulation_netlist(text: str) -> str:
                         high_value = f"V({high})"
                         low_value = f"V({low})"
                         if kind == "DAND5":
-                            expression = f"if({a_high},if({b_high},{high_value},{low_value}),{low_value})"
+                            expression = _conditional_expression(
+                                a_high,
+                                _conditional_expression(
+                                    b_high,
+                                    high_value,
+                                    low_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                low_value,
+                                ngspice_compatible=ngspice_compatible,
+                            )
                         elif kind == "DNAND5":
-                            expression = f"if({a_high},if({b_high},{low_value},{high_value}),{high_value})"
+                            expression = _conditional_expression(
+                                a_high,
+                                _conditional_expression(
+                                    b_high,
+                                    low_value,
+                                    high_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                high_value,
+                                ngspice_compatible=ngspice_compatible,
+                            )
                         elif kind == "DOR5":
-                            expression = f"if({a_high},{high_value},if({b_high},{high_value},{low_value}))"
+                            expression = _conditional_expression(
+                                a_high,
+                                high_value,
+                                _conditional_expression(
+                                    b_high,
+                                    high_value,
+                                    low_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                ngspice_compatible=ngspice_compatible,
+                            )
                         elif kind == "DNOR5":
-                            expression = f"if({a_high},{low_value},if({b_high},{low_value},{high_value}))"
+                            expression = _conditional_expression(
+                                a_high,
+                                low_value,
+                                _conditional_expression(
+                                    b_high,
+                                    low_value,
+                                    high_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                ngspice_compatible=ngspice_compatible,
+                            )
                         elif kind == "DXOR5":
-                            expression = f"if({a_high},if({b_high},{low_value},{high_value}),if({b_high},{high_value},{low_value}))"
+                            expression = _conditional_expression(
+                                a_high,
+                                _conditional_expression(
+                                    b_high,
+                                    low_value,
+                                    high_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                _conditional_expression(
+                                    b_high,
+                                    high_value,
+                                    low_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                ngspice_compatible=ngspice_compatible,
+                            )
                         else:
-                            expression = f"if({a_high},if({b_high},{high_value},{low_value}),if({b_high},{low_value},{high_value}))"
+                            expression = _conditional_expression(
+                                a_high,
+                                _conditional_expression(
+                                    b_high,
+                                    high_value,
+                                    low_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                _conditional_expression(
+                                    b_high,
+                                    low_value,
+                                    high_value,
+                                    ngspice_compatible=ngspice_compatible,
+                                ),
+                                ngspice_compatible=ngspice_compatible,
+                            )
                     line = f"B__{parts[0]} {output} {low} V={{{expression}}}"
                 elif kind == "DJK7":
                     j, k, clk, set_node, reset, q, qbar = nodes
@@ -1727,7 +2005,7 @@ def _set_symbol_labels(
                 value_item.set("Output", f"&ASC{display_value}V ")
             elif kind == "I":
                 value_item.set("Output", f"&ASC{display_value}A ")
-            elif kind in {"E", "F", "G", "H", "BV", "BI", "T"} or kind.startswith("XSUB"):
+            elif kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8"} or kind.startswith("XSUB"):
                 value_item.set("Output", _asc(display_value))
             elif kind.startswith("D"):
                 value_item.set("Output", _asc(display_value))
@@ -1743,7 +2021,7 @@ def _configure_component_semantics(
     if spec.kind not in {
         "V", "I", "BV", "BI", "T", "XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN",
         "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "S", "JN", "JP", "ZN", "ZP", "W", "K", "O", "U",
-        "DNAND5", "DNOR5", "DXOR5", "DXNOR5",
+        "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "TIMER8", "DFF8",
     }:
         return
     if spec.kind in {"DNAND5", "DNOR5", "DXOR5", "DXNOR5"}:
@@ -1816,6 +2094,17 @@ def _configure_component_semantics(
             "String",
             _asc(f"t%p %tD %tG %tS %tSUB {parameters}"),
         )
+        return
+    if spec.kind == "TIMER8":
+        # TIMER8 is a verified native vendor macro. Its extracted carrier
+        # already contains the exact named-terminal SPICE template; rewriting
+        # it as a generic XSUB would lose the vendor model identity.
+        return
+    if spec.kind == "DFF8":
+        # DFF8 is a verified native 7474N A-section carrier. Preserve its
+        # named-terminal digital model rather than rewriting it as a generic
+        # subcircuit; exact 74LS74 equivalence is deliberately reported as a
+        # substitution in the build warnings.
         return
     if spec.kind.startswith("XSUB"):
         model = (spec.model or "").strip()
@@ -2402,6 +2691,8 @@ def build_schematic(
     objects = composite.find("./Objects")
     refs = composite.find("./ReferencedComponents")
     circuit = circuit_item.find("./CiCircuit")
+    models = next(root.iter("Models"), None)
+    model_refs: set[str] = set()
 
     _clear(objects)
     _clear(refs)
@@ -2466,6 +2757,12 @@ def build_schematic(
         _remap_subtree(symbol_item, ids)
         comp = element_item.find("./CiComponent")
         sym = symbol_item.find("./CIITSymbolComp")
+        if comp is not None and comp.get("Model"):
+            # Native components extracted from a licensed Multisim database
+            # may point at a CiModel object outside the component subtree.
+            # Keep a project-local model placeholder so Multisim does not
+            # silently omit the component when exporting its native netlist.
+            model_refs.add(comp.get("Model"))
         rank = placement_rank[component_index]
         x = grid_origin_x + (rank % grid_columns) * grid_step_x
         y = grid_origin_y + (rank // grid_columns) * grid_step_y
@@ -2561,6 +2858,13 @@ def build_schematic(
     for item in component_items + port_items + node_items:
         elements.append(item)
     elements.append(circuit_item)
+
+    if models is not None:
+        existing_model_refs = {
+            item.get("CiID") for item in models.findall("./Item") if item.get("CiID")
+        }
+        for model_ref in sorted(model_refs - existing_model_refs):
+            models.append(ET.Element("Item", {"CiID": model_ref}))
 
     for name, record in node_records.items():
         circuit.find("./Nodes").append(
@@ -2703,6 +3007,26 @@ def build_schematic(
                 f"{spec.refdes}: {spec.kind} uses a verified generic carrier symbol; "
                 f"{model_note}"
             )
+        if spec.kind == "TIMER8":
+            model_warnings.append(
+                f"{spec.refdes}: TIMER8 uses the user-local verified LM555CN native "
+                "macro carrier; Multisim ReportNetlist may omit its internal body"
+            )
+            if (spec.model or "").upper() != "LM555CN":
+                model_warnings.append(
+                    f"{spec.refdes}: requested timer model {spec.model!r} is represented "
+                    "by the local LM555CN carrier and requires explicit compatibility review"
+                )
+        if spec.kind == "DFF8":
+            model_warnings.append(
+                f"{spec.refdes}: DFF8 uses the user-local verified 7474N native "
+                "A-section carrier; the second internal section is not instantiated"
+            )
+            if (spec.model or "").upper() != "7474N":
+                model_warnings.append(
+                    f"{spec.refdes}: requested flip-flop model {spec.model!r} is represented "
+                    "by the local 7474N carrier and requires explicit compatibility review"
+                )
         if spec.kind.startswith("XSUB"):
             if spec.model_definition:
                 model_warnings.append(

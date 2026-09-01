@@ -8,6 +8,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
+from .agent_audit import text_fingerprint
 from .model_provider import (
     MAX_TOOL_SCHEMA_BYTES,
     ModelCancelled,
@@ -34,6 +35,7 @@ class ToolExecutionError(ModelRuntimeError):
 
 ToolArgumentValidator = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 ToolHandler = Callable[[Mapping[str, Any], threading.Event | None], Any]
+AuditEventSink = Callable[[str, Mapping[str, Any]], None]
 
 
 def _require_json_tree(value: Any, field_name: str, depth: int = 0) -> None:
@@ -243,7 +245,15 @@ class BoundedToolLoop:
         temperature: float | None = None,
         cancel_event: threading.Event | None = None,
         timeout: float = 60.0,
+        audit_event: AuditEventSink | None = None,
     ) -> AgentRunResult:
+        if audit_event is not None and not callable(audit_event):
+            raise ValueError("audit_event must be callable")
+
+        def emit(event_type: str, details: Mapping[str, Any]) -> None:
+            if audit_event is not None:
+                audit_event(event_type, details)
+
         transcript = list(messages)
         if not transcript or any(
             not isinstance(item, ModelMessage) for item in transcript
@@ -253,6 +263,15 @@ class BoundedToolLoop:
             self.bindings[name].definition for name in sorted(self.bindings)
         )
         seen_call_ids = _validate_initial_transcript(transcript)
+        emit(
+            "run_started",
+            {
+                "initial_message_count": len(transcript),
+                "tool_names": [item.name for item in definitions],
+                "max_rounds": self.max_rounds,
+                "max_tool_calls": self.max_tool_calls,
+            },
+        )
         provider_ids: list[str] = []
         total_calls = 0
         input_tokens = 0
@@ -263,6 +282,13 @@ class BoundedToolLoop:
         for round_number in range(1, self.max_rounds + 1):
             if cancel_event is not None and cancel_event.is_set():
                 raise ModelCancelled("agent run was cancelled")
+            emit(
+                "model_round_started",
+                {
+                    "round": round_number,
+                    "transcript_message_count": len(transcript),
+                },
+            )
             response = self.registry.complete(
                 transcript,
                 definitions,
@@ -276,6 +302,27 @@ class BoundedToolLoop:
             )
             transcript.append(response.message)
             provider_ids.append(response.provider_id)
+            emit(
+                "model_round_completed",
+                {
+                    "round": round_number,
+                    "provider_id": response.provider_id,
+                    "requested_model": response.requested_model,
+                    "model": response.model,
+                    "finish_reason": response.finish_reason,
+                    "response_id": response.response_id,
+                    "request_id": response.request_id,
+                    "assistant_content": text_fingerprint(response.message.content),
+                    "reasoning_content_present": (
+                        response.message.reasoning_content is not None
+                    ),
+                    "tool_call_count": len(response.message.tool_calls),
+                    "tool_call_names": [
+                        item.name for item in response.message.tool_calls
+                    ],
+                    "usage": response.usage.to_dict() if response.usage else None,
+                },
+            )
             if response.usage is None:
                 usage_complete = False
             else:
@@ -290,7 +337,7 @@ class BoundedToolLoop:
                     if input_tokens or output_tokens or total_tokens
                     else None
                 )
-                return AgentRunResult(
+                result = AgentRunResult(
                     final_response=response,
                     transcript=tuple(transcript),
                     rounds=round_number,
@@ -299,6 +346,17 @@ class BoundedToolLoop:
                     usage=usage,
                     usage_complete=usage_complete,
                 )
+                emit(
+                    "run_completed",
+                    {
+                        "rounds": result.rounds,
+                        "tool_call_count": result.tool_call_count,
+                        "provider_ids": list(result.provider_ids),
+                        "usage": result.usage.to_dict() if result.usage else None,
+                        "usage_complete": result.usage_complete,
+                    },
+                )
+                return result
             if response.finish_reason != "tool_calls":
                 raise ModelRuntimeError(
                     "provider returned tool calls without finish_reason=tool_calls"
@@ -327,22 +385,57 @@ class BoundedToolLoop:
                 binding = self.bindings[call.name]
                 arguments = _validated_arguments(binding, call.arguments)
                 validated_calls.append((call, binding, arguments))
+                emit(
+                    "tool_call_validated",
+                    {
+                        "round": round_number,
+                        "call_id": call.call_id,
+                        "tool_name": call.name,
+                        "arguments": arguments,
+                    },
+                )
             seen_call_ids.update(call_ids)
 
             for call, binding, arguments in validated_calls:
                 if cancel_event is not None and cancel_event.is_set():
                     raise ModelCancelled("agent run was cancelled")
+                emit(
+                    "tool_call_started",
+                    {
+                        "round": round_number,
+                        "call_id": call.call_id,
+                        "tool_name": call.name,
+                    },
+                )
                 try:
                     result = binding.handler(arguments, cancel_event)
                 except ModelCancelled:
                     raise
                 except Exception as exc:
+                    emit(
+                        "tool_call_failed",
+                        {
+                            "round": round_number,
+                            "call_id": call.call_id,
+                            "tool_name": call.name,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
                     raise ToolExecutionError(
                         f"tool {call.name!r} failed without exposing internal details"
                     ) from exc
                 if cancel_event is not None and cancel_event.is_set():
                     raise ModelCancelled("agent run was cancelled")
                 content = _json_result(result)
+                emit(
+                    "tool_call_completed",
+                    {
+                        "round": round_number,
+                        "call_id": call.call_id,
+                        "tool_name": call.name,
+                        "result": text_fingerprint(content),
+                    },
+                )
                 try:
                     transcript.append(
                         ModelMessage(
@@ -363,6 +456,7 @@ class BoundedToolLoop:
 __all__ = [
     "AgentLimitError",
     "AgentRunResult",
+    "AuditEventSink",
     "BoundedToolLoop",
     "ToolBinding",
     "ToolExecutionError",

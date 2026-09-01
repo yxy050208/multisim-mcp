@@ -1,6 +1,6 @@
 # 模型 Provider 运行时 / Model Provider Runtime
 
-Multisim MCP 现在提供第一版传输无关模型运行时。它位于未来本地工作台的编排层，
+Multisim MCP 现在提供第一版传输无关模型运行时。它位于本地工作台的编排层，
 不进入 MCP server、COM worker 或 EDA Core。当前支持 DeepSeek、OpenAI、Ollama
 以及配置为 OpenAI-compatible 的服务，使用非流式 Chat Completions 兼容子集。
 
@@ -142,28 +142,45 @@ I/O 最迟受原请求超时约束且不会阻止进程退出。工具 handler �
 ## 只读 EDA 诊断入口
 
 `multisim-mcp model-diagnose` 现在是第一个正式工具化入口。它必须接收一个严格
-`CircuitDesign` JSON 或安全 SPICE 网表，随后只公开设计摘要、分页元件、单网络连接
-和结构性检查四个固定工具。普通 `model` 命令继续保持无工具。
+`CircuitDesign` JSON 或安全 SPICE 网表，随后公开设计摘要、分页元件、单网络连接
+和结构性检查四个固定工具。显式增加 `--experiment-dir` 时，还会为一个已完成实验加入
+波形列统计、验收结论和产物哈希元数据四个只读工具。普通 `model` 命令继续保持无工具。
+显式增加 `--enable-patch-preview` 时，再公开一个纯内存 `DesignPatch` 预览工具。
 
 ```powershell
 multisim-mcp model-diagnose `
   --input .\prompt.txt `
   --netlist .\circuit.cir `
+  --experiment-dir .\completed-experiment `
+  --enable-patch-preview `
   --max-rounds 8 `
   --max-tool-calls 16 `
+  --audit-output .\agent-audit.json `
   --json
 ```
 
-该入口不会启动 Multisim、执行网表、运行仿真或修改设计；原始网表、annotations 和
-文件路径不会进入工具结果。结构化元件/网络数据仍会按模型请求发送到所选 Provider，
+该入口不会启动 Multisim、执行网表、运行仿真或修改设计；原始网表、annotations、
+报告正文、原始波形、产物内容和文件路径不会进入工具结果。实验目录只在进入模型循环
+前由本地资源门禁读取并压缩成有限快照；设计与实验的同源关系当前不会自动证明。
+结构化元件/网络数据及有限实验证据仍会按模型请求发送到所选 Provider，
 详细隐私边界、输入门禁与输出上限见
 [`READ_ONLY_EDA_DIAGNOSIS.md`](READ_ONLY_EDA_DIAGNOSIS.md)。
 
+`--audit-output` 是显式、默认关闭的本地审计开关。审计 schema 记录每轮 Provider、
+模型/请求标识、token 用量、工具名称、已验证参数、结果字节数与 SHA-256，以及最终
+成功或失败状态。它不记录提示词、模型回答、reasoning、API Key 或完整工具结果；目标
+文件默认拒绝覆盖，只有 `--audit-overwrite` 才允许原子替换。库调用方可给
+`BoundedToolLoop.run(..., audit_event=...)` 传入事件接收器，应用层再决定持久化策略。
+补丁预览的已验证参数会进入审计，因此其中的元件值、设计参数、理由和 metadata 也属于
+工程数据；工具结果仍只记录大小与 SHA-256。CLI 的 `--json` 结果会完整返回已接受的
+预览、逆补丁和结构差异，供人或未来 UI 审批。
+
 ## 当前边界
 
-本阶段尚未提供流式输出、持久会话、图形界面、token/费用预算策略、实验结果只读工具
-或后端诊断。下一阶段应先把已有实验/验收证据接入只读分析，再提供带预览、事务、审批
-和回滚的纠错/优化动作；不得把全部 MCP 工具无审查地复制到模型循环。
+本阶段尚未提供流式输出、持久会话、图形界面、token/费用预算策略、设计—实验来源
+证明、原始波形窗口查询或后端诊断。补丁当前只有预览，没有持久化审批令牌、事务应用、
+仿真验证或回滚执行。下一阶段应在独立命令中实现审批后事务应用与回滚；不得把全部
+MCP 工具无审查地复制到模型循环。
 
 ## English summary
 
@@ -172,8 +189,13 @@ OpenAI-compatible Chat Completions, normalized messages/tool calls/usage,
 per-request environment credential resolution, cooperative cancellation, and
 explicit retryable-only provider failover. The CLI reads prompts only from
 explicit stdin or UTF-8 files and exposes no tools. `model-diagnose` is a
-separate explicit entry point with four fixed read-only bindings over strict
-CircuitDesign JSON or safely parsed SPICE. It never exposes raw netlist text or
-runs a backend, although requested structured circuit data is sent to the
-selected provider. Streaming, persistence, transactional actions, UI, and
-budget policy remain future workbench milestones.
+separate explicit entry point with four fixed read-only design bindings over
+strict CircuitDesign JSON or safely parsed SPICE. An explicit
+`--experiment-dir` adds four bounded evidence bindings for a completed
+experiment without exposing report text, raw samples, artifact content, or
+paths. It never runs a backend and does not assert design/experiment provenance,
+although requested structured circuit data and bounded evidence are sent to
+the selected provider. Explicit `--enable-patch-preview` adds one in-memory
+DesignPatch validator that returns inverse patches and structural deltas but
+cannot write, apply, simulate, or approve a change. Streaming, persistence,
+transactional actions, UI, and budget policy remain future workbench milestones.

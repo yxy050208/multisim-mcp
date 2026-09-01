@@ -28,6 +28,8 @@ instruments. The project therefore defines coverage by capability tier.
 | Current-controlled switch | `W...` | Verified experimental carrier | Control source and per-instance `.model` embedded |
 | N/P JFET and MESFET | `J...` / `Z...` | Verified experimental carrier | Per-instance `.model` embedded |
 | Five-terminal op-amp | `X... OPAMP5` | Verified | Native virtual op-amp |
+| Eight-terminal timer macro | `X... TIMER8/LM555CN` | Local-native verified | Licensed user-local LM555CN carrier; ReportNetlist may omit macro body |
+| D flip-flop section | `X... DFF8/7474N` | Local-native open/enum substitute | Licensed user-local 7474N A section; functional 74LS74 substitute, not exact 74LS74 evidence; current raw export omits Q/~Q |
 | Generic subcircuit | two-to-sixteen-terminal `X...` | Verified experimental carrier | Invocation retained; body remains in experiment netlist |
 | NOT / AND / OR / NAND / NOR / XOR / XNOR | `A...` digital aliases | Native preview verified | Open/export and real truth-table transient regression verified |
 | JK flip-flop | `A... J K CLK SET RESET Q QBAR JKFF` | Native preview verified | Open/export and real toggle-timing regression verified |
@@ -41,8 +43,10 @@ instruments. The project therefore defines coverage by capability tier.
 | Ground/named nets | `0`, node names | Verified | Complete |
 
 Every opened generated design is exported back through Multisim's native netlist
-report. Missing components make generation fail instead of being reported as a
-successful schematic.
+report. Missing ordinary components make generation fail instead of being reported
+as a successful schematic; the local vendor/digital macro carriers additionally
+require native component enumeration because Multisim may omit their internal body
+from the text report.
 
 ## Coverage tiers
 

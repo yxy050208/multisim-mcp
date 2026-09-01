@@ -80,6 +80,7 @@ def audit() -> list[Finding]:
         "docs/MIGRATION_TO_1.0.md",
         "docs/RECOVERY.md",
         "docs/WORKSPACE_MANIFESTS.md",
+        "docs/RELEASE_NOTES_v1.2.0.md",
         "docs/RELEASE_NOTES_v1.1.0.md",
         "docs/RELEASE_NOTES_v1.0.0.md",
         "docs/RELEASE_NOTES_v0.1.0-alpha.md",

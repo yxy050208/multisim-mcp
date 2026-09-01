@@ -93,6 +93,84 @@ R1 a b 1k
         self.assertIn("R", expanded)
         self.assertNotIn(".subckt", expanded.lower())
 
+    def test_structured_rebuild_retains_referenced_inline_models(self) -> None:
+        netlist = """\
+V1 vcc 0 10
+R1 vcc c 1k
+R2 vcc b 100k
+Q1 c b 0 QTEST
+.model QTEST NPN(BF=100)
+.model UNUSED D(IS=1n)
+.end
+"""
+        imported = circuit_design_from_spice(netlist, design_id="bjt-inline-model")
+        payload = imported.to_dict()
+        for component in payload["components"]:
+            if component["refdes"] == "R2":
+                component["value"] = "47k"
+        modified = CircuitDesign.from_dict(payload)
+
+        rebuilt = circuit_design_to_spice(modified, prefer_source=False)
+
+        self.assertIn(".model QTEST NPN(BF=100)", rebuilt)
+        self.assertNotIn(".model UNUSED", rebuilt)
+        self.assertIn("R2 vcc b 47k", rebuilt)
+        self.assertLess(rebuilt.index(".model QTEST"), rebuilt.index("Q1 c b 0 QTEST"))
+
+    def test_structured_rebuild_retains_subcircuits_only_when_still_referenced(self) -> None:
+        source = """\
+.func LIMIT(x) {x}
+.subckt IDEAL_OP in_p in_n v_p v_n out
+EGAIN out 0 in_p in_n 100k
+.ends IDEAL_OP
+XU1 inp inn vp vn out IDEAL_OP
+R1 out inn 10k
+.end
+"""
+        design = CircuitDesign(
+            design_id="opamp-inline-model",
+            title="Op amp model retention",
+            components=(
+                CircuitComponent(
+                    "XU1",
+                    "OPAMP5",
+                    ("inp", "inn", "vp", "vn", "out"),
+                    model="IDEAL_OP",
+                ),
+                CircuitComponent("R1", "R", ("out", "inn"), value="22k"),
+            ),
+            source_netlist=source,
+        )
+
+        rebuilt = circuit_design_to_spice(design, prefer_source=False)
+
+        self.assertIn(".func LIMIT(x) {x}", rebuilt)
+        self.assertIn(".subckt IDEAL_OP", rebuilt)
+        self.assertIn(".ends IDEAL_OP", rebuilt)
+        self.assertIn("XU1 inp inn vp vn out IDEAL_OP", rebuilt)
+
+    def test_structured_rebuild_retains_xspice_digital_model(self) -> None:
+        source = """\
+V1 vdd 0 5
+A1 i o vdd 0 INV
+.model INV d_inverter(rise_delay=1n fall_delay=1n)
+.end
+"""
+        design = CircuitDesign(
+            design_id="digital-inline-model",
+            title="Digital model retention",
+            components=(
+                CircuitComponent("V1", "V", ("vdd", "0"), value="5"),
+                CircuitComponent("A1", "DNOT4", ("i", "o", "vdd", "0"), model="INV"),
+            ),
+            source_netlist=source,
+        )
+
+        rebuilt = circuit_design_to_spice(design, prefer_source=False)
+
+        self.assertIn(".model INV d_inverter", rebuilt)
+        self.assertIn("A1 i o vdd 0 INV", rebuilt)
+
     def test_structured_compiler_covers_extended_existing_component_families(self) -> None:
         cases = (
             (
@@ -161,6 +239,24 @@ R1 a b 1k
                 ),
                 "XSC1 a b c d trig 0 OSCILLOSCOPE",
             ),
+            (
+                CircuitComponent(
+                    "U1",
+                    "DFF8",
+                    ("d", "pr", "clr", "clk", "q", "nq", "0", "vcc"),
+                    model="7474N",
+                ),
+                "XU1 d pr clr clk q nq 0 vcc 7474N",
+            ),
+            (
+                CircuitComponent(
+                    "U2",
+                    "TIMER8",
+                    ("0", "trig", "out", "reset", "ctrl", "thr", "dis", "vcc"),
+                    model="LM555CN",
+                ),
+                "XU2 0 trig out reset ctrl thr dis vcc LM555CN",
+            ),
         )
         for index, (component, expected) in enumerate(cases):
             with self.subTest(kind=component.kind):
@@ -172,6 +268,17 @@ R1 a b 1k
                 self.assertEqual(
                     circuit_design_to_spice(design), f"{expected}\n.end\n"
                 )
+
+    def test_structured_native_carriers_require_eight_terminals(self) -> None:
+        design = CircuitDesign(
+            design_id="invalid-native-carrier",
+            title="Invalid native carrier",
+            components=(
+                CircuitComponent("U1", "DFF8", ("d", "pr"), model="7474N"),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "native carrier requires 8 nodes"):
+            circuit_design_to_spice(design)
 
     def test_import_and_compile_supports_node_less_coupling_records(self) -> None:
         netlist = "L1 a 0 1m\nL2 b 0 2m\nK1 L1 L2 0.9\n.end\n"

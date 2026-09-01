@@ -65,7 +65,7 @@ jobs:
       - name: Compile installed sources
         run: python -m compileall mcp_server
       - name: Run COM-free tests against installed wheel
-        run: python -m unittest discover -s mcp_server/tests -v
+        run: python -m unittest discover -s mcp_server/tests -t mcp_server -v
       - name: Verify public artifact contents
         shell: pwsh
         run: |
@@ -108,7 +108,7 @@ jobs:
           print("Code-only wheel and sdist contain manifest/license and no extracted XML")
           '@ | python -
       - name: Compile release audit and local-pack tools
-        run: python -m compileall tools/release_audit.py tools/check_deepseek_harness_compat.py tools/check_dsh_plugin_release.py tools/check_npm_pack_result.py tools/smoke_deepseek_harness.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
+        run: python -m compileall tools/release_audit.py tools/check_mcp_package.py tools/check_deepseek_harness_compat.py tools/check_dsh_plugin_release.py tools/check_npm_pack_result.py tools/smoke_deepseek_harness.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
 
   windows-x86-protocol:
     runs-on: windows-latest
@@ -134,7 +134,7 @@ jobs:
           assert importlib.metadata.version("mcp").startswith("2.")
           assert importlib.metadata.version("cryptography").startswith("48.")
           '@ | python -
-          python -m unittest discover -s mcp_server/tests -p "test_*.py"
+          python -m unittest discover -s mcp_server/tests -t mcp_server -p "test_*.py"
 
   linux-introspection:
     runs-on: ubuntu-latest
@@ -184,9 +184,30 @@ jobs:
                   assert "submit_circuit_experiment" in names
                   assert "cancel_experiment_job" in names
                   assert "retry_experiment_job" in names
+                  assert len(names) == 78
                   assert len(prompts.prompts) == 5
-                  assert len(resources.resource_templates) == 19
+                  assert len(resources.resource_templates) == 20
                   print(f"{mode}: {len(names)} tools")
 
           asyncio.run(main())
           PY
+
+  linux-ngspice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install ngspice and package
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ngspice
+          python -m pip install ./mcp_server
+          python -m pip check
+      - name: Verify real ngspice backend and complete experiment pipeline
+        run: >-
+          python -m unittest discover
+          -s mcp_server/tests
+          -p "test_real_ngspice.py"
+          -v

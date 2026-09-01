@@ -12,6 +12,7 @@ import re
 import shutil
 import threading
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
@@ -48,11 +49,67 @@ from multisim_mcp.design_verification import (
     validate_measurement_requests,
     verify_requirements,
 )
+from multisim_mcp.course_demo import (
+    build_course_demo_manifest,
+    build_course_demo_spec,
+)
+from multisim_mcp.backend_differential import compare_registered_experiments
+from multisim_mcp.design_optimization import (
+    DesignOptimizationService,
+    validate_optimization_spec,
+)
+from multisim_mcp.global_optimization import (
+    GlobalDesignOptimizationService,
+    validate_global_optimization_spec,
+)
+from multisim_mcp.autonomous_correction import (
+    AutonomousDesignCorrectionService,
+    ModelRepairPlanner,
+    validate_autonomous_correction_spec,
+)
+from multisim_mcp.design_diagnosis import (
+    DesignDiagnosisService,
+    load_experiment_diagnosis_evidence,
+)
+from multisim_mcp.design_comparison import DesignVariantComparisonService
+from multisim_mcp.design_patch_evaluation import DesignPatchEvaluationService
+from multisim_mcp.design_plans import (
+    plan_design_options as build_design_plan_options,
+    select_design_option as select_planned_design_option,
+)
+from multisim_mcp.design_specifications import (
+    prepare_design_specification as build_design_specification,
+)
+from multisim_mcp.netlist_drafts import (
+    prepare_netlist_draft as build_netlist_draft,
+)
+from multisim_mcp.component_resolution import (
+    resolve_component_requirements as build_component_resolution,
+)
+from multisim_mcp.component_approvals import (
+    approve_component_resolution as build_component_resolution_approval,
+)
+from multisim_mcp.executable_netlists import (
+    MODEL_ROOT_ENV,
+    compile_executable_netlist as build_executable_netlist,
+)
+from multisim_mcp.executable_approvals import (
+    approve_executable_netlist as build_executable_netlist_approval,
+    validate_executable_netlist_approval as validate_approved_executable_netlist,
+)
+from multisim_mcp.simulation_approvals import (
+    approve_simulation_plan as build_simulation_plan_approval,
+    build_experiment_approval_provenance,
+    validate_simulation_plan_approval as validate_approved_simulation_plan,
+)
 from multisim_mcp.eda_backend import (
     BackendExecution,
     SchematicRequest,
     SimulationRequest,
 )
+from multisim_mcp.eda_core import CircuitDesign
+from multisim_mcp.model_provider import ModelProviderRegistry
+from multisim_mcp.provider_config import read_provider_config
 from multisim_mcp.eda_service import EdaApplicationService
 from multisim_mcp.experiment_sweep import plan_experiment_sweep as expand_sweep
 from multisim_mcp.experiment_service import (
@@ -60,6 +117,8 @@ from multisim_mcp.experiment_service import (
     ExperimentRequest,
 )
 from multisim_mcp.experiment_pipeline import MultisimExperimentPipeline
+from multisim_mcp.digital_observation import build_digital_observation_evidence
+from multisim_mcp.behavioral_reference import build_behavioral_reference_netlist
 from multisim_mcp.com_worker_client import (
     MultisimWorkerProcess,
     WorkerMs14Codec,
@@ -67,6 +126,12 @@ from multisim_mcp.com_worker_client import (
     worker_runtime_diagnostics,
 )
 from multisim_mcp.multisim_backend import MultisimBackend
+from multisim_mcp.ngspice_backend import NgspiceBackend, cancellable_process_runner
+from multisim_mcp.backend_selection import (
+    EXPERIMENT_BACKEND_ENV,
+    selected_experiment_backend,
+)
+from multisim_mcp.portable_schematic import render_portable_schematic
 from multisim_mcp.job_engine import (
     ExperimentJobManager,
     JobSubmission,
@@ -87,6 +152,9 @@ from multisim_mcp.schematic_builder import (
 )
 from multisim_mcp.spice_raw import parse_raw, summarize_columns, write_csv
 from multisim_mcp.spice_adapter import circuit_design_from_spice
+from multisim_mcp.spice_provenance import (
+    audit_spice_compatibility as build_spice_compatibility_audit,
+)
 from multisim_mcp.sweep_resources import (
     read_sweep_summary,
     read_sweep_text,
@@ -159,8 +227,27 @@ mcp = MultisimMCPServer(
         "Use submit_circuit_experiment for resilient long runs and "
         "run_verified_circuit_experiment for explicit design verdicts. Preview "
         "batch work with plan_experiment_sweep, then submit_experiment_sweep. "
+        "Use optimize_design for short bounded explicit/E-series value searches, "
+        "or submit_design_optimization for durable candidate-level recovery; "
+        "optional stock/cost constraints are supported and no selected patch is "
+        "persisted automatically. "
+        "Use compare_design_variants to rank complete designs under one verified "
+        "experiment contract without modifying any source design. "
+        "Use diagnose_design for deterministic read-only topology, requirement, "
+        "convergence, and evidence-backed bias/saturation findings. "
+        "Use evaluate_design_patch to retest an explicit reversible patch against "
+        "the baseline without modifying or automatically adopting the design. "
+        "Use global_optimize_design for bounded mixed topology/value Pareto "
+        "search, or autonomous_correct_design for model-proposed repairs that "
+        "must compile and pass real experiment gates; neither persists a patch. "
         "Use component_adapter_catalog for portable @KIND models; completed "
         "experiments include bilingual HTML/PDF and data-backed instruments."
+        " Use build_course_waveform_demo to obtain the bounded five-channel "
+        "course-design contract before connecting a native 555/74LS74/LM324 "
+        "schematic."
+        " Use audit_spice_compatibility before a run when dialect/model provenance "
+        "matters; completed experiments retain source/executed-netlist hashes and "
+        "solver evidence for compare_experiment_backends."
     ),
 )
 _MULTISIM_WORKER = MultisimWorkerProcess()
@@ -287,6 +374,20 @@ def experiment_commands_resource(experiment_id: str) -> str:
 )
 def experiment_log_resource(experiment_id: str) -> str:
     return read_text_artifact(experiment_id, "log")
+
+
+@mcp.resource(
+    "multisim://experiments/{experiment_id}/spice-compatibility",
+    name="experiment_spice_compatibility",
+    title="SPICE compatibility and model provenance",
+    description=(
+        "Machine-readable SPICE dialect, model hash/license, backend risk, and "
+        "solver-version evidence."
+    ),
+    mime_type="application/json",
+)
+def experiment_spice_compatibility_resource(experiment_id: str) -> str:
+    return read_text_artifact(experiment_id, "spice_compatibility")
 
 
 @mcp.resource(
@@ -537,7 +638,7 @@ def connect() -> dict:
 
 @mcp.tool()
 def runtime_status() -> dict:
-    """Check platform and Python compatibility without starting Multisim."""
+    """Check local EDA runtime compatibility without starting Multisim."""
     result = worker_runtime_diagnostics(_MULTISIM_WORKER)
     paths = template_search_paths()
     required = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
@@ -547,6 +648,17 @@ def runtime_status() -> dict:
     result["schematic_templates_ready"] = not missing
     result["missing_schematic_templates"] = missing
     result["tool_profile"] = tool_profile_status(_TOOL_PROFILE)
+    eda_service = _eda_application_service()
+    result["eda_backends"] = [
+        capabilities.to_dict()
+        for capabilities in eda_service.discover_backends()
+    ]
+    result["ngspice_runtime"] = NgspiceBackend().probe_runtime()
+    result["experiment_backend"] = {
+        "selected": selected_experiment_backend(),
+        "environment_variable": EXPERIMENT_BACKEND_ENV,
+        "default": "multisim",
+    }
     if missing:
         result["template_setup_hint"] = (
             "Run tools/bootstrap_local_component_pack.py and set "
@@ -599,6 +711,42 @@ def export_experiment_artifact(
 def get_experiment_summary(experiment_id: str) -> dict[str, Any]:
     """Return a compact report, verification, and artifact summary for agents."""
     return summarize_experiment(experiment_id)
+
+
+@mcp.tool(com_serialized=False)
+def audit_spice_compatibility(
+    netlist: str,
+    backend: str = "multisim",
+    model_references: list[dict[str, Any]] | None = None,
+    declared_dialect: str | None = None,
+) -> dict[str, Any]:
+    """Audit SPICE dialect, model hashes/licenses, and static backend risks."""
+    return build_spice_compatibility_audit(
+        netlist,
+        backend_id=backend,
+        model_references=model_references,
+        declared_dialect=declared_dialect,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def compare_experiment_backends(
+    reference_experiment_id: str,
+    candidate_experiment_id: str,
+    signals: list[str] | None = None,
+    absolute_tolerance: float = 1e-6,
+    relative_tolerance_percent: float = 1.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Numerically compare common signals from two registered EDA experiments."""
+    return compare_registered_experiments(
+        reference_experiment_id,
+        candidate_experiment_id,
+        signals=signals,
+        absolute_tolerance=absolute_tolerance,
+        relative_tolerance_percent=relative_tolerance_percent,
+        max_points=max_points,
+    )
 
 
 @mcp.tool(com_serialized=False)
@@ -686,6 +834,66 @@ def component_adapter_catalog() -> dict[str, Any]:
 
 
 @mcp.tool(com_serialized=False)
+def build_behavioral_reference(netlist: str) -> dict[str, Any]:
+    """Convert supported native DFF carriers into an explicit ngspice reference.
+
+    The returned netlist is not run automatically and never replaces the
+    source design. It maps native ``D, ~PR, ~CLR, CLK, Q, ~Q, GND, VCC`` pins
+    to the portable ``@DFF`` adapter, inserts explicit control inverters for
+    active-low ``~PR/~CLR``, and records the behavioral-only claim.
+    Pass the returned ``netlist`` explicitly to ``run_spice_netlist`` with
+    ``backend='ngspice'`` when a reference run is desired.
+    """
+    return build_behavioral_reference_netlist(netlist)
+
+
+@mcp.tool(com_serialized=False)
+def run_behavioral_reference(
+    netlist: str,
+    commands: str,
+    output_dir: str | None = None,
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Build and run an explicit ngspice behavioral reference in one call.
+
+    This workflow is intentionally opt-in: it only accepts a netlist containing
+    a supported native ``DFF8``/``7474N``-family carrier, converts that carrier
+    to the portable ``@DFF`` reference, and then runs the converted netlist
+    through the explicitly selected ngspice backend. The source design is not
+    modified, and the result must not be interpreted as native Multisim
+    74LS74 timing or electrical-equivalence evidence.
+    """
+    conversion = build_behavioral_reference_netlist(netlist)
+    if int(conversion.get("converted_count", 0)) <= 0:
+        raise ValueError(
+            "netlist does not contain a supported native DFF carrier; "
+            "use build_behavioral_reference for conversion metadata first"
+        )
+
+    reference_netlist = conversion["netlist"]
+    simulation = run_spice_netlist(
+        reference_netlist,
+        commands,
+        output_dir=output_dir,
+        timeout=timeout,
+        max_points=max_points,
+        unsafe_commands=False,
+        overwrite=overwrite,
+        backend="ngspice",
+    )
+    behavioral_metadata = {
+        key: value for key, value in conversion.items() if key != "netlist"
+    }
+    return {
+        **simulation,
+        "behavioral_reference": behavioral_metadata,
+        "reference_netlist": reference_netlist,
+    }
+
+
+@mcp.tool(com_serialized=False)
 def verify_experiment_requirements(
     experiment_id: str,
     requirements: list[DesignRequirement],
@@ -706,6 +914,197 @@ def plan_experiment_sweep(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool(com_serialized=False)
+def plan_design_options(
+    requirements: str,
+    constraints: dict[str, Any] | None = None,
+    objectives: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+    max_options: int = 3,
+) -> dict[str, Any]:
+    """Return comparable technical方案 without generating or executing a circuit.
+
+    The result is a bounded planning-only ``DesignPlan``.  It contains a
+    deterministic recommendation, alternative implementation paths, trade-offs,
+    and explicit assumptions.  Netlists, schematics, files, and simulations are
+    intentionally deferred until a caller selects an option in a later step.
+    """
+    return build_design_plan_options(
+        requirements,
+        constraints=constraints,
+        objectives=objectives,
+        context=context,
+        max_options=max_options,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def select_design_option(
+    plan: dict[str, Any],
+    option_id: str,
+) -> dict[str, Any]:
+    """Lock one planning option without generating or executing a circuit.
+
+    The input plan digest is checked before selection.  The returned envelope
+    binds the source and selected digests so a later generator can require an
+    explicit, untampered handoff.
+    """
+    return select_planned_design_option(plan, option_id)
+
+
+@mcp.tool(com_serialized=False)
+def prepare_design_specification(
+    plan: dict[str, Any],
+    parameter_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prepare a reviewable electrical specification from a selected plan.
+
+    This read-only step lists required electrical parameters, planned modules,
+    analyses, and validation gates.  It requires a valid selection digest and
+    never creates a CircuitDesign, netlist, schematic, file, or simulation.
+    """
+    return build_design_specification(plan, parameter_values)
+
+
+@mcp.tool(com_serialized=False)
+def prepare_netlist_draft(
+    plan: dict[str, Any],
+    specification: dict[str, Any],
+    approval: dict[str, Any],
+) -> dict[str, Any]:
+    """Prepare a logical netlist draft after explicit specification approval.
+
+    The result contains block-level nets, connections, unresolved component
+    requirements, and derived constraints.  It is not executable SPICE and
+    never creates a CircuitDesign, schematic, file, or simulation.
+    """
+    return build_netlist_draft(plan, specification, approval)
+
+
+@mcp.tool(com_serialized=False)
+def resolve_component_requirements(
+    draft: dict[str, Any],
+    selections: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve logical roles into reviewable component candidates and rating gates.
+
+    This remains a read-only planning step.  It does not choose a silent part
+    number, create a CircuitDesign, generate SPICE, write a file, or start a
+    simulation.  A later stage must provide model provenance and explicit
+    human approval before compiling an executable netlist.
+    """
+    return build_component_resolution(draft, selections)
+
+
+@mcp.tool(com_serialized=False)
+def approve_component_resolution(
+    draft: dict[str, Any],
+    resolution: dict[str, Any],
+    approval: dict[str, Any],
+) -> dict[str, Any]:
+    """Record explicit human approval for a complete component resolution.
+
+    This is still a review artifact.  It does not generate SPICE, create a
+    CircuitDesign, write a file, render a schematic, or start a simulation;
+    those actions require a later compiler and separate approval gates.
+    """
+    return build_component_resolution_approval(draft, resolution, approval)
+
+
+@mcp.tool(com_serialized=False)
+def compile_executable_netlist(
+    draft: dict[str, Any],
+    component_approval: dict[str, Any],
+) -> dict[str, Any]:
+    """Compile an approved logical draft into a bounded pin-level preview.
+
+    Only options in the compiler support matrix are accepted.  External model
+    bytes, when present, are re-hashed beneath ``MULTISIM_MCP_MODEL_ROOT``.
+    The result stays in memory and does not write files, create a schematic,
+    start Multisim, or run a simulation.
+    """
+    configured_root = os.environ.get(MODEL_ROOT_ENV) or None
+    return build_executable_netlist(
+        draft,
+        component_approval,
+        model_root=configured_root,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def approve_executable_netlist(
+    executable_netlist: dict[str, Any],
+    approval: dict[str, Any],
+) -> dict[str, Any]:
+    """Record explicit human approval for one immutable netlist preview.
+
+    The approval binds the compiled CircuitDesign and SPICE digest.  It does
+    not write a schematic, create a project file, add stimuli, or start a
+    simulation; those remain separate downstream gates.
+    """
+    return build_executable_netlist_approval(executable_netlist, approval)
+
+
+@mcp.tool(com_serialized=False)
+def approve_simulation_plan(
+    executable_netlist: dict[str, Any],
+    netlist_approval: dict[str, Any],
+    experiment_spec: dict[str, Any],
+    approval: dict[str, Any],
+) -> dict[str, Any]:
+    """Record explicit approval for one safe simulation plan.
+
+    The artifact binds the approved executable-netlist preview to the exact
+    analysis commands, measurement requirements, and theoretical values in an
+    ``ExperimentSpec``. It does not create a schematic, write files, or start
+    a simulation; ``run_verified_circuit_experiment`` must validate it again.
+    """
+    return build_simulation_plan_approval(
+        executable_netlist,
+        netlist_approval,
+        experiment_spec,
+        approval,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def build_course_waveform_demo(
+    netlist: str = "",
+    commands: str = "",
+    component_evidence: dict[str, Any] | None = None,
+    experiment_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the bilingual five-waveform course-design contract.
+
+    With no arguments this returns the safe behavioral reference model.  A
+    caller may provide a native Multisim-compatible netlist and analysis
+    commands to keep the same explicit requirement gates while changing the
+    implementation.  This tool only builds/validates the contract; use
+    ``run_verified_circuit_experiment`` for measured evidence.
+    """
+
+    chosen_netlist = netlist if netlist.strip() else None
+    chosen_commands = commands if commands.strip() else None
+    spec = build_course_demo_spec(chosen_netlist, chosen_commands)
+    manifest = build_course_demo_manifest(
+        netlist_kind=("native-multisim" if chosen_netlist else "behavioral-reference"),
+        backend_note=(
+            "Caller-supplied netlist; component-level claim requires native "
+            "Multisim evidence."
+            if chosen_netlist
+            else "Behavioral reference only; requires a real local simulator for measured evidence."
+        ),
+        component_evidence=component_evidence,
+        experiment_evidence=experiment_evidence,
+    )
+    return {
+        "schema_version": 1,
+        "demo_id": manifest["demo_id"],
+        "manifest": manifest,
+        "spec": spec,
+    }
+
+
+@mcp.tool(com_serialized=False)
 def submit_circuit_experiment(
     netlist: str,
     commands: str,
@@ -718,12 +1117,17 @@ def submit_circuit_experiment(
     heartbeat_timeout: float = 180.0,
     requirements: list[DesignRequirement] | None = None,
     theoretical_values: dict[str, float] | None = None,
+    executable_netlist: dict[str, Any] | None = None,
+    netlist_approval: dict[str, Any] | None = None,
+    simulation_plan_approval: dict[str, Any] | None = None,
 ) -> JobSubmission:
     """Queue a durable, cancellable experiment in an isolated worker process.
 
     Prefer this tool for long experiments. Poll ``multisim://jobs/{job_id}`` or
     call ``get_experiment_job``. Completed jobs return the same experiment
-    result and resource handles as ``run_circuit_experiment``.
+    result and resource handles as ``run_circuit_experiment``. When approval
+    artifacts are supplied, all three are persisted with the job and verified
+    again inside the isolated worker before execution.
     """
     if not output_dir.strip():
         raise ValueError("output_dir must not be empty")
@@ -760,6 +1164,31 @@ def submit_circuit_experiment(
         )
     elif theoretical_values:
         raise ValueError("theoretical_values requires requirements")
+    approved_handoff = (
+        executable_netlist is not None
+        or netlist_approval is not None
+        or simulation_plan_approval is not None
+    )
+    if approved_handoff:
+        if (
+            executable_netlist is None
+            or netlist_approval is None
+            or simulation_plan_approval is None
+        ):
+            raise ValueError(
+                "executable_netlist, netlist_approval, and "
+                "simulation_plan_approval must be provided together"
+            )
+        if verification is None:
+            raise ValueError(
+                "approved simulation-plan submission requires requirements"
+            )
+        validate_approved_simulation_plan(
+            executable_netlist,
+            netlist_approval,
+            verification,
+            simulation_plan_approval,
+        )
     return _job_manager().submit(
         {
             "job_kind": "experiment",
@@ -778,6 +1207,15 @@ def submit_circuit_experiment(
                     "theoretical_values": verification["theoretical_values"],
                 }
                 if verification is not None
+                else {}
+            ),
+            **(
+                {
+                    "executable_netlist": executable_netlist,
+                    "netlist_approval": netlist_approval,
+                    "simulation_plan_approval": simulation_plan_approval,
+                }
+                if approved_handoff
                 else {}
             ),
         }
@@ -839,10 +1277,25 @@ def schematic_component_catalog() -> dict:
                     else len(definition.port_templates)
                 ),
                 "value_unit": definition.value_unit,
+                "ready": any(
+                    all(
+                        (path / filename).is_file()
+                        for filename in (
+                            definition.element_template,
+                            definition.symbol_template,
+                            *definition.port_templates,
+                        )
+                    )
+                    for path in search_paths
+                ),
                 "maturity": (
                     "experimental-carrier"
                     if definition.kind in experimental_carriers
-                    else "native-verified"
+                    else (
+                        "local-native-verified"
+                        if definition.kind in {"TIMER8", "DFF8"}
+                        else "native-verified"
+                    )
                 ),
             }
             for definition in COMPONENT_DEFINITIONS.values()
@@ -1182,6 +1635,11 @@ def _run_spice_netlist_impl(
         summary["columns"] = parsed["columns"]
         summary["n_points"] = parsed["n_points"]
         summary["measurements"] = summarize_columns(parsed)
+        summary["digital_observation"] = build_digital_observation_evidence(
+            netlist,
+            parsed["columns"],
+            backend_id="multisim",
+        )
         step = max(1, math.ceil(parsed["n_points"] / max(1, int(max_points))))
         summary["rows"] = parsed["rows"][::step][:max_points]
 
@@ -1208,8 +1666,9 @@ def run_spice_netlist(
     max_points: int = 2000,
     unsafe_commands: bool = False,
     overwrite: bool = False,
+    backend: str = "multisim",
 ) -> dict:
-    """Run a SPICE netlist with safe ``op``, ``dc``, ``ac``, or ``tran`` commands.
+    """Run SPICE through Multisim or ngspice with safe analysis commands.
 
     The default path rejects scripting, shell escapes, file commands, and
     arbitrary command sourcing. Unrestricted engine commands require both the
@@ -1220,8 +1679,9 @@ def run_spice_netlist(
         title="Standalone SPICE simulation",
         allow_unsupported=True,
     )
+    backend_id = backend.strip().casefold()
     execution = _eda_application_service().simulate(
-        "multisim",
+        backend_id,
         SimulationRequest(
             design=design,
             commands=commands,
@@ -1232,7 +1692,10 @@ def run_spice_netlist(
             overwrite=overwrite,
         ),
     )
-    return _eda_compatibility_result(execution)
+    result = _eda_compatibility_result(execution)
+    if backend_id == "ngspice":
+        result = _enrich_ngspice_result(result, netlist)
+    return result
 
 
 def _create_schematic_impl(
@@ -1251,7 +1714,7 @@ def _create_schematic_impl(
         raise ValueError(
             "The schematic builder currently supports passive RLC, independent and "
             "behavioral/linear controlled sources, transmission lines, modeled "
-            "diode/BJT/MOSFET/JFET/MESFET/switch devices, OPAMP5, K/T/O/U, "
+            "diode/BJT/MOSFET/JFET/MESFET/switch devices, OPAMP5/TIMER8/DFF8, K/T/O/U, "
             "generic two-to-sixteen-terminal subcircuits, digital devices, and "
             "XFG/XSC virtual instruments "
             f"components only. Unsupported netlist lines: {preview}"
@@ -1309,6 +1772,7 @@ def _create_schematic_impl(
             verification_path.unlink(missing_ok=True)
         expected_specs = [item for item in parsed.components if item.kind != "GND"]
         native_components: dict[str, bool] = {}
+        native_evidence: dict[str, str] = {}
         enumerated_components = set(result["verification"]["components"])
         result["verification"]["virtual_instruments"] = [
             spec.refdes for spec in expected_specs if spec.kind in {"OSC6", "XFG3"}
@@ -1319,10 +1783,27 @@ def _create_schematic_impl(
             candidates = [spec.refdes]
             if spec.kind.startswith("D"):
                 candidates.append(spec.refdes + "A")
+            # Vendor-backed five-terminal macro-models and generic X
+            # subcircuits can be emitted by Multisim with a section suffix
+            # (for example XU1A), while EnumComponents reports the parent
+            # reference XU1.
+            if spec.kind in {"OPAMP5", "TIMER8", "DFF8"} or spec.kind.startswith("XSUB"):
+                candidates.append(spec.refdes + "A")
             if spec.kind in {"OSC6", "XFG3"}:
                 native_components[spec.refdes] = True
+                native_evidence[spec.refdes] = "virtual-instrument enumeration"
+            elif spec.kind in {"TIMER8", "DFF8"}:
+                # Multisim keeps vendor timer macro-models as native
+                # components, but ReportNetlist may omit their internal
+                # digital/macro body. EnumComponents is therefore the
+                # authoritative native-presence check for these carriers.
+                native_components[spec.refdes] = spec.refdes in enumerated_components
+                native_evidence[spec.refdes] = (
+                    "native component enumeration; vendor/digital body may be omitted by ReportNetlist"
+                )
             elif spec.kind == "K":
                 native_components[spec.refdes] = spec.refdes in enumerated_components
+                native_evidence[spec.refdes] = "native component enumeration"
             else:
                 native_components[spec.refdes] = any(
                     re.search(
@@ -1331,7 +1812,9 @@ def _create_schematic_impl(
                     )
                     for candidate in candidates
                 )
+                native_evidence[spec.refdes] = "ReportNetlist text match"
         result["verification"]["native_netlist_components"] = native_components
+        result["verification"]["native_component_evidence"] = native_evidence
         result["verification"]["native_netlist_complete"] = all(
             native_components.values()
         )
@@ -1352,7 +1835,10 @@ def _create_schematic_impl(
 def _eda_application_service() -> EdaApplicationService:
     """Build the compatibility service without retaining MCP/COM transport state."""
     return EdaApplicationService(
-        [MultisimBackend(_create_schematic_impl, _run_spice_netlist_impl)]
+        [
+            MultisimBackend(_create_schematic_impl, _run_spice_netlist_impl),
+            NgspiceBackend(),
+        ]
     )
 
 
@@ -1360,6 +1846,79 @@ def _eda_compatibility_result(execution: BackendExecution) -> dict:
     result = execution.to_dict()["payload"].get("compatibility_result")
     if not isinstance(result, dict):
         raise RuntimeError("EDA backend omitted the compatibility result")
+    return result
+
+
+def _enrich_ngspice_result(result: dict[str, Any], netlist: str) -> dict[str, Any]:
+    """Add parsed waveform and digital-observation evidence to a direct run."""
+    raw_path = result.get("raw")
+    if result.get("success") is True and isinstance(raw_path, str):
+        parsed = parse_raw(raw_path)
+        result["columns"] = parsed["columns"]
+        result["rows"] = parsed["rows"]
+        result["n_points"] = parsed["n_points"]
+        result["measurements"] = summarize_columns(parsed)
+        result["digital_observation"] = build_digital_observation_evidence(
+            netlist,
+            parsed["columns"],
+            backend_id="ngspice",
+        )
+    result["timed_out"] = bool(
+        isinstance(result.get("error"), str)
+        and "timeout" in str(result["error"]).casefold()
+    )
+    result["last_error"] = result.get("error") or ""
+    return result
+
+
+def _run_ngspice_netlist_impl(
+    netlist: str,
+    commands: str,
+    output_dir: str | None = None,
+    timeout: float = 120.0,
+    max_points: int = 2000,
+    unsafe_commands: bool = False,
+    overwrite: bool = False,
+    cancel_requested: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Compatibility runner used by the complete open-backend pipeline."""
+    if cancel_requested is not None and cancel_requested():
+        raise InterruptedError("Experiment cancellation requested")
+    if heartbeat is not None:
+        heartbeat()
+    design = circuit_design_from_spice(
+        netlist,
+        title="Standalone ngspice simulation",
+        allow_unsupported=True,
+    )
+    ngspice_service = EdaApplicationService(
+        [
+            NgspiceBackend(
+                process_runner=cancellable_process_runner(
+                    cancel_requested,
+                    heartbeat,
+                )
+            )
+        ]
+    )
+    execution = ngspice_service.simulate(
+        "ngspice",
+        SimulationRequest(
+            design=design,
+            commands=commands,
+            output_directory=output_dir or None,
+            timeout_seconds=timeout,
+            max_points=max_points,
+            unsafe_commands=unsafe_commands,
+            overwrite=overwrite,
+        ),
+    )
+    result = _enrich_ngspice_result(_eda_compatibility_result(execution), netlist)
+    if cancel_requested is not None and cancel_requested():
+        raise InterruptedError("Experiment cancellation requested")
+    if heartbeat is not None:
+        heartbeat()
     return result
 
 
@@ -1372,18 +1931,40 @@ def create_schematic_from_netlist(
     open_after_build: bool = True,
     image_path: str | None = None,
     overwrite: bool = False,
+    executable_netlist: dict[str, Any] | None = None,
+    netlist_approval: dict[str, Any] | None = None,
 ) -> dict:
     """Create an editable Multisim schematic from a supported SPICE netlist.
 
     Supports RLC components, scalar/waveform voltage and current sources,
-    B/E/F/G/H/T primitives, modeled semiconductors and switches, OPAMP5,
+    B/E/F/G/H/T primitives, modeled semiconductors and switches, OPAMP5, and
+    user-local verified TIMER8/LM555CN and DFF8/7474N native carriers,
     generic two-to-sixteen-terminal X subcircuits, digital devices, ground,
     named nets, wiring, and deterministic layout. Compatible inline subcircuits
     are recursively expanded into editable primitives; unsupported macro-model
     constructs remain explicit carrier-only evidence. Generated schematic probes
     remain experimental. The high-level experiment tool obtains authoritative
     data from the same source netlist through Multisim's command engine.
+
+    When ``executable_netlist`` and ``netlist_approval`` are both supplied,
+    the approval is revalidated against the immutable compiled preview before
+    any schematic work begins. The supplied ``netlist`` must exactly match the
+    approved preview's bound SPICE text. This path opens schematic generation
+    only; it does not approve or start a simulation.
     """
+    approved_handoff = executable_netlist is not None or netlist_approval is not None
+    if approved_handoff:
+        if executable_netlist is None or netlist_approval is None:
+            raise ValueError(
+                "executable_netlist and netlist_approval must be provided together"
+            )
+        validate_approved_executable_netlist(executable_netlist, netlist_approval)
+        approved_spice = executable_netlist.get("spice_netlist")
+        if not isinstance(approved_spice, str) or netlist != approved_spice:
+            raise ValueError(
+                "netlist does not match the approved executable preview's bound SPICE"
+            )
+
     output_path = Path(output_ms14).expanduser().resolve()
     if output_path.suffix.lower() != ".ms14":
         raise ValueError("output_ms14 must end with .ms14")
@@ -1405,7 +1986,20 @@ def create_schematic_from_netlist(
             overwrite=overwrite,
         ),
     )
-    return _eda_compatibility_result(execution)
+    result = _eda_compatibility_result(execution)
+    if approved_handoff:
+        # Keep the generated artifact traceable without copying the complete
+        # approval payload into a file-producing compatibility response.
+        result["netlist_approval"] = {
+            "approval_id": netlist_approval["approval_id"],
+            "approval_digest": netlist_approval["approval_digest"],
+            "compiled_id": netlist_approval["compiled_id"],
+            "compiled_digest": netlist_approval["compiled_digest"],
+            "state": netlist_approval["state"],
+            "schematic_generation": "approved",
+            "simulation_started": False,
+        }
+    return result
 
 
 def _run_circuit_experiment_transaction(
@@ -1421,12 +2015,31 @@ def _run_circuit_experiment_transaction(
     owner: str | None = None,
     requirements: list[DesignRequirement] | None = None,
     theoretical_values: dict[str, float] | None = None,
+    model_references: list[dict[str, Any]] | None = None,
+    declared_dialect: str | None = None,
+    approval_provenance: Mapping[str, Any] | None = None,
 ) -> ExperimentResult | VerifiedExperimentResult:
-    """Assemble local Multisim dependencies for the extracted pipeline."""
-    pipeline = MultisimExperimentPipeline(
-        _create_schematic_impl,
-        _run_spice_netlist_impl,
-    )
+    """Assemble the selected local EDA dependencies for the experiment pipeline."""
+    backend_id = selected_experiment_backend()
+    if backend_id == "ngspice":
+        pipeline = MultisimExperimentPipeline(
+            render_portable_schematic,
+            _run_ngspice_netlist_impl,
+            backend_id="ngspice",
+            backend_display_name="ngspice open-source simulator",
+            schematic_artifact_names=(
+                "schematic.svg",
+                "schematic.png",
+                "backend.json",
+            ),
+            design_filename="schematic.svg",
+            editable_schematic=False,
+        )
+    else:
+        pipeline = MultisimExperimentPipeline(
+            _create_schematic_impl,
+            _run_spice_netlist_impl,
+        )
     result = pipeline.run(
         netlist=netlist,
         commands=commands,
@@ -1440,6 +2053,9 @@ def _run_circuit_experiment_transaction(
         owner=owner,
         requirements=requirements,
         theoretical_values=theoretical_values,
+        model_references=model_references,
+        declared_dialect=declared_dialect,
+        approval_provenance=approval_provenance,
     )
     return result  # type: ignore[return-value]
 
@@ -1447,6 +2063,26 @@ def _run_circuit_experiment_transaction(
 def _experiment_application_service() -> ExperimentApplicationService:
     """Build the experiment service around the current transaction executor."""
     return ExperimentApplicationService(_run_circuit_experiment_transaction)
+
+
+def _design_optimization_service() -> DesignOptimizationService:
+    """Build the transport-neutral optimizer around the current experiment service."""
+    return DesignOptimizationService(_experiment_application_service())
+
+
+def _global_optimization_service() -> GlobalDesignOptimizationService:
+    """Build mixed topology/value global optimization around real experiments."""
+    return GlobalDesignOptimizationService(_experiment_application_service())
+
+
+def _design_comparison_service() -> DesignVariantComparisonService:
+    """Build complete-design comparison around the current experiment service."""
+    return DesignVariantComparisonService(_experiment_application_service())
+
+
+def _design_patch_evaluation_service() -> DesignPatchEvaluationService:
+    """Build read-only patch retesting around the current experiment service."""
+    return DesignPatchEvaluationService(_experiment_application_service())
 
 
 def _run_circuit_experiment_impl(
@@ -1462,6 +2098,7 @@ def _run_circuit_experiment_impl(
     owner: str | None = None,
     requirements: list[DesignRequirement] | None = None,
     theoretical_values: dict[str, float] | None = None,
+    approval_provenance: Mapping[str, Any] | None = None,
 ) -> ExperimentResult | VerifiedExperimentResult:
     """Route one complete experiment through the transport-neutral service."""
     design = circuit_design_from_spice(
@@ -1481,6 +2118,7 @@ def _run_circuit_experiment_impl(
         theoretical_values=(
             theoretical_values if theoretical_values is not None else {}
         ),
+        approval_provenance=approval_provenance,
     )
     result = _experiment_application_service().run(
         request,
@@ -1524,9 +2162,39 @@ def run_verified_circuit_experiment(
     timeout: float = 120.0,
     max_points: int = 2000,
     overwrite: bool = False,
+    executable_netlist: dict[str, Any] | None = None,
+    netlist_approval: dict[str, Any] | None = None,
+    simulation_plan_approval: dict[str, Any] | None = None,
 ) -> VerifiedExperimentResult:
-    """Run an ExperimentSpec and persist evidence-backed requirement verdicts."""
+    """Run an ExperimentSpec and persist evidence-backed requirement verdicts.
+
+    When the three approval inputs are supplied, the exact executable-netlist
+    and simulation-plan handoff is revalidated before any schematic or
+    simulation work begins. The legacy direct-spec path remains available for
+    compatibility; it does not claim this additional approval provenance.
+    """
     normalized = validate_experiment_spec(spec)
+    approved_handoff = (
+        executable_netlist is not None
+        or netlist_approval is not None
+        or simulation_plan_approval is not None
+    )
+    if approved_handoff:
+        if (
+            executable_netlist is None
+            or netlist_approval is None
+            or simulation_plan_approval is None
+        ):
+            raise ValueError(
+                "executable_netlist, netlist_approval, and "
+                "simulation_plan_approval must be provided together"
+            )
+        validated_approval = validate_approved_simulation_plan(
+            executable_netlist,
+            netlist_approval,
+            normalized,
+            simulation_plan_approval,
+        )
     result = _run_circuit_experiment_impl(
         normalized["netlist"],
         normalized["commands"],
@@ -1537,8 +2205,503 @@ def run_verified_circuit_experiment(
         overwrite,
         requirements=normalized["requirements"],
         theoretical_values=normalized["theoretical_values"],
+        approval_provenance=(
+            build_experiment_approval_provenance(validated_approval)
+            if approved_handoff
+            else None
+        ),
     )
+    if approved_handoff:
+        result["simulation_plan_approval"] = {
+            "approval_id": simulation_plan_approval["approval_id"],
+            "approval_digest": simulation_plan_approval["approval_digest"],
+            "netlist_approval_id": simulation_plan_approval["netlist_approval_id"],
+            "netlist_approval_digest": simulation_plan_approval[
+                "netlist_approval_digest"
+            ],
+            "state": simulation_plan_approval["state"],
+            "simulation_started": bool(result.get("success")),
+        }
     return result  # type: ignore[return-value]
+
+
+@mcp.tool(com_serialized=False)
+def diagnose_design(
+    design: dict[str, Any],
+    experiment_dir: str = "",
+    simulation_failure: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Diagnose a circuit without modifying it or silently guessing repairs.
+
+    Structural checks require only ``design``. When ``experiment_dir`` is
+    supplied, its artifact integrity manifest and canonical netlist are verified
+    before requirement, convergence, BJT, or op-amp evidence is used. An
+    optional bounded ``simulation_failure`` object may contain code, type,
+    stage, and message fields from a failed run.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    if not isinstance(experiment_dir, str):
+        raise ValueError("experiment_dir must be a string")
+    evidence = (
+        load_experiment_diagnosis_evidence(normalized_design, experiment_dir)
+        if experiment_dir.strip()
+        else None
+    )
+    return DesignDiagnosisService().run(
+        normalized_design,
+        experiment_evidence=evidence,
+        simulation_failure=simulation_failure,
+    )
+
+
+@mcp.tool()
+def evaluate_design_patch(
+    design: dict[str, Any],
+    patch: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    regenerate_source_netlist: bool = False,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Retest one explicit reversible patch against its unchanged baseline.
+
+    The service runs exactly two verified experiments under the same hard
+    requirements, writes before/after deterministic diagnoses and an inverse
+    patch, and never persists the candidate as the source design. A passing
+    result remains subject to the separate local approval workflow.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    return _design_patch_evaluation_service().run(
+        normalized_design,
+        patch,
+        spec,
+        output_dir,
+        regenerate_source_netlist=regenerate_source_netlist,
+        timeout_per_experiment=timeout_per_experiment,
+        max_points=max_points,
+    )
+
+
+@mcp.tool()
+def optimize_design(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Evaluate bounded component-value candidates without modifying the source design.
+
+    The baseline consumes one experiment from ``spec.max_experiments``. Values
+    may be explicit or generated from bounded E12/E24/E48/E96 ranges. Electrical,
+    optional in-stock, and maximum variable-cost rules are hard constraints;
+    failed/unverified candidates are never feasible, and the returned best patch
+    still requires the separate local approval workflow before persistence.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    return _design_optimization_service().run(
+        normalized_design,
+        spec,
+        output_dir,
+        timeout_per_experiment=timeout_per_experiment,
+        max_points=max_points,
+    )
+
+
+@mcp.tool()
+def global_optimize_design(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Run auditable mixed topology/value multi-objective global optimization.
+
+    Small declared domains are exhaustive; larger domains use deterministic
+    Halton space filling. Every candidate runs a real verified experiment,
+    failed hard constraints are excluded, and the result contains an
+    epsilon-aware Pareto front. No candidate is persisted automatically.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    return _global_optimization_service().run(
+        normalized_design,
+        spec,
+        output_dir,
+        timeout_per_experiment=timeout_per_experiment,
+        max_points=max_points,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def submit_global_optimization(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+    job_timeout: float = 21600.0,
+    heartbeat_timeout: float = 180.0,
+    resume_existing: bool = False,
+) -> JobSubmission:
+    """Queue durable mixed topology/value Pareto optimization.
+
+    Completed candidates are integrity-checked and reused after restart. An
+    interrupted candidate is rerun in a new attempt directory. No recommended
+    patch is persisted into the source design automatically.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    validate_global_optimization_spec(spec, normalized_design)
+    if not isinstance(output_dir, str) or not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    unresolved = Path(output_dir).expanduser()
+    if unresolved.is_symlink():
+        raise ValueError("output_dir must not be a symbolic link")
+    output_path = unresolved.resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    if not isinstance(resume_existing, bool):
+        raise ValueError("resume_existing must be a boolean")
+    if output_path.exists():
+        if not output_path.is_dir():
+            raise ValueError("output_dir exists and is not a directory")
+        if any(output_path.iterdir()) and not resume_existing:
+            raise FileExistsError(
+                "output_dir is not empty; set resume_existing only for a matching "
+                "interrupted global optimization"
+            )
+    if (
+        isinstance(timeout_per_experiment, bool)
+        or not isinstance(timeout_per_experiment, (int, float))
+        or not math.isfinite(float(timeout_per_experiment))
+        or not 0 < float(timeout_per_experiment) <= 3600
+    ):
+        raise ValueError("timeout_per_experiment must be between 0 and 3600")
+    if (
+        isinstance(max_points, bool)
+        or not isinstance(max_points, int)
+        or not 1 <= max_points <= 100_000
+    ):
+        raise ValueError("max_points must be between 1 and 100000")
+    if (
+        isinstance(job_timeout, bool)
+        or not isinstance(job_timeout, (int, float))
+        or not math.isfinite(float(job_timeout))
+        or not 1 <= float(job_timeout) <= 86_400
+    ):
+        raise ValueError("job_timeout must be between 1 and 86400 seconds")
+    if float(job_timeout) <= float(timeout_per_experiment):
+        raise ValueError("job_timeout must exceed timeout_per_experiment")
+    if (
+        isinstance(heartbeat_timeout, bool)
+        or not isinstance(heartbeat_timeout, (int, float))
+        or not math.isfinite(float(heartbeat_timeout))
+        or not 10 <= float(heartbeat_timeout) <= 900
+    ):
+        raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
+    persisted_spec = json.loads(json.dumps(spec, ensure_ascii=False, allow_nan=False))
+    return _job_manager().submit(
+        {
+            "job_kind": "global_optimization",
+            "design": normalized_design.to_dict(),
+            "global_optimization_spec": persisted_spec,
+            "output_dir": str(output_path),
+            "timeout_per_experiment": float(timeout_per_experiment),
+            "max_points": max_points,
+            "job_timeout": float(job_timeout),
+            "heartbeat_timeout": float(heartbeat_timeout),
+            "resume_existing": resume_existing,
+        }
+    )
+
+
+@mcp.tool()
+def autonomous_correct_design(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    provider_config_path: str | None = None,
+    provider: str | None = None,
+    fallback_providers: list[str] | None = None,
+    allow_failover: bool = False,
+    model_timeout: float = 60.0,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Autonomously diagnose, propose, simulate, and select a repair candidate.
+
+    The configured model may propose bounded parameter or topology patches, but
+    every candidate is revalidated and simulated locally. The final all-pass
+    candidate is returned as one reversible patch against the original design;
+    applying it remains a separate explicit approval operation.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    config = read_provider_config(provider_config_path)
+    registry = ModelProviderRegistry.from_config(config)
+    planner = ModelRepairPlanner(
+        registry,
+        provider_id=provider,
+        fallback_provider_ids=tuple(fallback_providers or ()),
+        allow_failover=allow_failover,
+        timeout=model_timeout,
+    )
+    service = AutonomousDesignCorrectionService(
+        _experiment_application_service(), planner
+    )
+    return service.run(
+        normalized_design,
+        spec,
+        output_dir,
+        timeout_per_experiment=timeout_per_experiment,
+        max_points=max_points,
+    )
+
+
+@mcp.tool(com_serialized=False)
+def submit_autonomous_correction(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    provider_config_path: str | None = None,
+    provider: str | None = None,
+    fallback_providers: list[str] | None = None,
+    allow_failover: bool = False,
+    model_timeout: float = 60.0,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+    job_timeout: float = 21600.0,
+    heartbeat_timeout: float = 180.0,
+    resume_existing: bool = False,
+) -> JobSubmission:
+    """Queue durable model-planned correction with round-level recovery.
+
+    The persisted provider configuration is validated and secret-free: it
+    contains only endpoint/model metadata and environment-variable names. API
+    keys are resolved by the isolated worker and are never written to job state.
+    Completed rounds are evidence-revalidated; an incomplete planning round is
+    replanned in a new attempt directory. No patch is applied automatically.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    validate_autonomous_correction_spec(spec, normalized_design)
+    provider_config = read_provider_config(provider_config_path)
+    registry = ModelProviderRegistry.from_config(provider_config)
+    provider_ids = set(registry.provider_ids())
+    if provider is not None and provider not in provider_ids:
+        raise ValueError(f"unknown provider: {provider}")
+    fallbacks = list(fallback_providers or [])
+    if len(fallbacks) != len(set(fallbacks)):
+        raise ValueError("fallback_providers must not contain duplicates")
+    unknown_fallbacks = sorted(set(fallbacks) - provider_ids)
+    if unknown_fallbacks:
+        raise ValueError(f"unknown fallback providers: {unknown_fallbacks}")
+    if fallbacks and not allow_failover:
+        raise ValueError("fallback providers require allow_failover=true")
+    if not isinstance(allow_failover, bool):
+        raise ValueError("allow_failover must be a boolean")
+    if (
+        isinstance(model_timeout, bool)
+        or not isinstance(model_timeout, (int, float))
+        or not math.isfinite(float(model_timeout))
+        or not 0 < float(model_timeout) <= 3600
+    ):
+        raise ValueError("model_timeout must be between 0 and 3600 seconds")
+    if not isinstance(output_dir, str) or not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    unresolved = Path(output_dir).expanduser()
+    if unresolved.is_symlink():
+        raise ValueError("output_dir must not be a symbolic link")
+    output_path = unresolved.resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    if not isinstance(resume_existing, bool):
+        raise ValueError("resume_existing must be a boolean")
+    if output_path.exists():
+        if not output_path.is_dir():
+            raise ValueError("output_dir exists and is not a directory")
+        if any(output_path.iterdir()) and not resume_existing:
+            raise FileExistsError(
+                "output_dir is not empty; set resume_existing only for a matching "
+                "interrupted autonomous correction"
+            )
+    if (
+        isinstance(timeout_per_experiment, bool)
+        or not isinstance(timeout_per_experiment, (int, float))
+        or not math.isfinite(float(timeout_per_experiment))
+        or not 0 < float(timeout_per_experiment) <= 3600
+    ):
+        raise ValueError("timeout_per_experiment must be between 0 and 3600")
+    if (
+        isinstance(max_points, bool)
+        or not isinstance(max_points, int)
+        or not 1 <= max_points <= 100_000
+    ):
+        raise ValueError("max_points must be between 1 and 100000")
+    if (
+        isinstance(job_timeout, bool)
+        or not isinstance(job_timeout, (int, float))
+        or not math.isfinite(float(job_timeout))
+        or not 1 <= float(job_timeout) <= 86_400
+    ):
+        raise ValueError("job_timeout must be between 1 and 86400 seconds")
+    if float(job_timeout) <= max(
+        float(timeout_per_experiment), float(model_timeout)
+    ):
+        raise ValueError("job_timeout must exceed model and experiment timeouts")
+    if (
+        isinstance(heartbeat_timeout, bool)
+        or not isinstance(heartbeat_timeout, (int, float))
+        or not math.isfinite(float(heartbeat_timeout))
+        or not 10 <= float(heartbeat_timeout) <= 900
+    ):
+        raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
+    if float(heartbeat_timeout) <= float(model_timeout):
+        raise ValueError("heartbeat_timeout must exceed model_timeout")
+    persisted_spec = json.loads(json.dumps(spec, ensure_ascii=False, allow_nan=False))
+    persisted_provider_config = json.loads(
+        json.dumps(provider_config, ensure_ascii=False, allow_nan=False)
+    )
+    return _job_manager().submit(
+        {
+            "job_kind": "autonomous_correction",
+            "design": normalized_design.to_dict(),
+            "autonomous_correction_spec": persisted_spec,
+            "provider_config": persisted_provider_config,
+            "provider": provider,
+            "fallback_providers": fallbacks,
+            "allow_failover": allow_failover,
+            "model_timeout": float(model_timeout),
+            "output_dir": str(output_path),
+            "timeout_per_experiment": float(timeout_per_experiment),
+            "max_points": max_points,
+            "job_timeout": float(job_timeout),
+            "heartbeat_timeout": float(heartbeat_timeout),
+            "resume_existing": resume_existing,
+        }
+    )
+
+
+@mcp.tool(com_serialized=False)
+def submit_design_optimization(
+    design: dict[str, Any],
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+    job_timeout: float = 7200.0,
+    heartbeat_timeout: float = 180.0,
+    resume_existing: bool = False,
+) -> JobSubmission:
+    """Queue a durable optimization with candidate-level crash recovery.
+
+    Completed candidates are evidence-verified and reused after a worker or MCP
+    restart. An interrupted candidate is rerun in a new attempt directory. The
+    result still returns only a proposed patch and never modifies the design.
+    Set ``resume_existing`` only to adopt a matching interrupted output folder.
+    """
+    normalized_design = CircuitDesign.from_dict(design)
+    validate_optimization_spec(spec, normalized_design)
+    if not isinstance(output_dir, str) or not output_dir.strip():
+        raise ValueError("output_dir must not be empty")
+    unresolved = Path(output_dir).expanduser()
+    if unresolved.is_symlink():
+        raise ValueError("output_dir must not be a symbolic link")
+    output_path = unresolved.resolve()
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_dir must not be a filesystem root")
+    if not isinstance(resume_existing, bool):
+        raise ValueError("resume_existing must be a boolean")
+    if output_path.exists():
+        if not output_path.is_dir():
+            raise ValueError("output_dir exists and is not a directory")
+        if any(output_path.iterdir()) and not resume_existing:
+            raise FileExistsError(
+                "output_dir is not empty; set resume_existing only for a matching "
+                "interrupted optimization"
+            )
+    if (
+        isinstance(timeout_per_experiment, bool)
+        or not isinstance(timeout_per_experiment, (int, float))
+        or not math.isfinite(float(timeout_per_experiment))
+        or not 0 < float(timeout_per_experiment) <= 3600
+    ):
+        raise ValueError("timeout_per_experiment must be between 0 and 3600")
+    if (
+        isinstance(max_points, bool)
+        or not isinstance(max_points, int)
+        or not 1 <= max_points <= 100_000
+    ):
+        raise ValueError("max_points must be between 1 and 100000")
+    if (
+        isinstance(job_timeout, bool)
+        or not isinstance(job_timeout, (int, float))
+        or not math.isfinite(float(job_timeout))
+        or not 1 <= float(job_timeout) <= 86_400
+    ):
+        raise ValueError("job_timeout must be between 1 and 86400 seconds")
+    if float(job_timeout) <= float(timeout_per_experiment):
+        raise ValueError("job_timeout must exceed timeout_per_experiment")
+    if (
+        isinstance(heartbeat_timeout, bool)
+        or not isinstance(heartbeat_timeout, (int, float))
+        or not math.isfinite(float(heartbeat_timeout))
+        or not 10 <= float(heartbeat_timeout) <= 900
+    ):
+        raise ValueError("heartbeat_timeout must be between 10 and 900 seconds")
+    persisted_spec = json.loads(
+        json.dumps(spec, ensure_ascii=False, allow_nan=False)
+    )
+    return _job_manager().submit(
+        {
+            "job_kind": "optimization",
+            "design": normalized_design.to_dict(),
+            "optimization_spec": persisted_spec,
+            "output_dir": str(output_path),
+            "timeout_per_experiment": float(timeout_per_experiment),
+            "max_points": max_points,
+            "job_timeout": float(job_timeout),
+            "heartbeat_timeout": float(heartbeat_timeout),
+            "resume_existing": resume_existing,
+        }
+    )
+
+
+@mcp.tool()
+def compare_design_variants(
+    variants: list[dict[str, Any]],
+    spec: dict[str, Any],
+    output_dir: str,
+    timeout_per_experiment: float = 120.0,
+    max_points: int = 2000,
+) -> dict[str, Any]:
+    """Rank 2-16 complete designs using one evidence-backed experiment contract.
+
+    Each item must contain exactly ``variant_id`` and ``design``. All requirements
+    are hard constraints, only finite measured passes are ranked, and no source
+    design is modified or automatically adopted.
+    """
+    if not isinstance(variants, list):
+        raise ValueError("variants must be an array")
+    normalized: dict[str, CircuitDesign] = {}
+    for index, item in enumerate(variants):
+        if not isinstance(item, dict) or set(item) != {"variant_id", "design"}:
+            raise ValueError(
+                f"variants[{index}] must contain exactly variant_id and design"
+            )
+        variant_id = item["variant_id"]
+        if not isinstance(variant_id, str) or not variant_id.strip():
+            raise ValueError(f"variants[{index}].variant_id must be non-empty")
+        normalized_id = variant_id.strip()
+        if normalized_id in normalized:
+            raise ValueError(f"duplicate variant id: {normalized_id}")
+        normalized[normalized_id] = CircuitDesign.from_dict(item["design"])
+    return _design_comparison_service().run(
+        normalized,
+        spec,
+        output_dir,
+        timeout_per_experiment=timeout_per_experiment,
+        max_points=max_points,
+    )
 
 
 def _run_experiment_sweep_impl(

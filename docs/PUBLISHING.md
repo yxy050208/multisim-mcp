@@ -69,9 +69,9 @@ English: public CI remains COM-free; run the real Multisim suite locally.
 git add <逐项审查过的路径>
 git diff --cached --check
 python tools/release_audit.py
-git commit -m "release: v1.1.0"
-git tag -a v1.1.0 -m "Multisim MCP v1.1.0"
-git show --no-patch --decorate v1.1.0
+git commit -m "release: v1.2.0"
+git tag -a v1.2.0 -m "Multisim MCP v1.2.0"
+git show --no-patch --decorate v1.2.0
 ```
 
 签注标签只用来锁定已审查源码，**推送标签本身不会触发 PyPI 发布**。
@@ -84,15 +84,15 @@ English: an annotated tag pins reviewed source but does not publish anything.
 Manually dispatch `publish-pypi.yml` at that tag and verify the run SHA; never
 attach the local template wheel.
 
-## 6. v1.1.0 发布顺序
+## 6. v1.2.0 发布顺序
 
 1. 推送发布提交并等待 `CI` 全部通过。
-2. 创建并推送签注标签 `v1.1.0`，确认远端标签解引用到已通过 CI 的
+2. 创建并推送签注标签 `v1.2.0`，确认远端标签解引用到已通过 CI 的
    `main` 合并提交。此操作不会自动发布 PyPI。
 3. 在标签引用上手动运行 Trusted Publishing，并等待成功：
 
    ```powershell
-   gh workflow run publish-pypi.yml --repo yxy050208/multisim-mcp --ref v1.1.0
+   gh workflow run publish-pypi.yml --repo yxy050208/multisim-mcp --ref v1.2.0
    ```
 
 4. 核对 PyPI JSON API 中的版本、文件名和 SHA-256；再使用双语发布说明创建
@@ -100,11 +100,11 @@ attach the local template wheel.
    份发布物，不使用本地模板开发包。
 5. 在同一标签引用上手动运行 MCP Registry 发布工作流，并确认
    `io.github.yxy050208/multisim-mcp` 显示
-   `1.1.0`。
+   `1.2.0`。
 
    ```powershell
    gh workflow run publish-mcp-registry.yml `
-     --repo yxy050208/multisim-mcp --ref v1.1.0
+     --repo yxy050208/multisim-mcp --ref v1.2.0
    ```
 
 6. 核对 Glama、awesome-mcp-servers 等社区目录的仓库链接和徽章；目录更新不能先于

@@ -106,12 +106,16 @@ def _loop(
 class BoundedToolLoopTest(unittest.TestCase):
     def test_two_round_run_validates_executes_and_accumulates_usage(self) -> None:
         handler_calls: list[Mapping[str, Any]] = []
+        audit_events: list[tuple[str, Mapping[str, Any]]] = []
         call = ToolCall("call_1", "measure", {"net": "out"})
         loop, provider = _loop(
             [_model_response(content="", calls=(call,)), _model_response(content="5 V")],
             [_measure_binding(handler_calls)],
         )
-        result = loop.run([ModelMessage("user", "Measure the output")])
+        result = loop.run(
+            [ModelMessage("user", "Measure the output")],
+            audit_event=lambda name, details: audit_events.append((name, details)),
+        )
         self.assertEqual(handler_calls, [{"net": "out"}])
         self.assertEqual(result.rounds, 2)
         self.assertEqual(result.tool_call_count, 1)
@@ -122,6 +126,25 @@ class BoundedToolLoopTest(unittest.TestCase):
         self.assertEqual(second_messages[-1].role, "tool")
         self.assertEqual(second_messages[-1].tool_call_id, "call_1")
         self.assertEqual(len(provider.requests[0][1]), 1)
+        event_names = [name for name, _ in audit_events]
+        self.assertEqual(event_names[0], "run_started")
+        self.assertIn("tool_call_validated", event_names)
+        self.assertIn("tool_call_completed", event_names)
+        self.assertEqual(event_names[-1], "run_completed")
+        validated = next(
+            details
+            for name, details in audit_events
+            if name == "tool_call_validated"
+        )
+        completed = next(
+            details
+            for name, details in audit_events
+            if name == "tool_call_completed"
+        )
+        self.assertEqual(validated["arguments"], {"net": "out"})
+        self.assertEqual(completed["result"]["utf8_bytes"], 25)
+        self.assertIn("sha256", completed["result"])
+        self.assertNotIn("volts", str(completed))
 
     def test_unbound_tool_is_rejected_before_any_handler(self) -> None:
         handler_calls: list[Mapping[str, Any]] = []
@@ -203,6 +226,7 @@ class BoundedToolLoopTest(unittest.TestCase):
 
     def test_handler_failure_does_not_expose_internal_message(self) -> None:
         handler_calls: list[Mapping[str, Any]] = []
+        audit_events: list[tuple[str, Mapping[str, Any]]] = []
         loop, _ = _loop(
             [
                 _model_response(
@@ -213,8 +237,16 @@ class BoundedToolLoopTest(unittest.TestCase):
             [_measure_binding(handler_calls, handler_error=True)],
         )
         with self.assertRaises(ToolExecutionError) as caught:
-            loop.run([ModelMessage("user", "hello")])
+            loop.run(
+                [ModelMessage("user", "hello")],
+                audit_event=lambda name, details: audit_events.append((name, details)),
+            )
         self.assertNotIn("internal path", str(caught.exception))
+        failed = next(
+            details for name, details in audit_events if name == "tool_call_failed"
+        )
+        self.assertEqual(failed["error_type"], "RuntimeError")
+        self.assertNotIn("internal path", str(failed))
 
     def test_initial_transcript_must_have_resolved_unique_tool_calls(self) -> None:
         handler_calls: list[Mapping[str, Any]] = []

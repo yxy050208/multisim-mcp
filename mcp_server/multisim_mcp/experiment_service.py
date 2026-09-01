@@ -61,6 +61,7 @@ class ExperimentRequest:
     owner: str | None = None
     requirements: tuple[DesignRequirement, ...] | None = None
     theoretical_values: Mapping[str, float] = field(default_factory=dict)
+    approval_provenance: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.design, CircuitDesign):
@@ -97,6 +98,14 @@ class ExperimentRequest:
             raise ValueError("max_points must be between 1 and 100000")
         if not isinstance(self.overwrite, bool):
             raise ValueError("overwrite must be a boolean")
+        if self.approval_provenance is not None:
+            if not isinstance(self.approval_provenance, Mapping):
+                raise ValueError("approval_provenance must be an object")
+            frozen_provenance = _freeze_json(
+                self.approval_provenance, "approval_provenance"
+            )
+            assert isinstance(frozen_provenance, Mapping)
+            object.__setattr__(self, "approval_provenance", frozen_provenance)
         if self.owner is not None:
             if (
                 not isinstance(self.owner, str)
@@ -181,6 +190,16 @@ class ExperimentApplicationService:
 
         result = self._runner(
             netlist=circuit_design_to_spice(request.design),
+            model_references=[
+                item.to_dict() for item in request.design.model_references
+            ],
+            declared_dialect=(
+                request.design.annotations.get("spice_dialect")
+                if isinstance(
+                    request.design.annotations.get("spice_dialect"), str
+                )
+                else None
+            ),
             commands=request.commands,
             output_dir=request.output_directory,
             title=request.title,
@@ -192,6 +211,11 @@ class ExperimentApplicationService:
             owner=request.owner,
             requirements=request.runner_requirements(),
             theoretical_values=request.runner_theoretical_values(),
+            approval_provenance=(
+                _thaw_json(request.approval_provenance)
+                if request.approval_provenance is not None
+                else None
+            ),
         )
         if not isinstance(result, Mapping):
             raise RuntimeError("experiment runner returned a non-object result")
@@ -214,6 +238,78 @@ class ExperimentApplicationService:
         returned_root = Path(str(result["output_dir"])).expanduser().resolve()
         if returned_root != Path(request.output_directory):
             raise RuntimeError("experiment result output_dir does not match the request")
+        if request.requirements is None:
+            return
+        verification = result.get("verification")
+        if not isinstance(verification, Mapping):
+            raise RuntimeError(
+                "successful verified experiment requires verification results"
+            )
+        if verification.get("schema_version") != 1:
+            raise RuntimeError("verified experiment schema_version is invalid")
+        if verification.get("overall_status") not in {
+            "pass",
+            "fail",
+            "unverified",
+        }:
+            raise RuntimeError("verified experiment overall_status is invalid")
+        counts = verification.get("counts")
+        requirements = verification.get("requirements")
+        if not isinstance(counts, Mapping) or set(counts) != {
+            "pass",
+            "fail",
+            "unverified",
+        }:
+            raise RuntimeError("verified experiment counts are invalid")
+        if any(
+            isinstance(counts[name], bool)
+            or not isinstance(counts[name], int)
+            or counts[name] < 0
+            for name in ("pass", "fail", "unverified")
+        ):
+            raise RuntimeError("verified experiment counts are invalid")
+        if (
+            not isinstance(requirements, list)
+            or len(requirements) != len(request.requirements)
+            or sum(int(counts[name]) for name in counts) != len(requirements)
+        ):
+            raise RuntimeError("verified experiment requirement count is invalid")
+        expected_ids = [str(item["id"]) for item in request.requirements]
+        received_ids: list[str] = []
+        actual_counts = {"pass": 0, "fail": 0, "unverified": 0}
+        for item in requirements:
+            if not isinstance(item, Mapping) or not isinstance(item.get("id"), str):
+                raise RuntimeError("verified experiment requirement is invalid")
+            status = item.get("status")
+            if status not in actual_counts:
+                raise RuntimeError("verified experiment requirement status is invalid")
+            received_ids.append(item["id"])
+            actual_counts[status] += 1
+        if received_ids != expected_ids:
+            raise RuntimeError("verified experiment requirement ids do not match request")
+        if any(int(counts[name]) != actual_counts[name] for name in actual_counts):
+            raise RuntimeError("verified experiment counts do not match requirements")
+        derived_status = (
+            "fail"
+            if actual_counts["fail"]
+            else "unverified"
+            if actual_counts["unverified"]
+            else "pass"
+        )
+        if verification["overall_status"] != derived_status:
+            raise RuntimeError("verified experiment overall_status is inconsistent")
+        verification_path = result.get("verification_path")
+        if not isinstance(verification_path, str) or not verification_path.strip():
+            raise RuntimeError(
+                "successful verified experiment requires verification_path"
+            )
+        resolved_verification = Path(verification_path).expanduser().resolve()
+        try:
+            resolved_verification.relative_to(returned_root)
+        except ValueError as exc:
+            raise RuntimeError(
+                "verified experiment verification_path escapes output_dir"
+            ) from exc
 
 
 __all__ = ["ExperimentApplicationService", "ExperimentRequest"]

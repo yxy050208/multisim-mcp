@@ -61,15 +61,27 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 mode
             )
             self.assertEqual(protocol, expected_protocol)
-            self.assertEqual(len(names), 55)
+            self.assertEqual(len(names), 78)
             self.assertEqual(len(prompts), 5)
-            self.assertEqual(len(resources), 19)
+            self.assertEqual(len(resources), 20)
 
             self.assertIn("runtime_status", names)
             self.assertIn("schematic_component_catalog", names)
             self.assertIn("create_schematic_from_netlist", names)
             self.assertIn("run_circuit_experiment", names)
             self.assertIn("submit_circuit_experiment", names)
+            self.assertIn("plan_design_options", names)
+            self.assertIn("select_design_option", names)
+            self.assertIn("prepare_design_specification", names)
+            self.assertIn("prepare_netlist_draft", names)
+            self.assertIn("resolve_component_requirements", names)
+            self.assertIn("approve_component_resolution", names)
+            self.assertIn("compile_executable_netlist", names)
+            self.assertIn("approve_executable_netlist", names)
+            self.assertIn("approve_simulation_plan", names)
+            self.assertIn("submit_design_optimization", names)
+            self.assertIn("diagnose_design", names)
+            self.assertIn("evaluate_design_patch", names)
             self.assertIn("get_experiment_job", names)
             self.assertIn("list_experiment_jobs", names)
             self.assertIn("cancel_experiment_job", names)
@@ -83,6 +95,8 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("submit_experiment_sweep", names)
             self.assertIn("register_sweep_artifacts", names)
             self.assertIn("component_adapter_catalog", names)
+            self.assertIn("build_behavioral_reference", names)
+            self.assertIn("run_behavioral_reference", names)
             self.assertIn("read_virtual_multimeter", names)
             self.assertIn("analyze_bode_response", names)
             self.assertIn("analyze_logic_signals", names)
@@ -91,6 +105,8 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("read_experiment_artifact", names)
             self.assertIn("export_experiment_artifact", names)
             self.assertIn("get_experiment_summary", names)
+            self.assertIn("compare_experiment_backends", names)
+            self.assertIn("audit_spice_compatibility", names)
             self.assertIn("run_spice_netlist", names)
             self.assertIn("create_circuit_experiment", prompts)
             self.assertIn("verify_design_requirements", prompts)
@@ -117,6 +133,48 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 },
             )
 
+    async def test_deterministic_diagnosis_is_callable_over_stdio(self) -> None:
+        package_root = Path(multisim_mcp.__file__).resolve().parent.parent
+        environment = get_default_environment()
+        import_paths = [str(package_root), *(item for item in sys.path if item)]
+        environment["PYTHONPATH"] = os.pathsep.join(dict.fromkeys(import_paths))
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "multisim_mcp.server"],
+            env=environment,
+        )
+        design = {
+            "schema_version": 1,
+            "design_id": "stdio-diagnosis",
+            "title": "stdio diagnosis",
+            "revision": 0,
+            "components": [
+                {
+                    "refdes": "R1",
+                    "kind": "R",
+                    "nodes": ["a", "b"],
+                    "value": "1k",
+                    "model": None,
+                    "parameters": {},
+                }
+            ],
+            "parameters": {},
+            "annotations": {},
+        }
+        async with Client(stdio_client(params), mode="2026-07-28") as session:
+            response = await session.call_tool("diagnose_design", {"design": design})
+        self.assertFalse(response.is_error)
+        self.assertIsInstance(response.structured_content, dict)
+        result = response.structured_content
+        assert result is not None
+        self.assertTrue(result["read_only"])
+        self.assertFalse(result["source_design_modified"])
+        self.assertFalse(result["simulation_performed"])
+        self.assertIn(
+            "reference-net-absent",
+            {finding["code"] for finding in result["findings"]},
+        )
+
     async def test_task_profiles_publish_exact_stable_tool_sets(self) -> None:
         for profile in ("core", "experiment", "optimization"):
             with self.subTest(profile=profile):
@@ -127,7 +185,7 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 # Profiles reduce tool schema only; MCP Resources and Prompts
                 # retain their stable compatibility surface.
                 self.assertEqual(len(prompts), 5)
-                self.assertEqual(len(resources), 19)
+                self.assertEqual(len(resources), 20)
 
 
 if __name__ == "__main__":

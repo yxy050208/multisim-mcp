@@ -8,6 +8,7 @@ from multisim_mcp.schematic_builder import (
     TEMPLATE_ONLY_ENV,
     TEMPLATE_PACK_ENV,
     build_schematic,
+    parse_netlist,
     prepare_simulation_netlist,
     template_search_paths,
 )
@@ -213,6 +214,30 @@ R99 a b 99k
             ["V1", "V2", "XU1", "R1", "0"],
         )
         self.assertEqual(result["unsupported"], [])
+
+    def test_parser_classifies_verified_timer8_and_normalizes_x_refdes(self) -> None:
+        parsed = parse_netlist(
+            "XU1 gnd trig out reset ctrl thr dis vcc LM555CN\n.end\n"
+        )
+        self.assertEqual(len(parsed.components), 1)
+        component = parsed.components[0]
+        self.assertEqual(component.kind, "TIMER8")
+        self.assertEqual(component.refdes, "U1")
+        self.assertEqual(component.nodes, ["0", "trig", "out", "reset", "ctrl", "thr", "dis", "vcc"])
+        self.assertEqual(component.model, "LM555CN")
+
+    def test_parser_classifies_verified_dff8_and_normalizes_x_refdes(self) -> None:
+        parsed = parse_netlist(
+            "XU1 d pr clr clk q nq 0 vcc 7474N\n.end\n"
+        )
+        self.assertEqual(len(parsed.components), 1)
+        component = parsed.components[0]
+        self.assertEqual(component.kind, "DFF8")
+        self.assertEqual(component.refdes, "U1")
+        self.assertEqual(
+            component.nodes, ["d", "pr", "clr", "clk", "q", "nq", "0", "vcc"]
+        )
+        self.assertEqual(component.model, "7474N")
 
     def test_builder_supports_linear_controlled_sources(self) -> None:
         import tempfile
@@ -605,6 +630,29 @@ Z1 zd zg 0 ZMOD
         self.assertIn(".model smdl%p SW(Ron=1 Roff=1G Vt=2)", generated)
         self.assertIn(".model jmdl%p NJF(Beta=1m)", generated)
         self.assertIn(".model zmdl%p NMF(Beta=2m)", generated)
+
+    def test_builder_registers_external_native_model_placeholders(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "native-model.xml"
+            build_schematic(
+                "D1 a 0 1N4001\n.end\n",
+                output,
+                probe_nets=[],
+            )
+            root = ET.parse(output).getroot()
+        component = next(
+            item.find("./CiComponent")
+            for item in root.iter("Item")
+            if item.find("./CiComponent") is not None
+            and item.find("./CiComponent").get("LocalName") == "&ASCD1"
+        )
+        model_ref = component.get("Model")
+        self.assertIsNotNone(model_ref)
+        models = next(root.iter("Models"))
+        self.assertIn(model_ref, {item.get("CiID") for item in models})
 
     def test_builder_folds_continuations_and_supports_current_controlled_switch(self) -> None:
         import tempfile

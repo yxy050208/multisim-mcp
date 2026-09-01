@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
+from multisim_mcp.eda_core import CircuitComponent, CircuitDesign, ModelReference
 from multisim_mcp.experiment_service import (
     ExperimentApplicationService,
     ExperimentRequest,
@@ -17,6 +17,12 @@ class ExperimentApplicationServiceTest(unittest.TestCase):
             design_id="experiment-divider",
             title="Divider",
             source_netlist="V1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.end\n",
+            model_references=(
+                ModelReference(
+                    "model:declared", "vendor", sha256="1" * 64, license="MIT"
+                ),
+            ),
+            annotations={"spice_dialect": "SPICE3"},
         )
 
     def test_service_normalizes_request_and_dispatches_complete_transaction(self) -> None:
@@ -34,6 +40,13 @@ class ExperimentApplicationServiceTest(unittest.TestCase):
                 "report": str(Path(root) / "report.md"),
                 "plot": str(Path(root) / "plot.svg"),
                 "output_dir": root,
+                "verification": {
+                    "schema_version": 1,
+                    "overall_status": "pass",
+                    "counts": {"pass": 1, "fail": 0, "unverified": 0},
+                    "requirements": [{"id": "vout", "status": "pass"}],
+                },
+                "verification_path": str(Path(root) / "verification.json"),
             }
 
         requirement = {
@@ -70,6 +83,8 @@ class ExperimentApplicationServiceTest(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(calls["netlist"], self._source_design().source_netlist)
         self.assertEqual(calls["commands"], "op")
+        self.assertEqual(calls["model_references"][0]["license"], "MIT")
+        self.assertEqual(calls["declared_dialect"], "SPICE3")
         self.assertEqual(calls["title"], "Verified divider")
         self.assertEqual(calls["output_dir"], str(output.resolve()))
         self.assertEqual(calls["timeout"], 30.0)
@@ -149,6 +164,48 @@ class ExperimentApplicationServiceTest(unittest.TestCase):
                 ExperimentApplicationService(wrong_output_runner).run(request)
             with self.assertRaisesRegex(RuntimeError, "boolean success"):
                 ExperimentApplicationService(lambda **kwargs: {}).run(request)
+
+            verified_request = ExperimentRequest(
+                self._source_design(),
+                "op",
+                output,
+                requirements=(
+                    {
+                        "id": "vout",
+                        "metric": "mean",
+                        "signal": "V(out)",
+                        "operator": "at_least",
+                        "target": 1.0,
+                    },
+                ),
+            )
+
+            def inconsistent_runner(**kwargs: object) -> dict[str, object]:
+                returned = str(kwargs["output_dir"])
+                return {
+                    "success": True,
+                    "experiment_id": "exp-inconsistent",
+                    "resources": {},
+                    "schematic": {},
+                    "simulation": {},
+                    "report": str(Path(returned) / "report.md"),
+                    "plot": str(Path(returned) / "plot.svg"),
+                    "output_dir": returned,
+                    "verification": {
+                        "schema_version": 1,
+                        "overall_status": "pass",
+                        "counts": {"pass": 1, "fail": 0, "unverified": 0},
+                        "requirements": [{"id": "wrong", "status": "pass"}],
+                    },
+                    "verification_path": str(
+                        Path(returned) / "verification.json"
+                    ),
+                }
+
+            with self.assertRaisesRegex(RuntimeError, "ids do not match"):
+                ExperimentApplicationService(inconsistent_runner).run(
+                    verified_request
+                )
 
 
 if __name__ == "__main__":

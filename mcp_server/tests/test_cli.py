@@ -173,6 +173,72 @@ class DoctorTest(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
 
+class CourseDemoCliTest(unittest.TestCase):
+    def test_course_demo_builds_bundle_without_starting_a_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "course-demo"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    ["course-demo", "--output", str(output), "--json"]
+                )
+            payload = json.loads(stdout.getvalue())
+            self.assertTrue((output / "course-demo-spec.json").is_file())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["requirement_count"], 12)
+
+
+class BehavioralReferenceCliTest(unittest.TestCase):
+    def test_behavioral_reference_cli_reads_files_and_forces_safe_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            netlist = root / "native.cir"
+            commands = root / "commands.txt"
+            output = root / "reference-output"
+            netlist.write_text("XU1 d pr clr clk q nq 0 vcc 7474N\n.end\n", encoding="utf-8")
+            commands.write_text("tran 1u 10u\n", encoding="utf-8")
+            stdout = io.StringIO()
+            with patch(
+                "multisim_mcp.server.run_behavioral_reference",
+                return_value={
+                    "success": True,
+                    "backend": "ngspice",
+                    "output_dir": str(output.resolve()),
+                    "reference_netlist": "@DFF",
+                },
+            ) as runner, redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "behavioral-reference",
+                        "--netlist",
+                        str(netlist),
+                        "--commands",
+                        str(commands),
+                        "--output",
+                        str(output),
+                        "--timeout",
+                        "31",
+                        "--max-points",
+                        "77",
+                        "--overwrite",
+                        "--json",
+                    ]
+                )
+            payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["command"], "behavioral-reference")
+        args, kwargs = runner.call_args
+        self.assertIn("7474N", args[0])
+        self.assertEqual(args[1].replace("\r\n", "\n"), "tran 1u 10u\n")
+        self.assertEqual(kwargs["output_dir"], str(output.resolve()))
+        self.assertEqual(kwargs["timeout"], 31.0)
+        self.assertEqual(kwargs["max_points"], 77)
+        self.assertTrue(kwargs["overwrite"])
+
+
 class ConfigGeneratorTest(unittest.TestCase):
     def test_claude_desktop_json(self) -> None:
         content = render_client_config(
@@ -592,6 +658,13 @@ class ModelCliTest(unittest.TestCase):
         captured: dict[str, object] = {}
 
         class Run:
+            rounds = 2
+            tool_call_count = 1
+            provider_ids = ("fixture", "fixture")
+            usage = ModelUsage(2, 3, 5)
+            usage_complete = True
+            transcript = ("system", "user", "assistant", "tool", "assistant")
+
             def to_dict(self) -> dict[str, object]:
                 return {
                     "final_response": ModelCliTest._response().to_dict(),
@@ -619,6 +692,12 @@ class ModelCliTest(unittest.TestCase):
             def run(self, messages: object, **kwargs: object) -> Run:
                 captured["messages"] = messages
                 captured["run_kwargs"] = kwargs
+                audit_event = kwargs.get("audit_event")
+                if audit_event is not None:
+                    audit_event(
+                        "fixture_event",
+                        {"tool_name": "eda_get_design_summary", "result_bytes": 20},
+                    )
                 return Run()
 
         design = {
@@ -647,6 +726,7 @@ class ModelCliTest(unittest.TestCase):
             root = Path(tmp)
             design_path = root / "design.json"
             prompt_path = root / "prompt.txt"
+            audit_path = root / "agent-audit.json"
             design_path.write_text(json.dumps(design), encoding="utf-8")
             prompt_path.write_text("Check the topology.", encoding="utf-8")
             output = io.StringIO()
@@ -672,9 +752,13 @@ class ModelCliTest(unittest.TestCase):
                         "4",
                         "--max-tool-calls",
                         "6",
+                        "--audit-output",
+                        str(audit_path),
                         "--json",
                     ]
                 )
+            audit_payload = json.loads(audit_path.read_text(encoding="utf-8"))
+            audit_content = audit_path.read_text(encoding="utf-8")
         payload = json.loads(output.getvalue())
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["command"], "model-diagnose")
@@ -693,6 +777,382 @@ class ModelCliTest(unittest.TestCase):
         messages = captured["messages"]
         self.assertEqual(messages[-1].content, "Check the topology.")
         self.assertIn("untrusted data", messages[0].content)
+        self.assertEqual(audit_payload["status"], "succeeded")
+        self.assertEqual(audit_payload["event_count"], 1)
+        self.assertFalse(audit_payload["privacy"]["prompt_content_recorded"])
+        self.assertNotIn("Check the topology.", audit_content)
+        self.assertNotIn("R1 in out 1k", audit_content)
+        self.assertEqual(payload["audit"]["path"], str(audit_path.resolve()))
+        self.assertFalse(payload["audit"]["content_recorded"])
+
+    def test_model_diagnose_audit_refuses_collision_before_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            netlist = root / "divider.cir"
+            prompt = root / "prompt.txt"
+            audit = root / "audit.json"
+            netlist.write_text("V1 in 0 1\nR1 in 0 1k\n.end\n", encoding="utf-8")
+            prompt.write_text("inspect", encoding="utf-8")
+            audit.write_text("keep", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("multisim_mcp.cli.read_provider_config") as read_config,
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--input",
+                        str(prompt),
+                        "--netlist",
+                        str(netlist),
+                        "--audit-output",
+                        str(audit),
+                        "--json",
+                    ]
+                )
+            retained = audit.read_text(encoding="utf-8")
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertIn("audit output already exists", payload["error"]["message"])
+        self.assertEqual(retained, "keep")
+        read_config.assert_not_called()
+
+    def test_model_diagnose_can_attach_path_free_completed_experiment_evidence(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class Run:
+            rounds = 1
+            tool_call_count = 0
+            provider_ids = ("fixture",)
+            usage = None
+            usage_complete = False
+            transcript = ("system", "user", "assistant")
+
+            def to_dict(self) -> dict[str, object]:
+                return {
+                    "final_response": ModelCliTest._response().to_dict(),
+                    "rounds": 1,
+                    "tool_call_count": 0,
+                    "provider_ids": ["fixture"],
+                    "usage": None,
+                    "usage_complete": False,
+                    "transcript_message_count": 3,
+                }
+
+        class Loop:
+            def __init__(
+                self, registry: object, bindings: object, **kwargs: object
+            ) -> None:
+                del registry, kwargs
+                captured["tool_names"] = [
+                    item.definition.name for item in bindings
+                ]
+
+            def run(self, messages: object, **kwargs: object) -> Run:
+                del kwargs
+                captured["messages"] = messages
+                return Run()
+
+        evidence_summary = {
+            "schema_version": 1,
+            "experiment_id": "exp-0123456789abcdef01234567",
+            "artifact_count": 1,
+            "total_size": 123,
+            "report_excerpt": "PRIVATE EXPERIMENT REPORT",
+            "measurements": {
+                "available": True,
+                "plotname": "Transient Analysis",
+                "point_count": 10,
+                "column_count": 1,
+                "columns": [
+                    {
+                        "column": "V(out)",
+                        "count": 10,
+                        "first": 0.0,
+                        "last": 1.0,
+                        "min": 0.0,
+                        "max": 1.0,
+                        "mean": 0.5,
+                    }
+                ],
+                "columns_truncated": False,
+            },
+            "verification": {
+                "available": True,
+                "valid_json": True,
+                "result": {
+                    "overall_status": "pass",
+                    "counts": {"pass": 1, "fail": 0, "unverified": 0},
+                    "requirement_count": 1,
+                    "requirements": [
+                        {"id": "gain", "status": "pass", "value": 2.0}
+                    ],
+                    "requirements_truncated": False,
+                },
+            },
+            "artifacts": [
+                {
+                    "name": "data",
+                    "mime_type": "text/csv",
+                    "size": 123,
+                    "sha256": "a" * 64,
+                }
+            ],
+        }
+        private_experiment_path = "C:/private/course-design/experiment"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            netlist = root / "circuit.cir"
+            prompt = root / "prompt.txt"
+            audit = root / "audit.json"
+            netlist.write_text("V1 in 0 1\nR1 in 0 1k\n.end\n", encoding="utf-8")
+            prompt.write_text("Analyze measured evidence.", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch(
+                    "multisim_mcp.cli.register_experiment",
+                    return_value={
+                        "experiment_id": "exp-0123456789abcdef01234567",
+                        "output_dir": private_experiment_path,
+                    },
+                ),
+                patch(
+                    "multisim_mcp.cli.summarize_experiment",
+                    return_value=evidence_summary,
+                ),
+                patch("multisim_mcp.cli.read_provider_config", return_value={}),
+                patch(
+                    "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                    return_value="registry",
+                ),
+                patch("multisim_mcp.cli.BoundedToolLoop", Loop),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--input",
+                        str(prompt),
+                        "--netlist",
+                        str(netlist),
+                        "--experiment-dir",
+                        private_experiment_path,
+                        "--audit-output",
+                        str(audit),
+                        "--json",
+                    ]
+                )
+            audit_content = audit.read_text(encoding="utf-8")
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(captured["tool_names"]), 8)
+        self.assertIn("eda_get_experiment_summary", captured["tool_names"])
+        self.assertIn("eda_list_requirement_results", captured["tool_names"])
+        system_prompt = captured["messages"][0].content
+        self.assertIn("already completed experiment", system_prompt)
+        self.assertIn("association is user-supplied", system_prompt)
+        self.assertEqual(
+            payload["experiment_evidence"]["overall_status"], "pass"
+        )
+        self.assertFalse(
+            payload["experiment_evidence"]["design_association_verified"]
+        )
+        serialized = output.getvalue() + audit_content
+        self.assertNotIn(private_experiment_path, serialized)
+        self.assertNotIn("PRIVATE EXPERIMENT REPORT", serialized)
+
+    def test_model_diagnose_explicit_patch_preview_is_structured_and_nonpersistent(
+        self,
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class Run:
+            rounds = 2
+            tool_call_count = 1
+            provider_ids = ("fixture", "fixture")
+            usage = None
+            usage_complete = False
+            transcript = ("system", "user", "assistant", "tool", "assistant")
+
+            def to_dict(self) -> dict[str, object]:
+                return {
+                    "final_response": ModelCliTest._response().to_dict(),
+                    "rounds": 2,
+                    "tool_call_count": 1,
+                    "provider_ids": ["fixture", "fixture"],
+                    "usage": None,
+                    "usage_complete": False,
+                    "transcript_message_count": 5,
+                }
+
+        patch_payload = {
+            "schema_version": 1,
+            "patch_id": "patch-r1-e24",
+            "design_id": "filter-v1",
+            "base_revision": 3,
+            "description": "Move R1 to the nearest E24 value",
+            "operations": [
+                {
+                    "operation": "set_component_value",
+                    "target": "R1.value",
+                    "before": "1030",
+                    "after": "1k",
+                    "reason": "Use an available E24 value",
+                }
+            ],
+            "metadata": {"source": "fixture"},
+        }
+
+        class Loop:
+            def __init__(
+                self, registry: object, bindings: object, **kwargs: object
+            ) -> None:
+                del registry, kwargs
+                captured["bindings"] = {
+                    item.definition.name: item for item in bindings
+                }
+
+            def run(self, messages: object, **kwargs: object) -> Run:
+                del kwargs
+                captured["messages"] = messages
+                binding = captured["bindings"]["eda_preview_design_patch"]
+                arguments = binding.validate_arguments({"patch": patch_payload})
+                captured["preview"] = binding.handler(arguments, None)
+                return Run()
+
+        design = {
+            "schema_version": 1,
+            "design_id": "filter-v1",
+            "title": "Filter",
+            "revision": 3,
+            "components": [
+                {
+                    "refdes": "R1",
+                    "kind": "R",
+                    "nodes": ["in", "0"],
+                    "value": "1030",
+                    "model": None,
+                    "parameters": {},
+                    "annotations": {},
+                }
+            ],
+            "nets": ["in", "0"],
+            "parameters": {},
+            "model_references": [],
+            "annotations": {},
+            "source_netlist": "R1 in 0 1030\n.end\n",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design_path = root / "design.json"
+            prompt_path = root / "prompt.txt"
+            design_path.write_text(json.dumps(design), encoding="utf-8")
+            original_design = design_path.read_text(encoding="utf-8")
+            prompt_path.write_text("Propose a safer standard value.", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("multisim_mcp.cli.read_provider_config", return_value={}),
+                patch(
+                    "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                    return_value="registry",
+                ),
+                patch("multisim_mcp.cli.BoundedToolLoop", Loop),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--input",
+                        str(prompt_path),
+                        "--design",
+                        str(design_path),
+                        "--enable-patch-preview",
+                        "--json",
+                    ]
+                )
+            retained_design = design_path.read_text(encoding="utf-8")
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            set(captured["bindings"]),
+            {
+                "eda_get_design_summary",
+                "eda_list_components",
+                "eda_inspect_net",
+                "eda_run_structural_checks",
+                "eda_preview_design_patch",
+            },
+        )
+        self.assertIn(
+            "valid preview proves only schema",
+            captured["messages"][0].content,
+        )
+        self.assertEqual(payload["patch_preview"]["preview_count"], 1)
+        preview = payload["patch_preview"]["previews"][0]
+        self.assertEqual(preview["patch"]["patch_id"], "patch-r1-e24")
+        self.assertEqual(preview["inverse_patch"]["base_revision"], 4)
+        self.assertFalse(preview["persisted"])
+        self.assertFalse(preview["backend_called"])
+        self.assertTrue(preview["approval_required_before_apply"])
+        self.assertTrue(preview["candidate"]["source_netlist_update_required"])
+        self.assertEqual(retained_design, original_design)
+
+    def test_model_diagnose_audit_persists_failed_run_without_error_text(self) -> None:
+        class Loop:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def run(self, messages: object, **kwargs: object) -> object:
+                audit_event = kwargs.get("audit_event")
+                if audit_event is not None:
+                    audit_event("run_started", {"fixture": True})
+                raise ModelProviderError(
+                    "provider failure detail",
+                    provider_id="fixture",
+                    retryable=False,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            netlist = root / "divider.cir"
+            prompt = root / "prompt.txt"
+            audit = root / "audit.json"
+            netlist.write_text("V1 in 0 1\nR1 in 0 1k\n.end\n", encoding="utf-8")
+            prompt.write_text("inspect", encoding="utf-8")
+            output = io.StringIO()
+            with (
+                patch("multisim_mcp.cli.read_provider_config", return_value={}),
+                patch(
+                    "multisim_mcp.cli.ModelProviderRegistry.from_config",
+                    return_value="registry",
+                ),
+                patch("multisim_mcp.cli.BoundedToolLoop", Loop),
+                redirect_stdout(output),
+            ):
+                exit_code = main(
+                    [
+                        "model-diagnose",
+                        "--input",
+                        str(prompt),
+                        "--netlist",
+                        str(netlist),
+                        "--audit-output",
+                        str(audit),
+                        "--json",
+                    ]
+                )
+            audit_content = audit.read_text(encoding="utf-8")
+            audit_payload = json.loads(audit_content)
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(audit_payload["status"], "failed")
+        self.assertEqual(audit_payload["error"]["type"], "ModelProviderError")
+        self.assertNotIn("provider failure detail", audit_content)
+
 
     def test_model_diagnose_rejects_duplicate_design_fields_before_provider(self) -> None:
         duplicate = (
@@ -755,6 +1215,61 @@ class ModelCliTest(unittest.TestCase):
         read_config.assert_not_called()
 
 
+class ProjectInspectionCliTest(unittest.TestCase):
+    def test_inspect_project_json_exposes_bounded_snapshot(self) -> None:
+        from multisim_mcp.workspace_manifest import write_directory_manifest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "design.json"
+            artifact.write_text("{}\n", encoding="utf-8")
+            write_directory_manifest(
+                root,
+                directory_kind="project",
+                entity_id="project-cli",
+                state="active",
+                artifacts={"design.json": "design"},
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["inspect-project", "--root", str(root), "--json"])
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["command"], "inspect-project")
+        self.assertEqual(payload["summary"]["manifest_count"], 1)
+        self.assertEqual(payload["root_manifest"]["entity_id"], "project-cli")
+
+    def test_workbench_api_cli_forwards_loopback_configuration(self) -> None:
+        with patch("multisim_mcp.cli.serve_workbench_api") as serve:
+            exit_code = main(
+                [
+                    "workbench-api",
+                    "--root",
+                    ".",
+                    "--host",
+                    "localhost",
+                    "--port",
+                    "8799",
+                    "--max-entries",
+                    "12",
+                    "--max-depth",
+                    "2",
+                    "--no-verify",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        serve.assert_called_once_with(
+            ".",
+            host="localhost",
+            port=8799,
+            verify=False,
+            max_entries=12,
+            max_depth=2,
+        )
+
+
 class HarnessSkillsCliTest(unittest.TestCase):
     def test_harness_skills_json_installs_five_bundled_skills(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -773,6 +1288,126 @@ class HarnessSkillsCliTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["skill_count"], 5)
         self.assertEqual(payload["command"], "harness-skills")
+
+
+class SearchPlanApprovalCliTest(unittest.TestCase):
+    def test_issue_and_non_consuming_verify(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            draft = root / "draft.json"
+            source_design = root / "source-design.json"
+            source_spec = root / "source-spec.json"
+            source_design.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "design_id": "fixture",
+                        "title": "Fixture",
+                        "revision": 0,
+                        "components": [],
+                        "nets": [],
+                        "parameters": {},
+                        "model_references": [],
+                        "annotations": {},
+                        "source_netlist": "R1 in 0 1k\n.end\n",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source_spec.write_text(json.dumps({"title": "fixture"}), encoding="utf-8")
+            draft.write_text(
+                json.dumps(
+                    {
+                        "available": True,
+                        "draft_kind": "sensitivity-guided-search-v1",
+                        "source_optimization_kind": "global-optimization",
+                        "review_required": True,
+                        "read_only": True,
+                        "executable": False,
+                        "max_experiments": 4,
+                        "preflight": {
+                            "status": "ready_for_review",
+                            "approval_required": True,
+                            "execution_enabled": False,
+                        },
+                        "parameters": [
+                            {"name": "R1", "values": ["1k", "1.2k"], "budget_share": 3}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = root / "store"
+            token_file = root / "token.txt"
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "search-plan-approve",
+                            "--spec-draft",
+                            str(draft),
+                            "--source-design",
+                            str(source_design),
+                            "--source-spec",
+                            str(source_spec),
+                            "--entry-handle",
+                            "entry-global-1",
+                            "--optimization-id",
+                            "global-1",
+                            "--optimization-kind",
+                            "global-optimization",
+                            "--exploration-budget",
+                            "3",
+                            "--max-experiments",
+                            "4",
+                            "--approval-store",
+                            str(store),
+                            "--token-output",
+                            str(token_file),
+                            "--ttl-seconds",
+                            "60",
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+            issued = json.loads(output.getvalue())
+            self.assertFalse(issued["approval_token_exposed"])
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "search-plan-verify",
+                            "--spec-draft",
+                            str(draft),
+                            "--source-design",
+                            str(source_design),
+                            "--source-spec",
+                            str(source_spec),
+                            "--entry-handle",
+                            "entry-global-1",
+                            "--optimization-id",
+                            "global-1",
+                            "--optimization-kind",
+                            "global-optimization",
+                            "--exploration-budget",
+                            "3",
+                            "--max-experiments",
+                            "4",
+                            "--approval-store",
+                            str(store),
+                            "--approval-token-file",
+                            str(token_file),
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+            verified = json.loads(output.getvalue())
+            self.assertEqual(verified["status"], "approved")
+            self.assertFalse(verified["execution_started"])
 
 
 if __name__ == "__main__":

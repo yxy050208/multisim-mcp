@@ -12,6 +12,37 @@
 
 - No changes yet.
 
+## [1.2.0] - 2026-09-01
+
+### 中文
+
+- 新增从需求、候选方案、设计规格、网表草稿、元件解析到可执行网表的分阶段设计链路；
+  方案和执行均通过显式审批门，默认不会自动采用或写入候选结果。
+- 新增电路诊断、补丁预演与事务、设计优化、全局优化、自主纠错和多方案比较；支持
+  硬约束、确定性搜索、Pareto 前沿、恢复点及真实实验门禁。
+- 扩展传输无关 EDA Core：统一 Multisim、ngspice、行为参考与差分验证后端，增加
+  数字观测、SPICE 兼容性/来源证明和开放 EDA 选择策略。
+- 扩展持久实验/优化作业、目录清单、完整性校验与中断恢复，并将 MCP 公共面更新为
+  78 个工具、20 个资源模板和 5 个双语提示词。
+- 增强 DeepSeek、OpenAI、Ollama 与 OpenAI-compatible 模型配置和受限工具循环；
+  独立 DeepSeek Harness npm 插件继续保持 `1.1.0`，与本版本兼容。
+- 本次 GitHub 候选版仅整理 Python MCP 核心、CLI、文档、测试及可选本地桥接 API，
+  **不包含 React Workbench 前端**，避免把尚未收尾的独立软件界面混入核心发布。
+
+### English
+
+- Added an approval-gated design pipeline from requirements and alternatives to
+  specifications, netlist drafts, component resolution, and executable netlists.
+- Added diagnosis, patch preview/transactions, constrained optimization, global
+  optimization, autonomous correction, and deterministic design comparison.
+- Expanded the transport-neutral EDA core across Multisim, ngspice, behavioral
+  references, differential checks, digital observation, and SPICE provenance.
+- Expanded durable jobs, integrity manifests, recovery, and the public MCP surface
+  to 78 tools, 20 resource templates, and five bilingual prompts.
+- Kept the independently published DeepSeek Harness npm integration at `1.1.0`.
+- This GitHub candidate contains the Python MCP core, CLI, tests, documentation,
+  and optional loopback bridge APIs; it deliberately excludes the React Workbench.
+
 ## [1.1.0] - 2026-08-21
 
 ### 中文

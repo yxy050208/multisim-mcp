@@ -1,6 +1,6 @@
 # 模型 Provider 自助配置 / Model Provider Self-Configuration
 
-本文说明 Multisim MCP 面向未来本地工作台提供的第一版模型 Provider 配置能力。
+本文说明 Multisim MCP 本地工作台提供的第一版模型 Provider 配置能力。
 它解决的是“发现、保存和诊断模型 API 配置”，还不是内置的模型对话或 Agent
 运行时。Multisim MCP 本身不需要模型密钥，密钥不会传入 MCP、COM worker、实验
 manifest、报告或导出产物。
@@ -90,6 +90,21 @@ multisim-mcp configure --provider openai-compatible `
 默认 `--apply` 会按 Provider ID 更新或添加条目，并保留其他已有条目。只有明确希望
 丢弃旧条目时才使用 `--apply --replace`。
 
+## 工作台配置页
+
+启动 `workbench-api` 和 React 工作台后，点击右上角齿轮图标进入“模型与 API 配置”
+（英文界面为 `Model / API settings`）：
+
+1. 页面从 `GET /api/provider-config` 读取已保存配置，或按当前进程环境变量做脱敏发现；
+2. 在右侧填写 Provider 类型、配置 ID、Base URL、模型、`/models` 路径和 API key 环境变量名；
+3. `Test connection` 才会显式调用本地回环 API 的 `POST /api/provider-probe`，服务端从
+   环境变量读取密钥并只返回状态、HTTP 状态和模型是否可用；
+4. `Copy CLI apply` 生成不含密钥的 `multisim-mcp configure ... --apply` 命令，执行命令后
+   刷新页面即可看到已保存配置。
+
+工作台 API 仍然只绑定 `127.0.0.1`/`localhost`/`::1`。页面没有配置写入按钮，也不会把
+密钥值发送到浏览器；这使得前端可以作为本地操作面板使用，同时保留 CLI 的明确写入门槛。
+
 ## 配置格式
 
 ```json
@@ -121,13 +136,15 @@ multisim-mcp configure --provider openai-compatible `
 第一版通用 `ModelProvider` 运行时、单次安全 CLI 调用、用量规范化、取消、显式失败
 回退和有界工具循环已经实现，详见
 [`MODEL_PROVIDER_RUNTIME.md`](MODEL_PROVIDER_RUNTIME.md)。当前尚未把 EDA 应用服务
-预绑定为模型工具，也没有流式 UI 或会话持久化。Provider 运行时仍不得让模型凭据
+预绑定为模型工具；配置页目前不提供流式对话或会话持久化。Provider 运行时仍不得让模型凭据
 进入 Multisim MCP server 或 COM worker。
 
 ## English summary
 
 `multisim-mcp configure` discovers, previews, atomically stores, and probes
-model-provider settings for the future local workbench. Configuration files
+model-provider settings for the local workbench. The `Model / API settings` page reads
+the same secret-free document, lets users draft a provider, explicitly probe
+its models endpoint, and copy the CLI apply command. Configuration files
 contain environment-variable references only, never credential values. Preview
 is the default; `--apply` is required to write and `--probe` is required to make
 a network request. Existing providers are merged unless `--replace` is explicit.
