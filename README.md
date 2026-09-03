@@ -14,7 +14,7 @@
 
 > `v1.2.0` 是**不含 React 前端的 MCP Core 正式版**：包含 Python MCP 服务、CLI、EDA
 > 核心、模型/DeepSeek 适配、测试、文档及可选 loopback 桥接 API；不包含仍在独立
-> 开发的 React Workbench 前端。PyPI 和 MCP Registry 仍保留 `v1.1.0`，待独立发布流程完成。
+> 开发的 React Workbench 前端。GitHub、PyPI 与 MCP Registry 均已发布 `v1.2.0`。
 
 四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
@@ -25,9 +25,8 @@
 
 ## 开源发布状态
 
-`1.1.0` 仍是 PyPI 与官方 MCP Registry 的已发布版本；GitHub Release 已更新为
-`1.2.0`。PyPI 包和
-`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目使用同一版本号。由本地 NI
+`1.2.0` 已同步发布到 GitHub Release、PyPI 与
+`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目。由本地 NI
 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。

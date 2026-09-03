@@ -18,8 +18,8 @@ and create reproducible reports.
 > `v1.2.0` is the **frontend-free MCP Core release**. It contains the
 > Python MCP server, CLI, EDA core, model/DeepSeek adapters, tests, documentation,
 > and optional loopback bridge APIs. It deliberately excludes the independently
-> developed React Workbench. PyPI and the MCP Registry still carry `v1.1.0` until
-> their separate publication workflows are completed.
+> developed React Workbench. GitHub, PyPI, and the MCP Registry all publish
+> `v1.2.0`.
 
 The completed development phases and release gates are recorded in the
 [1.0 roadmap](docs/ROADMAP_TO_1.0.md).
