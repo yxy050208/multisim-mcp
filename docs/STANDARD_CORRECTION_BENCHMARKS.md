@@ -36,8 +36,10 @@ multisim-mcp benchmark-suite `
   --json
 ```
 
-输出包含根级 `benchmark-suite.json`、每个用例的完整全局优化目录，以及递归
-SHA-256 `manifest.json`。目录必须为新目录或空目录，避免把旧证据混入结果。
+输出包含根级 `benchmark-suite.json`、`validation.json`、每个用例的完整全局优化目录，
+以及递归 SHA-256 `directory.manifest.json`。摘要会记录套件/用例的 UTC 时间戳、耗时、
+通过率和统一验收判据；`validation.json` 让即使所有真实实验都失败，也能生成可核验的
+失败证据。目录必须为新目录或空目录，避免把旧证据混入结果。
 
 2026-08-25 的本机真实门禁已完成 5/5 用例；这只记录该受测环境的结果。不同 Multisim
 版本、模型或求解器设置仍应重新运行，不能沿用此结论冒充本机证据。
@@ -47,6 +49,8 @@ SHA-256 `manifest.json`。目录必须为新目录或空目录，避免把旧证
 `benchmark-suite` is a repeatable cross-family gate over RC, RLC, op-amp, BJT,
 and regulated-power circuits. Offline mode validates safe compilation, bounded
 search contracts, and inline-model retention. `--run-real` executes the same
-cases through real Multisim experiments and writes an integrity-checked suite.
+cases through real Multisim experiments and writes an integrity-checked suite with
+per-case timing, pass-rate, and acceptance metadata. Even an all-failed run retains
+`validation.json` and a verifiable directory manifest.
 The benchmark demonstrates tested coverage, not guaranteed repair of every
 possible circuit.

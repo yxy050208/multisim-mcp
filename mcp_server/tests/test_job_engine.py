@@ -342,6 +342,9 @@ class WorkerRecoveryTest(unittest.TestCase):
                 )
                 self.assertIn("report", complete["result"]["resources"])
                 self.assertEqual(complete["mcp_task_status"], "completed")
+                self.assertEqual(complete["task_event"]["state"], "succeeded")
+                self.assertEqual(complete["task_event"]["event_type"], "completed")
+                self.assertEqual(complete["task_event"]["job_id"], submitted["job_id"])
             finally:
                 manager.shutdown()
 

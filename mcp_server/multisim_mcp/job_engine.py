@@ -23,21 +23,18 @@ from typing import Any, Final, Iterator
 
 from typing_extensions import TypedDict
 
+from multisim_mcp.api_contract import (
+    MCP_TASK_STATUS as API_MCP_TASK_STATUS,
+    TASK_EVENT_SCHEMA_VERSION,
+)
+
 
 JOB_SCHEMA_VERSION: Final = 1
 JOB_ID_PATTERN: Final = re.compile(r"^job-[0-9a-f]{32}$")
 TERMINAL_STATES: Final = frozenset({"succeeded", "failed", "cancelled", "timed_out"})
 ACTIVE_STATES: Final = frozenset({"queued", "running", "cancelling"})
 VALID_STATES: Final = ACTIVE_STATES | TERMINAL_STATES
-MCP_TASK_STATUS: Final[dict[str, str]] = {
-    "queued": "working",
-    "running": "working",
-    "cancelling": "working",
-    "succeeded": "completed",
-    "failed": "failed",
-    "cancelled": "cancelled",
-    "timed_out": "failed",
-}
+MCP_TASK_STATUS: Final[dict[str, str]] = dict(API_MCP_TASK_STATUS)
 
 
 def _valid_record_shape(record: dict[str, Any]) -> bool:
@@ -358,7 +355,21 @@ class ExperimentJobManager:
         if not include_result:
             hidden.add("result")
         public = {key: value for key, value in record.items() if key not in hidden}
-        public["mcp_task_status"] = MCP_TASK_STATUS[str(record["state"])]
+        state = str(record["state"])
+        mcp_task_status = MCP_TASK_STATUS[state]
+        public["mcp_task_status"] = mcp_task_status
+        # Additive, transport-neutral snapshot for UI/SSE/MCP Tasks adapters.
+        # Persisted job records and their schema remain unchanged.
+        public["task_event"] = {
+            "schema_version": TASK_EVENT_SCHEMA_VERSION,
+            "job_id": str(record["job_id"]),
+            "event_type": "completed" if state in TERMINAL_STATES else "state_changed",
+            "state": state,
+            "status": mcp_task_status,
+            "stage": str(record.get("stage", state)),
+            "progress": int(record.get("progress", 0)),
+            "updated_at": str(record.get("updated_at", "")),
+        }
         return deepcopy(public)
 
     def submit(self, spec: dict[str, Any]) -> JobSubmission:
