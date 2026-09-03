@@ -199,6 +199,15 @@ class McpExperimentResourceTest(unittest.IsolatedAsyncioTestCase):
         second_payload = json.loads(second.content[0].text)
         self.assertEqual(first_payload["thread"], second_payload["thread"])
         self.assertTrue(first_payload["thread"].startswith("multisim-worker"))
+        contract = first_payload["api_contract"]
+        self.assertEqual(contract["api_name"], "multisim-mcp-agent-api")
+        self.assertEqual(contract["api_version"], "1")
+        self.assertEqual(contract["tool_profile"]["name"], first_payload["tool_profile"]["name"])
+        self.assertIn("structured_errors", contract["features"])
+        self.assertEqual(
+            contract["tasks"]["status_uri_template"],
+            "multisim://jobs/{job_id}",
+        )
 
     async def test_job_tools_and_status_resource_are_protocol_readable(self) -> None:
         from multisim_mcp import server

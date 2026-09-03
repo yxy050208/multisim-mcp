@@ -290,6 +290,8 @@ Trusted Publishing 与后续 OIDC 暂存流程见
 [`EDA 核心与后端边界`](docs/EDA_CORE.md)和受限 SPICE 转换器；原理图生成与独立
 SPICE 仿真、同步/验证/持久任务完整实验均已通过应用服务执行，现有 MCP 工具签名与
 job 存储格式保持兼容；实验 staging、报告、原子发布和回滚已移入独立流水线。
+面向 DeepSeek Harness、其他 Agent 和未来 Workbench 的稳定返回值约定见
+[`Agent API 契约`](docs/AGENT_API.md)，可从 `runtime_status.api_contract` 读取。
 
 ## 仓库结构
 

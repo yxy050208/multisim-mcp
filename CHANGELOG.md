@@ -9,6 +9,9 @@
 - 1.3 开发：增强标准纠错基准套件的可审计性。每个用例和整个套件现在记录 UTC
   时间戳、耗时、通过率和统一验收判据；即使所有真实实验失败，也会保留
   `validation.json` 与可校验的目录清单，避免摘要与清单之间出现自引用哈希失效。
+- 1.3 开发：增加稳定 Agent API 契约。`runtime_status` 现在提供可缓存的版本化
+  `api_contract`，描述 Tool Profile、功能、错误码和 durable job 状态；CLI JSON
+  错误保留 `type/message` 兼容字段，并增加统一 `code/retryable`。
 
 ### English
 
@@ -16,6 +19,10 @@
   suite-level UTC timestamps, durations, pass rate, and acceptance criteria are
   recorded. Even an all-failed real run retains `validation.json` and a verifiable
   directory manifest, avoiding self-referential summary hashes.
+- 1.3 development: added a stable Agent API contract. `runtime_status` exposes a
+  cacheable versioned `api_contract` for Tool Profiles, features, error codes, and
+  durable-job states. CLI JSON errors retain `type/message` for compatibility and
+  add normalized `code/retryable` fields.
 
 ## [1.2.0] - 2026-09-01
 

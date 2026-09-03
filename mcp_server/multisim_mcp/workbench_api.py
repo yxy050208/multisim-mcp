@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
+from . import __version__
+from .api_contract import build_capabilities, build_error
 from .job_engine import ExperimentJobManager, default_job_dir
 from .model_provider import ModelMessage, ModelProviderRegistry, ModelRuntimeError
 from .design_plans import plan_design_options, select_design_option
@@ -44,6 +46,7 @@ from .workbench_artifacts import (
     read_entry_patch_artifact,
 )
 from .workspace_manifest import read_directory_manifest
+from .tool_profiles import selected_tool_profile, tool_profile_status
 
 
 WORKBENCH_API_SCHEMA_VERSION = 1
@@ -317,8 +320,12 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                     "success": False,
                     "error": {
+                        "schema_version": 1,
+                        "code": "runtime_error",
                         "type": "ResponseTooLarge",
                         "message": "workbench media exceeds the response size limit",
+                        "retryable": False,
+                        "command": "workbench-media",
                     },
                 },
             )
@@ -345,6 +352,12 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
         message = str(exc).replace(str(self.server.project_root), "<project>")
         return message[:512] or type(exc).__name__
 
+    def _structured_error(self, exc: BaseException, route: str) -> dict[str, Any]:
+        """Return a stable UI error while preserving the existing redaction."""
+        error = build_error(exc, command=route)
+        error["message"] = self._error_message(exc)
+        return error
+
     def _send_entry_error(self, exc: BaseException) -> None:
         if isinstance(exc, KeyError):
             status = 404
@@ -359,10 +372,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
             {
                 "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                 "success": False,
-                "error": {
-                    "type": type(exc).__name__,
-                    "message": self._error_message(exc),
-                },
+                "error": self._structured_error(exc, "/api/entries"),
             },
         )
 
@@ -414,6 +424,16 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if route == "/api/capabilities":
+            profile = selected_tool_profile()
+            self._send_json(
+                200,
+                build_capabilities(
+                    server_version=__version__,
+                    tool_profile=tool_profile_status(profile),
+                ),
+            )
+            return
         if route == "/api/provider-config":
             config_path = default_provider_config_path()
             try:
@@ -451,7 +471,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     {
                         "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                         "success": False,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, "/api/provider-config"),
                         "credential_values_exposed": False,
                     },
                 )
@@ -476,7 +496,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     {
                         "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                         "success": False,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, "/api/jobs"),
                     },
                 )
                 return
@@ -507,7 +527,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                         "service": "multisim-mcp-workbench",
                         "success": False,
-                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "error": self._structured_error(exc, "/api/project-snapshot"),
                     },
                 )
                 return
@@ -614,7 +634,14 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                 "service": "multisim-mcp-workbench",
                 "success": False,
-                "error": {"type": "NotFound", "message": "Unknown workbench API route"},
+                "error": {
+                    "schema_version": 1,
+                    "code": "not_found",
+                    "type": "NotFound",
+                    "message": "Unknown workbench API route",
+                    "retryable": False,
+                    "command": route,
+                },
             },
         )
 
@@ -631,7 +658,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                         "credential_values_exposed": False,
                     },
                 )
@@ -665,7 +692,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "read_only": True,
                         "approval_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -721,7 +748,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "read_only": True,
                         "approval_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -768,7 +795,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "read_only": True,
                         "preview_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -812,7 +839,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "success": False,
                         "read_only": True,
                         "approval_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -848,7 +875,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -890,7 +917,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -925,7 +952,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -963,7 +990,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -999,7 +1026,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                         "service": "multisim-mcp-workbench",
                         "success": False,
                         "read_only": True,
-                        "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                        "error": self._structured_error(exc, route),
                     },
                 )
                 return
@@ -1021,7 +1048,14 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                     "service": "multisim-mcp-workbench",
                     "success": False,
-                    "error": {"type": "NotFound", "message": "Unknown workbench API route"},
+                    "error": {
+                        "schema_version": 1,
+                        "code": "not_found",
+                        "type": "NotFound",
+                        "message": "Unknown workbench API route",
+                        "retryable": False,
+                        "command": route,
+                    },
                 },
             )
             return
@@ -1043,7 +1077,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                 {
                     "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                     "success": False,
-                    "error": {"type": type(exc).__name__, "message": self._error_message(exc)},
+                    "error": self._structured_error(exc, route),
                     "credential_values_exposed": False,
                 },
             )

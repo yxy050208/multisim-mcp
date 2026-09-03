@@ -125,6 +125,9 @@ AI client / Visual Workbench
 - [x] 将公共 CI 从 introspection-only 扩展到真实 ngspice 后端与完整实验回归；
 - [x] 强化标准纠错基准的真实验收证据：记录用例/套件耗时和通过率，并在全失败时
   仍生成 `validation.json` 与可验证目录清单；
+- [x] 建立稳定 Agent API 契约：版本化 capabilities、统一错误码与可重试标记，
+  durable job 公开 `task_event` 状态快照，并为 Workbench 提供只读
+  `/api/capabilities` 能力握手；保持既有 MCP 工具/资源数量和持久化 schema 兼容；
 - [ ] 按来源、许可证和 SHA-256 管理用户模型。
 
 阶段门禁：第二个后端无需改动优化器即可完成生成、仿真、测量和验证；

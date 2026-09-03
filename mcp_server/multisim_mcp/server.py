@@ -20,6 +20,7 @@ from typing import Any, Callable
 from mcp.server.mcpserver import MCPServer
 
 from multisim_mcp import __version__
+from multisim_mcp.api_contract import build_capabilities
 from multisim_mcp.experiment_resources import (
     ExperimentResourceIndex,
     ExperimentResult,
@@ -648,6 +649,10 @@ def runtime_status() -> dict:
     result["schematic_templates_ready"] = not missing
     result["missing_schematic_templates"] = missing
     result["tool_profile"] = tool_profile_status(_TOOL_PROFILE)
+    result["api_contract"] = build_capabilities(
+        server_version=__version__,
+        tool_profile=result["tool_profile"],
+    )
     eda_service = _eda_application_service()
     result["eda_backends"] = [
         capabilities.to_dict()

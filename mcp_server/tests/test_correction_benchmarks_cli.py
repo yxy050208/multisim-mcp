@@ -28,6 +28,8 @@ class CorrectionBenchmarkCliTest(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(code, 2)
         self.assertIn("requires --output", payload["error"]["message"])
+        self.assertEqual(payload["error"]["code"], "invalid_input")
+        self.assertFalse(payload["error"]["retryable"])
 
     def test_real_result_prints_case_status(self) -> None:
         result = {

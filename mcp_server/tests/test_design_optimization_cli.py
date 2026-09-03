@@ -64,6 +64,7 @@ class DesignOptimizationCliTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertEqual(payload["command"], "optimize-design")
         self.assertEqual(payload["error"]["type"], "ValueError")
+        self.assertEqual(payload["error"]["code"], "invalid_input")
 
     def test_resume_reads_validated_raw_spec_and_forwards_checkpoint_mode(self) -> None:
         args = cli.build_parser().parse_args([*self._arguments(), "--resume"])

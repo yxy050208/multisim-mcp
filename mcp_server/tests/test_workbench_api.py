@@ -411,6 +411,11 @@ class WorkbenchApiTest(unittest.TestCase):
                 self.assertEqual(health["status"], "ok")
                 self.assertTrue(health["read_only"])
                 self.assertEqual(health["assistant"], "read-only-chat")
+                with urlopen(f"{base}/api/capabilities", timeout=3) as response:
+                    capabilities = json.loads(response.read())
+                self.assertEqual(capabilities["api_name"], "multisim-mcp-agent-api")
+                self.assertEqual(capabilities["api_version"], "1")
+                self.assertEqual(capabilities["tool_profile"]["name"], "full")
                 self.assertEqual(snapshot["source"], "local-workbench-api")
                 self.assertEqual(fixed_root_snapshot["workspace_root"], str(root.resolve()))
                 self.assertEqual(snapshot["root_manifest"]["entity_id"], "api-project")
@@ -958,6 +963,9 @@ class WorkbenchApiTest(unittest.TestCase):
                 with self.assertRaises(HTTPError) as context:
                     urlopen(invalid_request, timeout=3)
                 self.assertEqual(context.exception.code, 422)
+                error_payload = json.loads(context.exception.read())
+                self.assertEqual(error_payload["error"]["code"], "invalid_input")
+                self.assertEqual(error_payload["error"]["command"], "/api/provider-probe")
             finally:
                 server.shutdown()
                 thread.join(timeout=3)

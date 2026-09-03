@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from multisim_mcp import __version__
+from multisim_mcp.api_contract import build_error_envelope
 from multisim_mcp.agent_audit import (
     AgentAuditTrail,
     validate_agent_audit_output,
@@ -153,6 +154,28 @@ saved, simulated, or approved. If source_netlist_update_required is true, explic
 the authoritative source must be regenerated or updated before any future application."""
 _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _HARNESS_SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def _cli_error(
+    command: str,
+    exc: BaseException,
+    *,
+    schema_version: int = SCHEMA_VERSION,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Return the stable JSON error envelope used by CLI commands.
+
+    ``type`` and ``message`` remain in the nested error object for 1.2 clients;
+    the API contract adds ``code`` and ``retryable`` without changing exit codes.
+    """
+
+    payload = build_error_envelope(
+        exc,
+        command=command,
+        schema_version=schema_version,
+    )
+    payload.update(extra)
+    return payload
 _ENVIRONMENT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -3105,13 +3128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "inspect-project",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("inspect-project", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3147,13 +3164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "execute-handoff",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("execute-handoff", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3184,13 +3195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "course-demo",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("course-demo", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3221,13 +3226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "behavioral-reference",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("behavioral-reference", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3259,13 +3258,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "workbench-api",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("workbench-api", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3323,10 +3316,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "workbench",
-                            "success": False,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            **_cli_error("workbench", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3344,13 +3334,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "diagnose-design",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("diagnose-design", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3376,13 +3360,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "optimize-design",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("optimize-design", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3412,13 +3390,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": args.command,
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error(args.command, exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3447,13 +3419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "benchmark-suite",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("benchmark-suite", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3485,13 +3451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "compare-designs",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("compare-designs", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3517,13 +3477,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "evaluate-design-patch",
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error("evaluate-design-patch", exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3577,13 +3531,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": args.command,
-                            "success": False,
-                            "error": {
-                                "type": type(exc).__name__,
-                                "message": str(exc),
-                            },
+                            **_cli_error(args.command, exc),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -3624,10 +3572,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "harness-skills",
-                            "success": False,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            **_cli_error("harness-skills", exc),
                         },
                         ensure_ascii=False,
                     )
@@ -3652,10 +3597,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": PROVIDER_CONFIG_SCHEMA_VERSION,
-                            "command": "configure",
-                            "success": False,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            **_cli_error(
+                                "configure",
+                                exc,
+                                schema_version=PROVIDER_CONFIG_SCHEMA_VERSION,
+                            ),
                             "credential_values_exposed": False,
                         },
                         ensure_ascii=False,
@@ -3690,13 +3636,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
-                        "schema_version": 1,
-                        "command": "model",
-                        "success": False,
-                        "error": {
-                            "type": type(error).__name__,
-                            "message": str(error),
-                        },
+                        **_cli_error("model", error),
                         "credential_values_exposed": False,
                     },
                     ensure_ascii=False,
@@ -3726,13 +3666,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 json.dumps(
                     {
-                        "schema_version": 1,
-                        "command": "model-diagnose",
-                        "success": False,
-                        "error": {
-                            "type": type(error).__name__,
-                            "message": str(error),
-                        },
+                        **_cli_error("model-diagnose", error),
                         "credential_values_exposed": False,
                     },
                     ensure_ascii=False,
@@ -3762,10 +3696,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(
                     json.dumps(
                         {
-                            "schema_version": SCHEMA_VERSION,
-                            "command": "config",
-                            "success": False,
-                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                            **_cli_error("config", exc),
                         },
                         ensure_ascii=False,
                     )
