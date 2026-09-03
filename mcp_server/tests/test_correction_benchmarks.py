@@ -46,6 +46,21 @@ class _SuccessfulBenchmarkService(GlobalDesignOptimizationService):
         }
 
 
+class _FailingBenchmarkService(GlobalDesignOptimizationService):
+    def __init__(self) -> None:
+        pass
+
+    def run(self, design, spec, output_directory, **kwargs):  # type: ignore[no-untyped-def]
+        del design, spec, output_directory, kwargs
+        return {
+            "success": False,
+            "status": "failed",
+            "experiments_attempted": 1,
+            "feasible_solution_count": 0,
+            "recommended_solution": None,
+        }
+
+
 class CorrectionBenchmarkTest(unittest.TestCase):
     def test_catalog_spans_five_families_and_compiles_model_bound_designs(self) -> None:
         result = validate_standard_benchmarks()
@@ -84,11 +99,29 @@ class CorrectionBenchmarkTest(unittest.TestCase):
         self.assertEqual(result["passed_count"], 5)
         self.assertEqual(result["failed_count"], 0)
         self.assertEqual(restored["status"], "passed")
+        self.assertEqual(restored["acceptance"]["pass_rate"], 1.0)
+        self.assertTrue(restored["manifest"])
         self.assertTrue(all(item["expected_assignment_selected"] for item in result["cases"]))
+        self.assertTrue(all(item["duration_seconds"] >= 0 for item in result["cases"]))
         manifest_paths = {
             item["path"] for item in result["manifest"]["artifacts"]
         }
         self.assertIn("rc-lowpass/directory.manifest.json", manifest_paths)
+        self.assertIn("validation.json", manifest_paths)
+        self.assertNotIn("benchmark-suite.json", manifest_paths)
+
+    def test_failed_suite_still_writes_a_verifiable_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "failed-suite"
+            result = run_standard_benchmarks(_FailingBenchmarkService(), str(output))
+            restored = read_benchmark_suite(str(output), verify=True)
+            validation_exists = (output / "validation.json").is_file()
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["passed_count"], 0)
+        self.assertEqual(result["failed_count"], 5)
+        self.assertEqual(restored["acceptance"]["pass_rate"], 0.0)
+        self.assertTrue(validation_exists)
 
 
 if __name__ == "__main__":

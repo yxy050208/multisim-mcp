@@ -6,11 +6,16 @@
 
 ### 中文
 
-- 暂无。
+- 1.3 开发：增强标准纠错基准套件的可审计性。每个用例和整个套件现在记录 UTC
+  时间戳、耗时、通过率和统一验收判据；即使所有真实实验失败，也会保留
+  `validation.json` 与可校验的目录清单，避免摘要与清单之间出现自引用哈希失效。
 
 ### English
 
-- No changes yet.
+- 1.3 development: hardened the standard correction benchmark suite. Per-case and
+  suite-level UTC timestamps, durations, pass rate, and acceptance criteria are
+  recorded. Even an all-failed real run retains `validation.json` and a verifiable
+  directory manifest, avoiding self-referential summary hashes.
 
 ## [1.2.0] - 2026-09-01
 

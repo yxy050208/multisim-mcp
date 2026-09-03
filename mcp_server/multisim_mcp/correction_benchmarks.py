@@ -7,7 +7,9 @@ import json
 import math
 import os
 import tempfile
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Final, Mapping, Sequence
 
@@ -25,7 +27,12 @@ from .workspace_manifest import (
 
 BENCHMARK_SCHEMA_VERSION: Final = 1
 BENCHMARK_SUMMARY_NAME: Final = "benchmark-suite.json"
+BENCHMARK_VALIDATION_NAME: Final = "validation.json"
 _CASE_ID_LIMIT: Final = 32
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
@@ -451,8 +458,12 @@ def run_standard_benchmarks(
 
     selected = _select_cases(case_ids)
     validation = validate_standard_benchmarks([case.case_id for case in selected])
+    started_at = _utc_now()
+    suite_started = time.monotonic()
     results: list[dict[str, Any]] = []
     for case in selected:
+        case_started_at = _utc_now()
+        case_started = time.monotonic()
         try:
             result = service.run(
                 case.design,
@@ -482,6 +493,9 @@ def run_standard_benchmarks(
                     "recommended_assignment": dict(assignments),
                     "expected_assignment_selected": expected_selected,
                     "output_dir": str(root / case.case_id),
+                    "started_at": case_started_at,
+                    "completed_at": _utc_now(),
+                    "duration_seconds": round(time.monotonic() - case_started, 6),
                     "error": None,
                 }
             )
@@ -496,30 +510,45 @@ def run_standard_benchmarks(
                     "recommended_assignment": {},
                     "expected_assignment_selected": False,
                     "output_dir": str(root / case.case_id),
+                    "started_at": case_started_at,
+                    "completed_at": _utc_now(),
+                    "duration_seconds": round(time.monotonic() - case_started, 6),
                     "error": {"type": type(exc).__name__, "message": str(exc)},
                 }
             )
     passed_count = sum(bool(item["passed"]) for item in results)
+    case_count = len(results)
     summary: dict[str, Any] = {
         "schema_version": BENCHMARK_SCHEMA_VERSION,
         "mode": "real-multisim",
         "success": passed_count == len(results),
         "status": "passed" if passed_count == len(results) else "failed",
-        "case_count": len(results),
+        "case_count": case_count,
         "passed_count": passed_count,
-        "failed_count": len(results) - passed_count,
+        "failed_count": case_count - passed_count,
+        "started_at": started_at,
+        "completed_at": _utc_now(),
+        "duration_seconds": round(time.monotonic() - suite_started, 6),
+        "acceptance": {
+            "criterion": "every selected case passes and selects its expected assignment",
+            "pass_rate": round(passed_count / case_count, 6) if case_count else 1.0,
+            "all_selected_cases_passed": passed_count == case_count,
+        },
         "validation": validation,
         "cases": results,
         "output_dir": str(root),
         "simulation_performed": True,
     }
-    _atomic_json(root / BENCHMARK_SUMMARY_NAME, summary)
+    # Keep a small immutable record outside the summary so even an entirely
+    # failed suite still has a verifiable artifact for its directory manifest.
+    _atomic_json(root / BENCHMARK_VALIDATION_NAME, validation)
     artifacts = {
         path.relative_to(root).as_posix(): (
-            "summary" if path.name == BENCHMARK_SUMMARY_NAME else "case-artifact"
+            "validation" if path.name == BENCHMARK_VALIDATION_NAME else "case-artifact"
         )
         for path in root.rglob("*")
-        if path.is_file() and path != root / DIRECTORY_MANIFEST_NAME
+        if path.is_file()
+        and path not in {root / DIRECTORY_MANIFEST_NAME, root / BENCHMARK_SUMMARY_NAME}
     }
     manifest = write_directory_manifest(
         root,
@@ -529,11 +558,14 @@ def run_standard_benchmarks(
         artifacts=artifacts,
         metadata={
             "operation": "benchmark-suite",
-            "case_count": len(results),
+            "case_count": case_count,
             "passed_count": passed_count,
         },
     )
     summary["manifest"] = manifest.to_dict()
+    # The summary is written after the manifest so it can safely embed the
+    # manifest record without invalidating an artifact hash.
+    _atomic_json(root / BENCHMARK_SUMMARY_NAME, summary)
     return summary
 
 
@@ -557,6 +589,7 @@ def read_benchmark_suite(output_directory: str, *, verify: bool = True) -> dict[
 __all__ = [
     "BENCHMARK_SCHEMA_VERSION",
     "BENCHMARK_SUMMARY_NAME",
+    "BENCHMARK_VALIDATION_NAME",
     "CorrectionBenchmark",
     "read_benchmark_suite",
     "run_standard_benchmarks",
