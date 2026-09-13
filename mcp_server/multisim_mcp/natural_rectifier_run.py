@@ -58,6 +58,23 @@ def rectifier_measurements(result: dict, plan: dict) -> dict:
             'adjacent_window_mean_delta_v':delta,'settling_limit_v':max(.01,abs(mean)*.002)}
 
 
+def electrical_stress_review(plan: dict, measurements: dict) -> dict:
+    derived=plan['derived']
+    # These are design review values, not claims about unmodeled ratings.
+    actual_power=measurements['output_mean_v']*measurements['load_current_a']
+    return {'status':'requires-rated-part-selection',
+            'load_power_w':actual_power,
+            'recommended_resistor_power_w':derived['recommended_resistor_power_w'],
+            'recommended_capacitor_voltage_v':derived['recommended_capacitor_voltage_v'],
+            'estimated_bridge_piv_v':derived['estimated_bridge_piv_v'],
+            'diode_model':derived['diode_model'],
+            'checks':{'load_power_is_finite':math.isfinite(actual_power),
+                      'resistor_rating_required':derived['recommended_resistor_power_w'],
+                      'capacitor_voltage_rating_required':derived['recommended_capacitor_voltage_v'],
+                      'diode_piv_required':derived['estimated_bridge_piv_v']},
+            'reason':'Native model does not expose purchased resistor power, capacitor voltage/ESR or diode surge/PIV ratings; select parts from a datasheet before hardware use.'}
+
+
 def verify_rectifier_waveform(path: Path, plan: dict) -> dict:
     with path.open(encoding='utf-8',newline='') as stream:
         rows = list(csv.DictReader(stream))
@@ -128,6 +145,7 @@ def run_rectifier_plan(plan: dict, output: str, *, execute: bool = False,
                 result['native_parameter_readback']=values
             result['presentation_acceptance'] = verify_rectifier_presentation(root/'native-model.xml',plan,values)
             result['rectifier_acceptance'] = rectifier_measurements(result,plan)
+            result['electrical_stress_review'] = electrical_stress_review(plan,result['rectifier_acceptance'])
             result['waveform_acceptance'] = verify_rectifier_waveform(root/'native'/'analysis-002'/'data.csv',plan)
             summary = export_rectifier_summary(root,result,plan)
             if not all(result[key]['ok'] for key in ('presentation_acceptance','rectifier_acceptance','waveform_acceptance')):
@@ -141,6 +159,6 @@ def run_rectifier_plan(plan: dict, output: str, *, execute: bool = False,
         final_summary = html.escape(json.dumps({key:result.get(key) for key in ('success','verification_status','error')},ensure_ascii=False,indent=2))
         report_text = re.sub(r'<pre>.*?</pre>',lambda _:summary+'<pre>'+final_summary+'</pre>',report.read_text(encoding='utf-8'),count=1,flags=re.S)
         report.write_text(report_text + '<h2>整流电源验收</h2><pre>' + html.escape(json.dumps(
-            {key:result.get(key) for key in ('rectifier_acceptance','presentation_acceptance','waveform_acceptance','delivery_status','limitations')},
+            {key:result.get(key) for key in ('rectifier_acceptance','electrical_stress_review','presentation_acceptance','waveform_acceptance','delivery_status','limitations')},
             ensure_ascii=False,indent=2)) + '</pre>',encoding='utf-8')
     return finalize_task_result(root,result)

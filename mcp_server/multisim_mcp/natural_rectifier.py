@@ -48,6 +48,7 @@ def parse_natural_rectifier(text: str) -> dict[str, Any]:
     estimated_ripple = current/(2*frequency*capacitor)
     estimated_dc = peak - 1.5 - estimated_ripple/2
     resistance = round(estimated_dc/current, 2)
+    load_power = estimated_dc * current
     stop, middle, start = 20/frequency, 17/frequency, 14/frequency
     voltage_low, voltage_high = estimated_dc*.85, min(peak,estimated_dc*1.15)
     def check(net: str, quantity: str, low: float, high: float, **extra: Any) -> dict:
@@ -59,7 +60,11 @@ def parse_natural_rectifier(text: str) -> dict[str, Any]:
         "derived":{"ac_rms_v":rms,"ac_peak_v":peak,"frequency_hz":frequency,"load_a":current,
                    "load_resistance_ohm":resistance,"capacitance_f":capacitor,"ripple_limit_v":ripple,
                    "estimated_no_load_dc_v":peak-1.5,"estimated_loaded_dc_v":estimated_dc,
-                   "estimated_ripple_vpp":estimated_ripple,"diode_count":4,"diode_model":"1N4001GP"},
+                   "estimated_ripple_vpp":estimated_ripple,"load_power_w":load_power,
+                   "recommended_resistor_power_w":load_power*1.5,
+                   "recommended_capacitor_voltage_v":peak*1.5,
+                   "estimated_bridge_piv_v":peak*2,
+                   "diode_count":4,"diode_model":"1N4001GP"},
         "proposal":{
             "title":"单相桥式整流与滤波", "application":text.strip(),
             "netlist":(f"V1 ac_p ac_n DC 0 SIN(0 {peak:g} {frequency:g})\n"
@@ -78,6 +83,7 @@ def parse_natural_rectifier(text: str) -> dict[str, Any]:
         "assumptions":["未指定时采用12Vrms、50Hz、100mA、纹波上限1V；输入是隔离低压交流。",
                        "采用本地1N4001GP模型；负载电流用于设计电阻，不是恒流负载。",
                        "按每只二极管0.75V初估负载电阻，按纹波选470–4700uF；最终数值以原生仿真为准。",
+                       "工程选型估算：电阻功率至少为负载平均功率的1.5倍，电容耐压至少为输入峰值的1.5倍，二极管PIV至少为输入峰值的2倍；需按实际器件数据手册复核。",
                        "原理图使用理想源/电容和精确计算的电阻；尚未验证源阻抗、浪涌、温升、容差、器件功率或实物安全。"],
         "status":"unverified-native-proposal"}
 

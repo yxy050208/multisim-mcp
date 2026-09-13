@@ -81,3 +81,5 @@ python tools/run_rectifier_optimization_acceptance.py --output D:/experiments/re
 缓存差异单独留档，不修改 NI 文件缓存来伪造一致性。缺少原生读回证据时仍采用严格缓存检查；有效字符串或原生读值错误都会失败。
 
 尚未验证源阻抗、浪涌电流、二极管热耗散、电容 ESR/额定纹波电流、电阻/二极管容差、频率偏差、PCB 或实物安全。当前完成的是有限参数与工况的**原生仿真优化闭环**。
+
+最新源码还会在每次整流验收中生成 `electrical_stress_review`：以原生输出和负载计算实际负载功率，并给出电阻功率、电容耐压和桥式 PIV 的保守选型下限。该状态固定为 `requires-rated-part-selection`，直到接入带额定值的器件目录和浪涌/热模型；它不会把未建模的额定值伪装成仿真通过。

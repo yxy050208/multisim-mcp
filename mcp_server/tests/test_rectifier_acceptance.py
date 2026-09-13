@@ -11,7 +11,7 @@ from multisim_mcp.generated_analog_run import transient_statistic, validate_prop
 from multisim_mcp.linear_reference import expected_native_pins
 from multisim_mcp.native_xml import parse_native_xml, write_native_xml
 from multisim_mcp.natural_rectifier import parse_natural_rectifier, validate_rectifier_netlist
-from multisim_mcp.natural_rectifier_run import run_natural_rectifier, verify_rectifier_presentation, rectifier_measurements, verify_rectifier_waveform
+from multisim_mcp.natural_rectifier_run import run_natural_rectifier, verify_rectifier_presentation, rectifier_measurements, verify_rectifier_waveform, electrical_stress_review
 from multisim_mcp.schematic_builder import build_schematic, template_search_paths
 
 
@@ -103,6 +103,14 @@ class RectifierAcceptanceTest(unittest.TestCase):
         checks[2]['measured_value']=12
         self.assertFalse(rectifier_measurements(result,plan)['ok'])
 
+    def test_stress_review_exposes_ratings_without_faking_certification(self):
+        plan=parse_natural_rectifier('桥式整流')
+        review=electrical_stress_review(plan,{'output_mean_v':15.,'load_current_a':.1})
+        self.assertEqual(review['status'],'requires-rated-part-selection')
+        self.assertAlmostEqual(review['load_power_w'],1.5)
+        self.assertGreater(review['recommended_resistor_power_w'],review['load_power_w'])
+        self.assertGreater(review['recommended_capacitor_voltage_v'],plan['derived']['ac_peak_v'])
+        self.assertIn('datasheet',review['reason'])
     def test_aggregate_checks_use_native_csv_and_reject_excess_ripple(self):
         raw=parse_natural_rectifier('桥式整流')['proposal']
         plan,parts=validate_proposal(raw)
