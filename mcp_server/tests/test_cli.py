@@ -29,6 +29,20 @@ from multisim_mcp.model_provider import (
 )
 
 
+def _write_all_component_templates(root: Path) -> None:
+    """Create every template a complete pack needs, so readiness can be real."""
+    from multisim_mcp.schematic_builder import (
+        COMPONENT_DEFINITIONS,
+        component_template_files,
+    )
+
+    for name in REQUIRED_TEMPLATES:
+        (root / name).write_text("fixture", encoding="utf-8")
+    for definition in COMPONENT_DEFINITIONS.values():
+        for name in component_template_files(definition):
+            (root / name).write_text("fixture", encoding="utf-8")
+
+
 class DoctorTest(unittest.TestCase):
     def test_generated_local_pack_schema_rejects_legacy_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -87,8 +101,7 @@ class DoctorTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for name in REQUIRED_TEMPLATES:
-                (root / name).write_text("fixture", encoding="utf-8")
+            _write_all_component_templates(root)
             with (
                 patch(
                     "multisim_mcp.cli._worker_runtime_diagnostics",
@@ -122,6 +135,102 @@ class DoctorTest(unittest.TestCase):
         self.assertTrue(report["automation_ready"])
         self.assertFalse(report["activation_checked"])
         self.assertIsNone(report["activation_ready"])
+        self.assertTrue(report["full_workflow_ready"])
+
+    def _doctor_report_for_pack(self, root: Path) -> dict:
+        runtime = {
+            "platform": "Windows-test",
+            "windows": True,
+            "python": "3.10.0",
+            "multisim_mcp": "test",
+            "python_executable": r"C:\Python32\python.exe",
+            "python_bits": 32,
+            "required_python_bits": 32,
+            "pywin32_available": True,
+            "prog_id": "MultisimInterface.MultisimApp",
+            "runtime_compatible": True,
+            "runtime_mode": "automation",
+            "runtime_message": "ready",
+        }
+        with (
+            patch(
+                "multisim_mcp.cli._worker_runtime_diagnostics",
+                return_value=runtime,
+            ),
+            patch(
+                "multisim_mcp.schematic_builder.template_search_paths",
+                return_value=[root],
+            ),
+            patch(
+                "multisim_mcp.cli._com_registration",
+                return_value={
+                    "registered": True,
+                    "status": "registered",
+                    "clsid": "{fixture}",
+                },
+            ),
+            patch(
+                "multisim_mcp.cli._codec_diagnostics",
+                return_value={
+                    "ready": True,
+                    "tools": {
+                        "ewd": {"available": True, "command": ["node", "ewd.js"]},
+                        "ewe": {"available": True, "command": ["node", "ewe.js"]},
+                    },
+                },
+            ),
+        ):
+            return collect_doctor_report("en")
+
+    @staticmethod
+    def _template_check(report: dict) -> dict:
+        return next(
+            item
+            for item in report["checks"]
+            if item["id"] == "schematic.template_pack"
+        )
+
+    def test_missing_extended_family_warns_and_lists_unavailable(self) -> None:
+        """An optional carrier must not read as ready, nor fail the pack."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_all_component_templates(root)
+            # Remove one extended (non-core) family: TIMER8.
+            for name in ("timer8_element.xml", "sym_timer8.xml"):
+                (root / name).unlink()
+            report = self._doctor_report_for_pack(root)
+
+        check = self._template_check(report)
+        self.assertEqual(check["status"], "warn")
+        self.assertEqual(check["extended_missing_kinds"], ["TIMER8"])
+        self.assertEqual(check["core_missing_kinds"], [])
+        self.assertIn("TIMER8", check["missing_component_templates"])
+        # Readiness must be false: the pack cannot build every documented family.
+        self.assertFalse(report["full_workflow_ready"])
+
+    def test_missing_core_family_fails_the_template_check(self) -> None:
+        """Losing a core family is a hard failure, not a warning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_all_component_templates(root)
+            (root / "r_element.xml").unlink()
+            report = self._doctor_report_for_pack(root)
+
+        check = self._template_check(report)
+        self.assertEqual(check["status"], "fail")
+        self.assertIn("R", check["core_missing_kinds"])
+        self.assertFalse(report["full_workflow_ready"])
+
+    def test_complete_pack_reports_no_unavailable_families(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_all_component_templates(root)
+            report = self._doctor_report_for_pack(root)
+
+        check = self._template_check(report)
+        self.assertEqual(check["status"], "pass")
+        self.assertEqual(check["unavailable_kinds"], [])
+        self.assertEqual(check["missing_component_templates"], {})
         self.assertTrue(report["full_workflow_ready"])
 
     def test_connect_flag_requests_explicit_activation_probe(self) -> None:

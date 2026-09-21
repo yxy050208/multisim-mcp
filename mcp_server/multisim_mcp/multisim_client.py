@@ -814,12 +814,18 @@ class Ms14Codec:
         generated = source + ".xml"
         target = os.path.abspath(output_xml) if output_xml else generated
         if os.path.abspath(target) != os.path.abspath(generated):
+            # The decoder writes beside the source, so a nested destination would
+            # otherwise fail on the copy with a bare WinError 3.
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
             shutil.copy2(generated, target)
         return {"xml": target, "size": os.path.getsize(target)}
 
     def encode(self, source_xml: str, output_ms14: Optional[str] = None) -> dict:
         source_xml = os.path.abspath(source_xml)
-        output_ms14 = output_ms14 or source_xml.removesuffix(".xml")
+        output_ms14 = os.path.abspath(
+            output_ms14 or source_xml.removesuffix(".xml")
+        )
+        os.makedirs(os.path.dirname(output_ms14) or ".", exist_ok=True)
         proc = subprocess.run(
             [
                 *self._base_cmd("ewe"),

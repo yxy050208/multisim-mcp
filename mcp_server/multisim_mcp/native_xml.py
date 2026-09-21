@@ -10,6 +10,11 @@ def parse_native_xml(path: str | Path) -> ET.ElementTree:
     # into a comment covering the entire macromodel. Escape before parsing.
     with Path(path).open(encoding="utf-8-sig", newline="") as stream:
         text = stream.read()
+    # The decoder can leave a stray NUL byte in otherwise valid output (seen in
+    # roughly a quarter of the stock samples). XML 1.0 forbids NUL anywhere, so
+    # strip it here rather than make every caller rediscover the parse failure.
+    if "\x00" in text:
+        text = text.replace("\x00", "")
     def preserve(match: re.Match[str]) -> str:
         value = match[3].replace("\r", "&#13;").replace("\n", "&#10;").replace("\t", "&#9;")
         return match[1] + match[2] + value + match[2]

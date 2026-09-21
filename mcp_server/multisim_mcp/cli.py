@@ -552,52 +552,106 @@ def collect_doctor_report(
     )
 
     paths = _load_module("multisim_mcp.schematic_builder").template_search_paths()
+    builder = _load_module("multisim_mcp.schematic_builder")
+    completeness = builder.template_completeness(paths)
+    # The base requirements stay a hard gate; per-family completeness is graded
+    # separately so an optional carrier cannot mask the real state of the pack.
     missing_templates = [
         name
         for name in REQUIRED_TEMPLATES
         if not any((path / name).is_file() for path in paths)
     ]
     local_pack = _local_pack_status(paths)
-    templates_ready = not missing_templates and bool(local_pack["compatible"])
     incompatible_pack = not local_pack["compatible"]
-    if templates_ready:
-        template_message = _message(
-            language,
-            "原理图模板包可用。",
-            "The schematic template pack is ready.",
-        )
-    elif incompatible_pack:
+    core_missing = list(completeness["core_missing_kinds"])
+    extended_missing = list(completeness["extended_missing_kinds"])
+    # Readiness means every documented family can be built, not just that the
+    # three generic scaffolding files exist.
+    templates_ready = (
+        not missing_templates
+        and not core_missing
+        and not extended_missing
+        and not incompatible_pack
+    )
+    if incompatible_pack:
+        template_status = "fail"
         template_message = _message(
             language,
             "本地模板包版本过旧或 manifest 无效。",
             "The local template pack is outdated or has an invalid manifest.",
         )
-    else:
+    elif missing_templates or core_missing:
+        template_status = "fail"
         template_message = _message(
             language,
-            "原理图模板包不完整。",
-            "The schematic template pack is incomplete.",
+            "原理图模板包不完整：核心器件模板缺失。",
+            "The schematic template pack is incomplete: core component "
+            "templates are missing.",
+        )
+    elif extended_missing:
+        template_status = "warn"
+        template_message = _message(
+            language,
+            (
+                "原理图模板包可用，但部分扩展器件缺失，这些器件无法生成："
+                + "、".join(extended_missing)
+            ),
+            (
+                "The schematic template pack works, but these extended families "
+                "cannot be generated: " + ", ".join(extended_missing)
+            ),
+        )
+    else:
+        template_status = "pass"
+        template_message = _message(
+            language,
+            "原理图模板包可用，全部器件模板完整。",
+            "The schematic template pack is ready with every component family complete.",
+        )
+    if template_status == "pass":
+        template_repair = None
+    elif incompatible_pack or missing_templates or core_missing:
+        template_repair = _message(
+            language,
+            "使用 1.0 源码重新运行 "
+            "tools/bootstrap_local_component_pack.py，并设置 "
+            "MULTISIM_MCP_TEMPLATE_DIR。",
+            "Rebuild the pack with the 1.0 "
+            "tools/bootstrap_local_component_pack.py and set "
+            "MULTISIM_MCP_TEMPLATE_DIR.",
+        )
+    else:
+        template_repair = _message(
+            language,
+            (
+                "若要使用这些器件，请从本机已授权的 Multisim 设计导出载体，"
+                "例如：tools/overlay_local_component_pack.py "
+                "--pack <pack> --source <设计.ms14> --refdes <位号> "
+                "--kind <类型> --identity-token <型号>"
+            ),
+            (
+                "To enable them, derive a carrier from your own licensed Multisim "
+                "design, for example: tools/overlay_local_component_pack.py "
+                "--pack <pack> --source <design.ms14> --refdes <refdes> "
+                "--kind <kind> --identity-token <part>"
+            ),
         )
     checks.append(
         _check(
             "schematic.template_pack",
-            "pass" if templates_ready else "fail",
+            template_status,
             template_message,
-            (
-                None
-                if templates_ready
-                else _message(
-                    language,
-                    "使用 1.0 源码重新运行 "
-                    "tools/bootstrap_local_component_pack.py，并设置 "
-                    "MULTISIM_MCP_TEMPLATE_DIR。",
-                    "Rebuild the pack with the 1.0 "
-                    "tools/bootstrap_local_component_pack.py and set "
-                    "MULTISIM_MCP_TEMPLATE_DIR.",
-                )
-            ),
+            template_repair,
             search_paths=[str(path) for path in paths],
             missing=missing_templates,
+            # Keep the legacy scalar available, now carrying the full picture.
+            missing_component_templates={
+                kind: files for kind, files in completeness["missing_by_kind"].items()
+            },
+            unavailable_kinds=completeness["unavailable_kinds"],
+            core_missing_kinds=core_missing,
+            extended_missing_kinds=extended_missing,
+            component_kinds_checked=completeness["component_kinds"],
             local_pack=local_pack,
         )
     )

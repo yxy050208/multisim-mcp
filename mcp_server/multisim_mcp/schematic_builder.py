@@ -16,7 +16,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from multisim_mcp.layout_validation import validate_schematic_geometry
 from multisim_mcp.orthogonal_routing import route_pins, junction_point, pin_escape
@@ -908,6 +908,79 @@ def template_search_paths() -> list[Path]:
     if not (override and local_only):
         paths.append(TEMPLATE_DIR)
     return paths
+
+
+# Component families whose absence makes the documented, regression-covered
+# baseline workflows impossible. A missing core template is a failure; a missing
+# optional family is only a warning, so an incomplete optional carrier never
+# hides the real state of the pack (and never silently claims readiness).
+CORE_TEMPLATE_KINDS: Final = frozenset(
+    {
+        "R", "C", "L", "V", "I", "GND",
+        "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "OPAMP5",
+        "DNOT4", "DAND5", "DOR5", "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "DJK7",
+    }
+)
+
+
+def component_template_files(definition: ComponentDefinition) -> tuple[str, ...]:
+    """Return every template file one component family needs to build."""
+    return (
+        definition.element_template,
+        definition.symbol_template,
+        *definition.port_templates,
+    )
+
+
+def template_completeness(
+    paths: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Report per-family availability across the trusted search roots.
+
+    ``template_search_paths`` is an intentional overlay chain: a user-local
+    licensed pack can provide device-specific carriers while the package root
+    supplies generic fallback templates. Each required file therefore only
+    needs to resolve from one trusted root. Doctor, runtime status, and the
+    component catalog all consume this same report.
+    """
+    search_paths = (
+        list(paths) if paths is not None else template_search_paths()
+    )
+    missing_by_kind: dict[str, list[str]] = {}
+    for kind, definition in sorted(COMPONENT_DEFINITIONS.items()):
+        names = component_template_files(definition)
+        absent = [
+            name
+            for name in names
+            if not any((root / name).is_file() for root in search_paths)
+        ]
+        if absent:
+            missing_by_kind[kind] = absent
+    core_missing = sorted(
+        kind for kind in missing_by_kind if kind in CORE_TEMPLATE_KINDS
+    )
+    extended_missing = sorted(
+        kind for kind in missing_by_kind if kind not in CORE_TEMPLATE_KINDS
+    )
+    return {
+        "search_paths": search_paths,
+        "component_kinds": len(COMPONENT_DEFINITIONS),
+        "missing_by_kind": missing_by_kind,
+        "unavailable_kinds": sorted(missing_by_kind),
+        "core_missing_kinds": core_missing,
+        "extended_missing_kinds": extended_missing,
+        "complete": not missing_by_kind,
+    }
+
+
+def template_status(paths: list[Path] | None = None) -> str:
+    """Return ``pass``, ``warn`` or ``fail`` for schematic template readiness."""
+    report = template_completeness(paths)
+    if report["core_missing_kinds"]:
+        return "fail"
+    if report["extended_missing_kinds"]:
+        return "warn"
+    return "pass"
 
 
 def _deepcopy(element: ET.Element) -> ET.Element:
@@ -3505,6 +3578,7 @@ def build_schematic(
 
 __all__ = [
     "COMPONENT_DEFINITIONS",
+    "CORE_TEMPLATE_KINDS",
     "DIGITAL_MODEL_KINDS",
     "TEMPLATE_PACK_ENV",
     "TEMPLATE_ONLY_ENV",
@@ -3514,8 +3588,11 @@ __all__ = [
     "ParsedNetlist",
     "SubcircuitDefinition",
     "build_schematic",
+    "component_template_files",
     "parse_netlist",
     "parse_spice_value",
     "prepare_simulation_netlist",
+    "template_completeness",
     "template_search_paths",
+    "template_status",
 ]
