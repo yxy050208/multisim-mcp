@@ -707,6 +707,32 @@ A4 j k clk set reset q qbar JKFF
         self.assertIn("A__A4_DAC [d_A4_q d_A4_qbar] [q qbar] MCP_DAC", simulation)
         self.assertIn(".model JKFF d_jkff", simulation)
 
+    def test_builder_preserves_zero_and_nonstandard_refdes_mappings(self) -> None:
+        """Multisim must not renumber R0 or digital prefixes such as AINV0."""
+        import tempfile
+        from pathlib import Path
+
+        netlist = """\
+V1 vdd 0 DC 5
+AINV0 din out vdd 0 NOT
+R0 out 0 1k
+.end
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "mapped.xml"
+            build_schematic(netlist, output, probe_nets=[])
+            root = ET.parse(output).getroot()
+        mapping = root.find(".//RefDesInfoContainer/CIRToInfoMap")
+        self.assertIsNotNone(mapping)
+        keys = {item.get("CIRKey") for item in mapping.findall("./CIRToInfoMapItem")}
+        self.assertIn("&ASCR0", keys)
+        self.assertIn("&ASCAINV0A", keys)
+        ainv = next(item for item in mapping.findall("./CIRToInfoMapItem") if item.get("CIRKey") == "&ASCAINV0A")
+        info = ainv.find("./RefDesInfo")
+        self.assertEqual(info.get("IRPrefix"), "&ASCAINV")
+        self.assertEqual(info.get("IRNumber"), "0")
+        self.assertEqual(info.get("IRSection"), "&ASCA")
+
     def test_builder_and_simulation_translation_support_derived_logic_gates(self) -> None:
         import tempfile
         from pathlib import Path

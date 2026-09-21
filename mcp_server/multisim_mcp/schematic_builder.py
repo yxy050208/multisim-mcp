@@ -14,6 +14,7 @@ import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
@@ -2691,6 +2692,97 @@ def _refdes_info(
     return info_item
 
 
+def _component_refdes_info(
+    refdes: str,
+    file_path: str,
+    circuit_name: str,
+    *,
+    sectioned: bool = False,
+) -> ET.Element | None:
+    """Build the native refdes map entry that preserves a generated designator.
+
+    A freshly encoded XML file has the component's ``LocalName`` but no
+    ``CIRToInfoMap`` entry. Multisim then allocates the next free number when
+    the designator ends in a number already considered used (notably ``R0``),
+    including names with nonstandard prefixes such as ``AINV0``. The map is the
+    native identity contract that keeps the requested designator stable.
+    """
+    match = re.fullmatch(r"([A-Za-z]+)(\d+)", refdes)
+    if match is None:
+        return None
+    prefix, number = match.groups()
+    section = "A" if sectioned else ""
+    external = f"{prefix}{number}{section}"
+    refdes_str = f"&ASC!0!0!0{refdes}!0{file_path}!01!0{circuit_name}!0"
+    info_item = ET.Element("CIRToInfoMapItem", {"CIRKey": _asc(external)})
+    info = ET.SubElement(
+        info_item,
+        "RefDesInfo",
+        {
+            "Class": "CIITHierRefDesInfo",
+            "IRPrefix": _asc(prefix),
+            "IRNumber": number,
+            "Locked": "0",
+            "IRSection": _asc(section) if section else "",
+            "IRSectionID": "0" if section else "-1",
+            "SpiceTemplate": "",
+        },
+    )
+    data = ET.SubElement(
+        info,
+        "RefDesInfoData",
+        {
+            "Class": "CIITHierRefDes",
+            "RefDesBufSize": "260",
+            "RefDesStrSize": str(len(refdes_str)),
+            "RefDesCount": "2",
+            "RefDes": refdes_str,
+            "SectionBufSize": "260" if section else "0",
+            "SectionStrSize": "2" if section else "0",
+            "Section": _asc(section) if section else "&ASC(null)",
+            "Prefix": _asc(prefix),
+            "Number": number,
+        },
+    )
+    ET.SubElement(data, "RefDesData")
+    for tag in ("PinOrderCIR", "PinOrderIR", "PinNumbersCIR", "PinNumbersIR", "SharedPins"):
+        ET.SubElement(info, tag)
+    return info_item
+
+
+def _add_component_refdes_map(
+    root: ET.Element,
+    specs: Sequence[ComponentSpec],
+    file_path: str,
+    circuit_name: str,
+) -> None:
+    """Register standard and multi-section component designators in the XML."""
+    container = _find_by_tag(root, "RefDesInfoContainer")
+    if container is None:
+        return
+    mapping = container.find("./CIRToInfoMap")
+    if mapping is None:
+        mapping = ET.SubElement(container, "CIRToInfoMap")
+    existing = {str(item.get("CIRKey") or "") for item in mapping.findall("./CIRToInfoMapItem")}
+    section_kinds = set(DIGITAL_MODEL_KINDS.values()) | {"OPAMP5", "TIMER8", "DFF8"}
+    section_kinds.update({"XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN"})
+    for spec in specs:
+        if spec.kind == "GND":
+            continue
+        key = _asc(f"{spec.refdes}{'A' if spec.kind in section_kinds else ''}")
+        if key in existing:
+            continue
+        item = _component_refdes_info(
+            spec.refdes,
+            file_path,
+            circuit_name,
+            sectioned=spec.kind in section_kinds,
+        )
+        if item is not None:
+            mapping.append(item)
+            existing.add(key)
+
+
 def _refdes_prefix_usage() -> ET.Element:
     usage = ET.Element(
         "RefDesPrefixUsage",
@@ -3482,6 +3574,13 @@ def build_schematic(
             )
 
     new_circuit_id = circuit_item.get("CiID")
+    circuit_name = str(circuit_item.get("LocalName") or "minimal").removeprefix("&ASC")
+    _add_component_refdes_map(
+        root,
+        specs,
+        str(Path(output_path).with_suffix(".ms14")),
+        circuit_name,
+    )
     for el in root.iter():
         if "Circuit" in el.attrib:
             el.set("Circuit", new_circuit_id)
