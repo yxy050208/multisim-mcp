@@ -219,6 +219,55 @@ def _check(
     return result
 
 
+def _release_tuple(version: object) -> tuple[int, ...] | None:
+    """Return the numeric release part of a PEP 440 version, or ``None``.
+
+    ``1.3.0rc1`` and ``1.3.0`` both normalize to ``(1, 3, 0)``, so a release
+    candidate accepts a pack produced by the final release of that series.
+    Local segments (``+local``) and non-numeric parts are ignored.
+    """
+    if not isinstance(version, str):
+        return None
+    head = version.strip().split("+", 1)[0]
+    if not head:
+        return None
+    parts: list[int] = []
+    for chunk in head.split("."):
+        digits = ""
+        for char in chunk:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts) if parts else None
+
+
+def _pack_generator_status(generator: object) -> str:
+    """Classify the pack generator against the running release.
+
+    A pack built by an older release can silently miss templates that this
+    release expects (for example ``probe_element.xml`` in 1.3.0rc1), so the
+    schema version alone is not enough to call it usable.
+    """
+    if not isinstance(generator, dict):
+        return "unknown"
+    current = _release_tuple(__version__)
+    built = _release_tuple(generator.get("version"))
+    if current is None or built is None:
+        return "unknown"
+    width = max(len(current), len(built))
+    current += (0,) * (width - len(current))
+    built += (0,) * (width - len(built))
+    if built < current:
+        return "stale"
+    if built > current:
+        return "newer"
+    return "current"
+
+
 def _local_pack_status(paths: list[Path]) -> dict[str, Any]:
     """Reject generated packs whose extraction contract predates this release."""
     for root in paths:
@@ -234,15 +283,23 @@ def _local_pack_status(paths: list[Path]) -> dict[str, Any]:
                 "compatible": False,
                 "manifest": str(manifest),
                 "schema_version": None,
+                "generator_status": "unknown",
                 "error": str(exc),
             }
+        generator = payload.get("generator")
+        generator_status = _pack_generator_status(generator)
         return {
             "managed": True,
-            "compatible": schema_version == LOCAL_PACK_SCHEMA_VERSION,
+            "compatible": (
+                schema_version == LOCAL_PACK_SCHEMA_VERSION
+                and generator_status != "stale"
+            ),
             "manifest": str(manifest),
             "schema_version": schema_version,
             "required_schema_version": LOCAL_PACK_SCHEMA_VERSION,
-            "generator": payload.get("generator"),
+            "generator": generator,
+            "generator_status": generator_status,
+            "required_generator_version": __version__,
         }
     return {
         "managed": False,
@@ -250,6 +307,7 @@ def _local_pack_status(paths: list[Path]) -> dict[str, Any]:
         "manifest": None,
         "schema_version": None,
         "required_schema_version": LOCAL_PACK_SCHEMA_VERSION,
+        "generator_status": "unknown",
     }
 
 
@@ -588,10 +646,10 @@ def collect_doctor_report(
                 if templates_ready
                 else _message(
                     language,
-                    "使用 1.0 源码重新运行 "
+                    f"使用 {__version__} 源码重新运行 "
                     "tools/bootstrap_local_component_pack.py，并设置 "
                     "MULTISIM_MCP_TEMPLATE_DIR。",
-                    "Rebuild the pack with the 1.0 "
+                    f"Rebuild the pack with the {__version__} "
                     "tools/bootstrap_local_component_pack.py and set "
                     "MULTISIM_MCP_TEMPLATE_DIR.",
                 )

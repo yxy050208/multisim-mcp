@@ -14,12 +14,15 @@ from multisim_mcp.cli import (
     LOCAL_PACK_SCHEMA_VERSION,
     REQUIRED_TEMPLATES,
     _local_pack_status,
+    _pack_generator_status,
     _read_spice_design,
+    _release_tuple,
     _write_config,
     collect_doctor_report,
     main,
     render_client_config,
 )
+from multisim_mcp import __version__
 from multisim_mcp.model_provider import (
     ModelMessage,
     ModelProviderError,
@@ -44,6 +47,52 @@ class DoctorTest(unittest.TestCase):
         self.assertTrue(legacy["managed"])
         self.assertFalse(legacy["compatible"])
         self.assertTrue(current["compatible"])
+
+    def test_release_tuple_normalizes_pre_release_suffixes(self) -> None:
+        self.assertEqual(_release_tuple("1.3.0rc1"), (1, 3, 0))
+        self.assertEqual(_release_tuple("1.3.0"), (1, 3, 0))
+        self.assertEqual(_release_tuple("1.2.0"), (1, 2, 0))
+        self.assertEqual(_release_tuple("2.0"), (2, 0))
+        self.assertIsNone(_release_tuple("not-a-version"))
+        self.assertIsNone(_release_tuple(None))
+        self.assertIsNone(_release_tuple(""))
+
+    def test_pack_generator_status_classifies_versions(self) -> None:
+        self.assertEqual(_pack_generator_status({"version": __version__}), "current")
+        # An rc accepts a pack built by the final release of the same series.
+        if "rc" in __version__:
+            self.assertEqual(
+                _pack_generator_status({"version": __version__.split("rc")[0]}),
+                "current",
+            )
+        self.assertEqual(_pack_generator_status({"version": "0.9.0"}), "stale")
+        self.assertEqual(_pack_generator_status({"version": "99.0.0"}), "newer")
+        self.assertEqual(_pack_generator_status(None), "unknown")
+        self.assertEqual(_pack_generator_status({"name": "multisim-mcp"}), "unknown")
+
+    def test_local_pack_built_by_older_release_is_rejected(self) -> None:
+        """A 1.2.0 pack shares schema 2 but misses 1.3.0 templates."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write(version: str) -> dict:
+                (root / "local-pack-manifest.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": LOCAL_PACK_SCHEMA_VERSION,
+                            "generator": {"name": "multisim-mcp", "version": version},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return _local_pack_status([root])
+
+            stale = write("0.9.0")
+            current_pack = write(__version__)
+        self.assertEqual(stale["generator_status"], "stale")
+        self.assertFalse(stale["compatible"])
+        self.assertEqual(current_pack["generator_status"], "current")
+        self.assertTrue(current_pack["compatible"])
 
     def test_report_has_stable_machine_readable_shape(self) -> None:
         report = collect_doctor_report("en")
