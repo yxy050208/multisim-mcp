@@ -11,6 +11,49 @@
 
 安装：`python -m pip install multisim-mcp==1.3.0rc1`。64 位 MCP 前端仍需配置独立的 32 位 Multisim COM worker。
 
+## 升级须知：从 1.2.0 升级必须重新生成本地模板包
+
+1.3.0 的 `tools/extract_native_component_templates.py` 比 1.2.0 多提取
+`probe_element.xml`、`probe_symbol.xml`、`probe_instrument.xml`、`qnpn_model.xml`。
+**沿用 1.2.0 生成的模板包不会报错，但会静默降级**：`probe_*` 相关能力不可用，
+且仓库自带测试会有 4 个用例因缺少这些模板而失败。两者的 `schema_version` 同为 2，
+所以仅比较 schema 版本无法发现问题——这也是 1.3.0rc1 之前 `doctor` 会误报通过的原因。
+
+升级后请重新生成：
+
+```bash
+python tools/bootstrap_local_component_pack.py \
+  --samples-root "<NI Circuit Design Suite samples>" \
+  --output "<模板包目录>" --force
+# 然后把 MULTISIM_MCP_TEMPLATE_DIR 指向新目录
+```
+
+自 1.3.0rc1 起，`doctor` 会读取 manifest 中的 `generator.version` 并与当前版本比较；
+模板包由更旧版本生成时，`schematic.template_pack` 会判为 `fail` 并给出重新生成的提示，
+`local_pack.generator_status` 会给出 `stale` / `current` / `newer` / `unknown`。
+
+## English — Upgrading: regenerate the local template pack
+
+The 1.3.0 extractor emits four templates that 1.2.0 did not
+(`probe_element.xml`, `probe_symbol.xml`, `probe_instrument.xml`, `qnpn_model.xml`).
+Reusing a 1.2.0-generated pack fails **silently**: probe features stop working and
+4 repository tests fail on missing templates. Both packs report `schema_version` 2,
+so a schema-only check cannot detect it — which is why `doctor` used to pass anyway.
+
+Regenerate after upgrading:
+
+```bash
+python tools/bootstrap_local_component_pack.py \
+  --samples-root "<NI Circuit Design Suite samples>" \
+  --output "<pack directory>" --force
+# then point MULTISIM_MCP_TEMPLATE_DIR at the new directory
+```
+
+From 1.3.0rc1, `doctor` compares `generator.version` in the manifest against the
+running release. A pack built by an older release makes `schematic.template_pack`
+report `fail` with a regenerate hint, and `local_pack.generator_status` reports
+`stale` / `current` / `newer` / `unknown`.
+
 边界：真实元件实测集中于 Multisim 14.3、LM324AJ 和 2N3904；新图纸仍需人工复核。尚不保证任意复杂电路、容差/温漂/噪声分析、开关电源或多板自动生成。此版本不包含独立桌面前端。
 
 ## English
