@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "SERIES_RESISTOR",
+  "terminals": ["p", "n"],
+  "parameters": [
+    {
+      "name": "R",
+      "default": 1000,
+      "minimum": 0.001,
+      "maximum": 1000000000000
+    }
+  ],
+  "expansion": [
+    "R{stem} {p} {n} {R}"
+  ],
+  "description_zh": "社区适配器示例：串联电阻",
+  "description_en": "Community adapter example: series resistor",
+  "maturity": "community"
+}

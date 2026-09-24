@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "multisim_version": "14.3",
+  "components": [
+    {
+      "logical_family": "resistor",
+      "native_name": "R",
+      "model_source": "local-template-pack",
+      "pin_signature": ["1", "2"],
+      "supported_versions": ["14.3"],
+      "template": "r_element.xml",
+      "verified": true,
+      "evidence": "native RC divider netlist and OP/TRAN regression"
+    },
+    {
+      "logical_family": "capacitor",
+      "native_name": "C",
+      "model_source": "local-template-pack",
+      "pin_signature": ["1", "2"],
+      "supported_versions": ["14.3"],
+      "template": "c_element.xml",
+      "verified": true,
+      "evidence": "native RC and RLC regression"
+    },
+    {
+      "logical_family": "inductor",
+      "native_name": "L",
+      "model_source": "local-template-pack",
+      "pin_signature": ["1", "2"],
+      "supported_versions": ["14.3"],
+      "template": "l_element.xml",
+      "verified": true,
+      "evidence": "native RLC AC regression"
+    },
+    {
+      "logical_family": "voltage-source",
+      "native_name": "V",
+      "model_source": "local-template-pack",
+      "pin_signature": ["-", "+"],
+      "supported_versions": ["14.3"],
+      "template": "v_element.xml",
+      "verified": true,
+      "evidence": "native RC/RLC/OPAMP OP and AC regression"
+    },
+    {
+      "logical_family": "ideal-opamp5",
+      "native_name": "OPAMP5",
+      "model_source": "generated-ideal-vcvs",
+      "pin_signature": ["in+", "in-", "v+", "v-", "out"],
+      "supported_versions": ["14.3"],
+      "template": "opamp5_element.xml",
+      "verified": true,
+      "evidence": "native non-inverting gain regression; ideal VCVS semantics"
+    },
+    {
+      "logical_family": "lm324aj-section-a",
+      "native_name": "LM324AJ",
+      "model_source": "licensed-local-LM158_4",
+      "pin_signature": ["1IN+", "1IN-", "VS+", "VS-", "1OUT"],
+      "supported_versions": ["14.3"],
+      "template": "lm324aj_element.xml",
+      "verified": true,
+      "evidence": "docs/THESIS_PLUGIN_ACCEPTANCE_20260909.md; two separate section-A packages, native OP/AC/TRAN and model hashes; sampled scope only"
+    },
+    {
+      "logical_family": "vendor-opamp5-virtual",
+      "native_name": "5T_Virtual",
+      "model_source": "vendor-carrier",
+      "pin_signature": ["in+", "in-", "v+", "v-", "out"],
+      "supported_versions": ["14.3"],
+      "template": "opamp5_element.xml",
+      "verified": false,
+      "evidence": "carrier enumerates but generated output was zero; do not auto-select"
+    }
+  ]
+}
