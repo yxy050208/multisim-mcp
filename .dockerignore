@@ -1,0 +1,10 @@
+**
+!mcp_server/
+!mcp_server/pyproject.toml
+!mcp_server/LICENSE
+!mcp_server/README.md
+!mcp_server/MANIFEST.in
+!mcp_server/multisim_mcp/
+!mcp_server/multisim_mcp/*.py
+!mcp_server/multisim_mcp/templates/
+!mcp_server/multisim_mcp/templates/manifest.json

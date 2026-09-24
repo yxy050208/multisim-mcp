@@ -1,0 +1,48 @@
+{
+  "title": "Two-stage active low-pass native acceptance",
+  "application": "0.1 V DC input; low-frequency gain 10; two buffered RC stages and 100k load; ideal model only",
+  "netlist": "V1 in 0 DC 0.1 AC 1\nVCC vcc 0 DC 15\nVSS vss 0 DC -15\nR1 in lp1 10k\nC1 lp1 0 10n\nXU1 lp1 fb1 vcc vss stage1 OPAMP5\nRF1 stage1 fb1 10k\nRG1 fb1 0 10k\nR2 stage1 lp2 10k\nC2 lp2 0 10n\nXU2 lp2 fb2 vcc vss out OPAMP5\nRF2 out fb2 40k\nRG2 fb2 0 10k\nRL out 0 100k\n.end\n",
+  "probe_nets": [
+    "in",
+    "stage1",
+    "out"
+  ],
+  "experiments": [
+    {
+      "type": "op"
+    },
+    {
+      "type": "ac",
+      "commands": "ac dec 40 10 100k"
+    }
+  ],
+  "checks": [
+    {
+      "analysis": "op",
+      "net": "out",
+      "quantity": "value",
+      "min": 0.999,
+      "max": 1.001
+    },
+    {
+      "analysis": "ac",
+      "net": "out",
+      "reference_net": "in",
+      "quantity": "magnitude",
+      "min": 9.9,
+      "max": 10.01,
+      "frequency_min_hz": 10,
+      "frequency_max_hz": 100
+    },
+    {
+      "analysis": "ac",
+      "net": "out",
+      "reference_net": "in",
+      "quantity": "magnitude",
+      "min": 0,
+      "max": 0.26,
+      "frequency_min_hz": 10000,
+      "frequency_max_hz": 100000
+    }
+  ]
+}

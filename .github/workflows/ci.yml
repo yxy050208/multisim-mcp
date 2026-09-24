@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build mcp_server
+      - name: Validate MCP Registry metadata
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import re
+          from pathlib import Path
+
+          registry = json.loads(Path("server.json").read_text(encoding="utf-8"))
+          pyproject = Path("mcp_server/pyproject.toml").read_text(encoding="utf-8")
+          version = re.search(r'(?m)^version\s*=\s*"([^"]+)"$', pyproject).group(1)
+          assert registry["name"] == "io.github.yxy050208/multisim-mcp"
+          assert registry["version"] == version
+          package = registry["packages"][0]
+          assert package["registryType"] == "pypi"
+          assert package["identifier"] == "multisim-mcp"
+          assert package["version"] == version
+          assert package["transport"]["type"] == "stdio"
+          readme = Path("mcp_server/README.md").read_text(encoding="utf-8")
+          assert "mcp-name: io.github.yxy050208/multisim-mcp" in readme
+          '@ | python -
+      - name: Install built wheel
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem mcp_server/dist/*.whl | Select-Object -First 1
+          python -m pip install $wheel.FullName
+          python -m pip check
+      - name: Smoke-test installed CLI
+        shell: pwsh
+        run: |
+          multisim-mcp --help
+          multisim-mcp --json doctor | Out-File -Encoding utf8 doctor.json
+          @'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("doctor.json").read_text(encoding="utf-8-sig"))
+          assert result["command"] == "doctor"
+          assert result["success"] is True
+          assert result["introspection_ready"] is True
+          '@ | python -
+          multisim-mcp config --client generic --python $((Get-Command python).Source)
+      - name: Validate pinned DeepSeek Harness contract
+        run: |
+          python tools/check_deepseek_harness_compat.py --json
+          python tools/check_dsh_plugin_release.py --json
+      - name: Compile installed sources
+        run: python -m compileall mcp_server
+      - name: Run COM-free tests against installed wheel
+        run: python -m unittest discover -s mcp_server/tests -t mcp_server -v
+      - name: Verify public artifact contents
+        shell: pwsh
+        run: |
+          @'
+          from importlib.resources import files
+          from pathlib import Path
+          import json
+          import tarfile
+          import zipfile
+          import multisim_mcp
+
+          package = files("multisim_mcp")
+          assert package.joinpath("templates/manifest.json").is_file()
+          harness_manifest = package.joinpath("harness_skills/manifest.json")
+          assert harness_manifest.is_file()
+          skill_names = json.loads(harness_manifest.read_text(encoding="utf-8"))["skills"]
+          assert len(skill_names) == 5
+          for name in skill_names:
+              assert package.joinpath(f"harness_skills/{name}/SKILL.md").is_file()
+          wheels = list(Path("mcp_server/dist").glob("*.whl"))
+          assert wheels
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = archive.namelist()
+              assert any(name.endswith("licenses/LICENSE") for name in names)
+              assert any(name.endswith("harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
+              assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+              metadata_name = next(name for name in names if name.endswith(".dist-info/METADATA"))
+              metadata = archive.read(metadata_name).decode("utf-8")
+              assert "mcp-name: io.github.yxy050208/multisim-mcp" in metadata
+          sdists = list(Path("mcp_server/dist").glob("*.tar.gz"))
+          assert sdists
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              names = archive.getnames()
+              assert any(name.endswith("/LICENSE") for name in names)
+              assert any(name.endswith("/multisim_mcp/templates/manifest.json") for name in names)
+              assert any(name.endswith("/multisim_mcp/harness_skills/manifest.json") for name in names)
+              assert sum(name.endswith("/SKILL.md") for name in names) == 5
+              assert not any("/templates/" in name and name.endswith(".xml") for name in names)
+          print("Code-only wheel and sdist contain manifest/license and no extracted XML")
+          '@ | python -
+      - name: Compile release audit and local-pack tools
+        run: python -m compileall tools/release_audit.py tools/check_mcp_package.py tools/check_deepseek_harness_compat.py tools/check_dsh_plugin_release.py tools/check_npm_pack_result.py tools/smoke_deepseek_harness.py tools/bootstrap_local_component_pack.py tools/extract_native_component_templates.py
+
+  windows-x86-protocol:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+          architecture: "x86"
+      - name: Install on 32-bit Python
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ./mcp_server
+          python -m pip check
+      - name: Verify 32-bit MCP 2 modern and legacy protocol surface
+        shell: pwsh
+        run: |
+          @'
+          import importlib.metadata
+          import struct
+
+          assert struct.calcsize("P") * 8 == 32
+          assert importlib.metadata.version("mcp").startswith("2.")
+          assert importlib.metadata.version("cryptography").startswith("48.")
+          '@ | python -
+          python -m unittest discover -s mcp_server/tests -t mcp_server -p "test_*.py"
+
+  linux-introspection:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Build introspection-only image
+        run: docker build --tag multisim-mcp-glama .
+      - name: Verify Linux runtime diagnostics
+        run: |
+          docker run --rm -i multisim-mcp-glama python - <<'PY'
+          from multisim_mcp.multisim_client import runtime_diagnostics
+
+          result = runtime_diagnostics()
+          assert result["windows"] is False
+          assert result["runtime_compatible"] is False
+          assert result["runtime_mode"] == "introspection-only"
+          print(result)
+          PY
+      - name: Verify modern and legacy MCP introspection through Docker stdio
+        run: |
+          python -m pip install "mcp>=2.0.0,<3"
+          python - <<'PY'
+          import asyncio
+          from mcp import Client
+          from mcp.client.stdio import StdioServerParameters, stdio_client
+
+          async def main():
+              for mode, expected in (
+                  ("2026-07-28", "2026-07-28"),
+                  ("legacy", "2025-11-25"),
+              ):
+                  params = StdioServerParameters(
+                      command="docker",
+                      args=["run", "--rm", "-i", "multisim-mcp-glama"],
+                  )
+                  async with Client(stdio_client(params), mode=mode) as session:
+                      tools = await session.list_tools()
+                      prompts = await session.list_prompts()
+                      resources = await session.list_resource_templates()
+                      assert session.protocol_version == expected
+                  names = {tool.name for tool in tools.tools}
+                  assert "runtime_status" in names
+                  assert "run_circuit_experiment" in names
+                  assert "submit_circuit_experiment" in names
+                  assert "cancel_experiment_job" in names
+                  assert "retry_experiment_job" in names
+                  # The 1.3 development branch exposes the expanded design,
+                  # approval, and native-sweep surface.
+                  assert len(names) == 107
+                  assert len(prompts.prompts) == 5
+                  assert len(resources.resource_templates) == 20
+                  print(f"{mode}: {len(names)} tools")
+
+          asyncio.run(main())
+          PY
+
+  linux-ngspice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install ngspice and package
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ngspice
+          python -m pip install ./mcp_server
+          python -m pip check
+      - name: Verify real ngspice backend and complete experiment pipeline
+        run: >-
+          python -m unittest discover
+          -s mcp_server/tests
+          -p "test_real_ngspice.py"
+          -v

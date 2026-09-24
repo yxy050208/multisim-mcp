@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "title": "原生 API 样例电阻参数变更实验",
+  "application": "验证 R1 参数变更是否进入 Multisim 仿真",
+  "constraints": [
+    "使用本机授权的 API Toolkit RLC Values.ms14 样例及其 API 输出探针"
+  ],
+  "boards": [
+    {
+      "id": "main",
+      "role": "primary"
+    }
+  ],
+  "experiments": [
+    {
+      "type": "op",
+      "outputs": [
+        "V(OutProbe)",
+        "I(OutProbe)"
+      ]
+    },
+    {
+      "type": "ac",
+      "commands": "ac lin 11 10 1k",
+      "outputs": [
+        "V(OutProbe)",
+        "I(OutProbe)"
+      ]
+    },
+    {
+      "type": "ac",
+      "commands": "ac dec 5 10 1k",
+      "outputs": [
+        "V(OutProbe)"
+      ]
+    },
+    {
+      "type": "ac",
+      "commands": "ac oct 5 10 1k",
+      "outputs": [
+        "V(OutProbe)"
+      ]
+    },
+    {
+      "type": "tran",
+      "commands": "tran 10u 2m",
+      "outputs": [
+        "V(OutProbe)",
+        "I(OutProbe)"
+      ]
+    }
+  ],
+  "objectives": []
+}
