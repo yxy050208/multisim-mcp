@@ -40,7 +40,7 @@ _MODEL_COMPONENT_KINDS = frozenset(
 # Native vendor-backed carriers are emitted as portable X instances when a
 # structured design is rebuilt.  They do not require an inline .model record;
 # the user-local Multisim component pack supplies their native identity.
-_NATIVE_CARRIER_KINDS = frozenset({"TIMER8", "DFF8"})
+_NATIVE_CARRIER_KINDS = frozenset({"TIMER8", "DFF8", "CD4017"})
 
 
 def _stable_design_id(netlist: str) -> str:

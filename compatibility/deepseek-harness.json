@@ -28,14 +28,16 @@
     "compatible_core_versions": [
       "1.1.0",
       "1.2.0",
-      "1.3.0rc1"
+      "1.3.0rc1",
+      "1.3.0rc2",
+      "1.3.0rc3"
     ],
     "bundle_path": "integrations/deepseek-harness",
     "tool_profiles": {
-      "core": 29,
-      "experiment": 84,
+      "core": 34,
+      "experiment": 89,
       "optimization": 70,
-      "full": 107
+      "full": 112
     },
     "skills": [
       "multisim-create-experiment",

@@ -22,7 +22,14 @@ def compare_roundtrip_topology(
     """Compare stable names without assuming a vendor netlist dialect."""
     components = sorted({str(item) for item in expected_components if str(item) and str(item) != "0"})
     nets = sorted({str(item) for item in expected_nets if str(item) and str(item) != "0"})
-    missing_components = [item for item in components if not _present(exported_netlist, item)]
+    # Multisim names single-section instances of a multi-section package with
+    # the package's own section suffix (for example U1 -> U1A for the first
+    # op-amp of an LM324 carrier). Accept that alias instead of reporting a
+    # false "component lost" failure.
+    def _seen(name: str) -> bool:
+        return _present(exported_netlist, name) or _present(exported_netlist, name + "A")
+
+    missing_components = [item for item in components if not _seen(item)]
     missing_nets = [item for item in nets if not _present(exported_netlist, item)]
     # Extra names are intentionally not inferred from arbitrary tokens: vendor
     # netlists contain model names and internal nodes that are not source nets.
