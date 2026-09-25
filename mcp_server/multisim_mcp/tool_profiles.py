@@ -119,6 +119,11 @@ ALL_TOOL_NAMES = frozenset(
         "set_rlc_value",
         "decode_ms14",
         "encode_ms14",
+        "list_component_positions",
+        "set_component_positions",
+        "set_sheet_size",
+        "check_component_overlap",
+        "validate_layout_positions",
     }
 )
 
@@ -145,6 +150,11 @@ _CIRCUIT_CORE = frozenset(
         "set_rlc_value",
         "decode_ms14",
         "encode_ms14",
+        "list_component_positions",
+        "set_component_positions",
+        "set_sheet_size",
+        "check_component_overlap",
+        "validate_layout_positions",
     }
 )
 

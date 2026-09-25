@@ -8,7 +8,7 @@ experiments, exporting data, and generating reproducible reports.
 非官方 Multisim 自动化 MCP：从受限 SPICE 网表生成可编辑电路图，调用本机
 Multisim 执行实验，并导出 `.ms14`、原理图、raw、CSV、SVG 和 Markdown 报告。
 
-> MCP Core 1.3.0rc1 release candidate; stable 1.2.0 remains available.
+> MCP Core 1.3.0rc3 release candidate; stable 1.2.0 remains available.
 > This source/package does not include the React Workbench frontend. It may expose
 > optional loopback bridge APIs for compatible local clients. This project is not
 > affiliated with NI. Multisim must be

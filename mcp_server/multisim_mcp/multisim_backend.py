@@ -196,6 +196,9 @@ class MultisimBackend:
             open_after_build=request.open_after_build,
             image_path=str(image) if image else None,
             overwrite=request.overwrite,
+            component_positions=request.component_positions,
+            min_sheet_size=request.min_sheet_size,
+            verify=request.verify,
         )
         success = result.get("success") is True
         paths = [ms14, Path(str(ms14) + ".xml")]

@@ -190,6 +190,9 @@ class SchematicRequest:
     include_experimental_probes: bool = False
     probe_nets: tuple[str, ...] = ()
     overwrite: bool = False
+    component_positions: dict[str, Any] | None = None
+    min_sheet_size: tuple[float, float] | None = None
+    verify: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.design, CircuitDesign):

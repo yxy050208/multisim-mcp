@@ -7,7 +7,7 @@ which cannot be drawn raises an error instead of silently crossing a symbol.
 from __future__ import annotations
 
 import heapq
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from functools import lru_cache
 from typing import Any
 
@@ -104,6 +104,37 @@ def route(start: Point, end: Point, obstacles: list[dict[str, Any]], *,
             xs.update((a[0] - 9, a[0] + 9))
         else:
             ys.update((a[1] - 9, a[1] + 9))
+    # Spatial buckets: a horizontal edge can only ever interact with
+    # horizontal segments on its own row and vertical segments whose x falls
+    # inside the edge's span (and vice versa).  The buckets are kept as
+    # sorted arrays so an edge can pull every segment whose perpendicular
+    # coordinate lies inside the edge's span (bisect) -- segments may sit at
+    # coordinates that are NOT grid rows/cols (elbow fallback points), so a
+    # plain per-grid-line lookup would miss them.  With the buckets, cost()
+    # semantics are identical to the old scan-everything loop while cutting
+    # it from O(all segments) to O(log n + nearby) -- the difference between
+    # minutes and seconds on large custom layouts.
+    h_by_row: dict[float, list[tuple[Point, Point]]] = {}
+    v_by_col: dict[float, list[tuple[Point, Point]]] = {}
+    for a, b in occupied:
+        if a[0] == b[0]:
+            v_by_col.setdefault(a[0], []).append((a, b))
+        else:
+            h_by_row.setdefault(a[1], []).append((a, b))
+    h_rows = sorted(h_by_row.items())
+    h_row_ys = [y for y, _segs in h_rows]
+    v_cols = sorted(v_by_col.items())
+    v_col_xs = [x for x, _segs in v_cols]
+
+    def _segs_in_range(indexed: list, coords: list, lo: float, hi: float):
+        lo, hi = min(lo, hi), max(lo, hi)
+        start_i = bisect_left(coords, lo)
+        end_i = bisect_right(coords, hi)
+        out: list[tuple[Point, Point]] = []
+        for _coord, segs in indexed[start_i:end_i]:
+            out.extend(segs)
+        return out
+
     xs.update((min(xs)-18, max(xs)+18))
     ys.update((min(ys)-18, max(ys)+18))
     xx, yy = sorted(xs), sorted(ys)
@@ -117,8 +148,14 @@ def route(start: Point, end: Point, obstacles: list[dict[str, Any]], *,
         a, b = (xx[x], yy[y]), (xx[nx], yy[ny])
         if any(crosses_box(a, b, box) for box in boxes):
             return float("inf")
+        if a[1] == b[1]:
+            local = list(h_by_row.get(a[1], ()))
+            local.extend(_segs_in_range(v_cols, v_col_xs, a[0], b[0]))
+        else:
+            local = list(v_by_col.get(a[0], ()))
+            local.extend(_segs_in_range(h_rows, h_row_ys, a[1], b[1]))
         crossings = 0
-        for c, d in occupied:
+        for c, d in local:
             relation = segment_relation(a, b, c, d)
             if relation == "overlap":
                 return float("inf")
