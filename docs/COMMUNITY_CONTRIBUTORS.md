@@ -9,14 +9,15 @@ Their work includes:
 - aligning round-trip topology checks with Multisim `ReportNetlist` behavior;
 - binding native XSPICE model objects for digital and carrier devices;
 - validating the signal-chain ordering and excessive-crossing gate in the
-  follow-up branch; this layout profile remains a tracked next-phase merge
-  because the current `main` keeps the safer generic placement path; and
+  follow-up branch; the profile and crossing-rate validator are now merged,
+  while real Multisim regression evidence remains a follow-up; and
 - preserving native reference designators such as `R0` and `AINV0` through schematic encoding and reopening.
 
 The round-trip, XSPICE, and reference-designator fixes from this contribution
 are retained in `main` and were tested against Multisim 14.3. The signal-chain
-layout profile and crossing-rate gate remain explicitly tracked for the next
-layout regression milestone rather than being presented as already shipped.
+layout profile and crossing-rate validator are now in the working `main`; the
+next milestone is to validate them against real Multisim round trips and
+representative LED/digital boards.
 
 ## ijay11111
 

@@ -2627,6 +2627,117 @@ def _rectifier_profile(specs: list[ComponentSpec]) -> dict[str, Any] | None:
                          'RLOAD':(909,216), '0':(909,486)}}
 
 
+def _digital_stage_profile(specs: list[ComponentSpec]) -> dict[str, Any] | None:
+    """Lay multi-stage digital logic out in signal-chain reading order.
+
+    The generic connectivity order is stable but can scatter sequential logic
+    across the sheet when a clock/reset bus connects many devices.  This
+    profile follows low-fanout data nets, keeps passive support parts beside
+    the device they serve, and leaves analog-active designs on their existing
+    dedicated profiles.
+    """
+    parts = [item for item in specs if item.kind != "GND"]
+    if not parts:
+        return None
+    digital_kinds = set(DIGITAL_MODEL_KINDS.values())
+    digital = [item for item in parts if item.kind in digital_kinds]
+    analog_active = {"OPAMP5", "LM324AJ", "QNPN", "QPNP", "MNMOS", "MPMOS", "JN", "JP"}
+    if len(digital) < 3 or any(item.kind in analog_active for item in parts):
+        return None
+
+    supply_names = {"0", "vdd", "vcc", "vss", "gnd", "vee"}
+    members: dict[str, list[int]] = {}
+    for index, item in enumerate(parts):
+        for node in set(item.nodes):
+            members.setdefault(node, []).append(index)
+    data_nets = {
+        node for node, indexes in members.items()
+        if node.lower() not in supply_names and len(indexes) <= 3
+    }
+    drives: dict[int, list[int]] = {index: [] for index in range(len(parts))}
+    for node in data_nets:
+        indexes = members[node]
+        for source in indexes:
+            for target in indexes:
+                if source != target:
+                    drives[source].append(target)
+
+    source_kinds = {"V", "I", "BV", "BI", "XFG3"}
+    support_kinds = {"R", "C", "L", "D", "K"}
+    is_support = [item.kind in support_kinds for item in parts]
+    is_driver = [item.kind in source_kinds for item in parts]
+    order: list[int] = []
+    emitted: set[int] = set()
+
+    def walk(index: int) -> None:
+        if index in emitted:
+            return
+        emitted.add(index)
+        order.append(index)
+        for target in sorted(drives[index]):
+            if not is_support[target]:
+                walk(target)
+
+    for index, driver in enumerate(is_driver):
+        if driver:
+            walk(index)
+    for index, support in enumerate(is_support):
+        if not support:
+            walk(index)
+    for index in range(len(parts)):
+        if index not in emitted and not is_support[index]:
+            emitted.add(index)
+            order.append(index)
+
+    attached: dict[int, list[int]] = {}
+    trailing: list[int] = []
+    for index, support in enumerate(is_support):
+        if not support:
+            continue
+        host = next(
+            (
+                other
+                for node in parts[index].nodes
+                if node.lower() not in supply_names
+                for other in members.get(node, ())
+                if other != index and not is_support[other] and other in emitted
+            ),
+            None,
+        )
+        if host is None:
+            trailing.append(index)
+        else:
+            attached.setdefault(host, []).append(index)
+    ordered: list[int] = []
+    for index in order:
+        ordered.append(index)
+        ordered.extend(attached.get(index, ()))
+    ordered.extend(trailing)
+
+    # Keep short chains on one row so a load really stays beside its host;
+    # wider designs retain the bounded six-column sheet used by the generic
+    # placement path.
+    per_row = (
+        len(ordered)
+        if len(ordered) <= 6
+        else min(6, max(2, math.ceil(math.sqrt(max(1, len(ordered) + 1)))))
+    )
+    origin_x, origin_y = 36, 117
+    col_step, row_step = 270, 216
+    positions = {
+        parts[index].refdes: (
+            origin_x + (slot % per_row) * col_step,
+            origin_y + (slot // per_row) * row_step,
+        )
+        for slot, index in enumerate(ordered)
+    }
+    row_count = (len(ordered) - 1) // per_row + 1
+    for item in specs:
+        if item.kind == "GND":
+            positions[item.refdes] = (origin_x, origin_y + row_count * row_step)
+    return {"positions": positions}
+
+
 def _common_emitter_profile(specs: list[ComponentSpec]) -> dict[str, Any] | None:
     expected = {"VCC": ("V", ["vcc", "0"]), "VIN": ("V", ["in", "0"]),
                 "RBIAS1": ("R", ["vcc", "base"]), "RBIAS2": ("R", ["base", "0"]),
@@ -3591,6 +3702,9 @@ def build_schematic(
     opamp_profile = _opamp_profile(specs)
     ce_profile = _common_emitter_profile(specs)
     rectifier_profile = _rectifier_profile(specs)
+    digital_profile = None
+    if not any((simple_profile, opamp_profile, ce_profile, rectifier_profile)):
+        digital_profile = _digital_stage_profile(specs)
     node_records: dict[str, dict[str, Any]] = {}
     connections: dict[str, list[dict[str, Any]]] = {}
     component_items: list[ET.Element] = []
@@ -3718,6 +3832,8 @@ def build_schematic(
             x, y = ce_profile['positions'][spec.refdes]
         elif rectifier_profile:
             x, y = rectifier_profile['positions'][spec.refdes]
+        elif digital_profile:
+            x, y = digital_profile['positions'][spec.refdes]
         position_override = (component_positions or {}).get(spec.refdes)
         if position_override:
             x, y = float(position_override[0]), float(position_override[1])
@@ -4219,7 +4335,7 @@ def build_schematic(
 
     return {
         "xml": str(output_path),
-        "layout_profile": "bridge_rectifier" if rectifier_profile else "common_emitter" if ce_profile else "source_series_shunt" if simple_profile else "pin_escape_obstacle_routing",
+        "layout_profile": "bridge_rectifier" if rectifier_profile else "common_emitter" if ce_profile else "source_series_shunt" if simple_profile else "digital_signal_chain" if digital_profile else "pin_escape_obstacle_routing",
         "geometry": {"placements": placements, "wires": net_wires, "pins": net_pin_points},
         "components": [
             {

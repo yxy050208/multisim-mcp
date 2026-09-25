@@ -23,10 +23,10 @@
 - 主分支最新提交：`97d4ac2`。
 - 公开 CI 的 `checks`、`windows-x86-protocol`、`linux-introspection` 和
   `linux-ngspice` 全部通过；本地 Harness 契约检查通过。
-- 当前完整测试基线为 `792 passed, 45 skipped, 139 subtests`（共 837 个测试项）；真实 Multisim 证据集中在已记录的
+- 当前完整测试基线为 `796 passed, 45 skipped, 139 subtests`（共 841 个测试项）；真实 Multisim 证据集中在已记录的
   14.3 环境和组件族，不能据此宣称任意复杂电路或生产级认证。
-- 仍需对数字电路、LED 板和多板工程建立布局回归基准；重叠、穿体、跨网交叉率
-  必须在交付前作为硬门禁。
+- 已加入数字信号链布局和 `crossings_per_wire` 几何错误；仍需对数字电路、LED
+  板和多板工程建立真实 Multisim 回归基准，并在交付层把失败结果阻断或自动修复。
 
 ## 安装边界
 

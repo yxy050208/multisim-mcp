@@ -31,6 +31,39 @@ class LayoutValidationTest(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertIn("wire-endpoint-off-pin", {item["code"] for item in result["findings"]})
 
+    def test_crossing_rate_is_a_hard_geometry_finding(self) -> None:
+        result = validate_schematic_geometry(
+            [],
+            {
+                "a": [[(0, 10), (30, 10)]],
+                "b": [[(15, 0), (15, 20)]],
+            },
+            max_crossings_per_wire=0.5,
+        )
+        self.assertEqual(result["different_net_crossings"], 1)
+        self.assertEqual(result["crossings_per_wire"], 0.5)
+        self.assertEqual(result["crossings_limit_per_wire"], 0.5)
+        self.assertEqual(result["status"], "pass")
+
+        result = validate_schematic_geometry(
+            [],
+            {
+                "a": [[(0, 10), (30, 10)]],
+                "b": [[(15, 0), (15, 20)]],
+            },
+            max_crossings_per_wire=0.49,
+        )
+        self.assertEqual(result["status"], "fail")
+        finding = next(item for item in result["findings"] if item["code"] == "excessive-wire-crossings")
+        self.assertEqual(finding["crossings"], 1)
+        self.assertEqual(finding["wires"], 2)
+
+    def test_crossing_limit_rejects_invalid_values(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_schematic_geometry([], {}, max_crossings_per_wire=-1)
+        with self.assertRaises(ValueError):
+            validate_schematic_geometry([], {}, max_crossings_per_wire=True)
+
 
 if __name__ == "__main__":
     unittest.main()
