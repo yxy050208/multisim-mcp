@@ -9,7 +9,8 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> The current GitHub stable release is `v1.2.0`. This project is not affiliated
+> The current GitHub stable release is `v1.2.0`; the source tree currently tracks
+> the unreleased `1.3.0rc3` candidate. This project is not affiliated
 > with or endorsed by NI. A
 > locally installed and licensed Multisim 14+ environment is required. The
 > COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
@@ -239,7 +240,7 @@ merges into a live Claude Desktop, Codex, or Harness configuration automatically
 See the [DeepSeek / Harness integration guide](docs/DEEPSEEK_HARNESS.md) for the
 credential boundary and compatibility baseline.
 `--tool-profile core|experiment|optimization|full` limits tool discovery;
-omitting it preserves the 55-tool `full` compatibility mode. Artifact export is
+omitting it preserves the 112-tool `full` compatibility mode. Artifact export is
 disabled unless `--artifact-export-dir` explicitly approves a destination root.
 The Harness skill installer preserves existing files unless `--force` is explicit.
 Model-provider self-configuration supports DeepSeek, OpenAI, Ollama, and custom

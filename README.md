@@ -8,7 +8,7 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前发布候选版为 `1.3.0rc3`（GitHub 标签 `v1.3.0rc3`）。项目非 NI 官方产品，需要本机安装并授权
+> 当前源码候选版为 `1.3.0rc3`；GitHub/PyPI 当前公开稳定版仍为 `v1.2.0`，rc3 尚未创建公开标签或发行包。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
@@ -25,14 +25,15 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 脉冲响应。图纸使用真实直流/脉冲源、共射布局和隐藏测量面板。要求重建本地模板包，
 当前仅实测 Multisim 14.3；新工程仍需图面复核，不代表第二阶段全部完成。
 
-第二阶段预览版的准确变更、验证结果和发布边界见
-[`1.3.0rc1 发布说明`](docs/RELEASE_NOTES_v1.3.0rc1.md)。
+当前源码候选版的准确变更、验证结果和发布边界见
+[`1.3.0rc3 发布说明`](docs/RELEASE_NOTES_v1.3.0rc3.md)；已发布的 rc1 仍保留在
+[`rc1 发布说明`](docs/RELEASE_NOTES_v1.3.0rc1.md)。
 
 后续源码开发新增 [桥式整流原生插件工作流](docs/RECTIFIER_NATIVE_ACCEPTANCE.md)：
 `run_natural_rectifier` 从低压交流输入、负载电流和纹波要求生成 1N4001GP 桥式电路，
 核对原生模型、引脚及保存参数，运行 OP/TRAN 并导出图纸、波形与报告。
 已完成默认工况、4V/5mA、18V/60Hz/200mA 和更严格纹波工况的本机实测。
-此新增能力尚未进入 `1.3.0rc1` 发布包，不包含稳压电源或实物设计认证。
+这些新增能力属于源码候选版，尚未进入公开发行包；不包含稳压电源或实物设计认证。
 
 进一步新增 [原生整流电容优化闭环](docs/RECTIFIER_OPTIMIZATION.md)：
 `optimize_natural_rectifier` 固定负载比较九个电容候选，检查输入/负载/电容变化及启动，
@@ -311,7 +312,7 @@ C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
 DeepSeek 模型与官方 Harness 的分层、凭据边界和版本兼容性见
 [`DeepSeek / Harness 适配说明`](docs/DEEPSEEK_HARNESS.md)。
 `--tool-profile core|experiment|optimization|full` 可限制客户端发现的工具；
-省略时保持 55 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
+省略时保持 112 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
 `--artifact-export-dir` 后可用，并且只能写入该目录之下。
 Harness Skill 安装默认不覆盖现有文件；需要恢复打包版本时显式增加 `--force`。
 模型 Provider 自助配置支持 DeepSeek、OpenAI、Ollama 和任意

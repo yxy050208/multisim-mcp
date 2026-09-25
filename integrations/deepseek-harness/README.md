@@ -1,6 +1,12 @@
-# 1.3.0-rc.1 preview update
+# 1.3.0-rc.1 public bundle / 1.3.0rc3 source compatibility
 
-Install the candidate core with `python -m pip install multisim-mcp==1.3.0rc1`, then add `multisim-mcp-dsh-plugin@1.3.0-rc.1`. This adapter uses the configured Python MCP server; it does not bundle Python or Multisim. New capabilities remain limited to the documented validated circuit families.
+The published npm bundle remains `multisim-mcp-dsh-plugin@1.3.0-rc.1` and the
+published Python candidate is `multisim-mcp==1.3.0rc1`. The source tree also
+contains the unreleased `1.3.0rc3` core; the compatibility manifest records it
+as compatible, but it must be installed from a local checkout until a package
+and tag are published. This adapter uses the configured Python MCP server; it
+does not bundle Python or Multisim. New capabilities remain limited to the
+documented validated circuit families.
 
 # Multisim MCP 的 DeepSeek Harness 插件
 
@@ -14,8 +20,8 @@ Install the candidate core with `python -m pip install multisim-mcp==1.3.0rc1`, 
 
 ```powershell
 $env:MULTISIM_MCP_PYTHON = "C:\path\to\python32\python.exe"
-& $env:MULTISIM_MCP_PYTHON -m pip install "multisim-mcp==1.1.0"
-dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.1.0"
+& $env:MULTISIM_MCP_PYTHON -m pip install "multisim-mcp==1.3.0rc1"
+dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.0-rc.1"
 dsh --profile web --dump-config
 ```
 
