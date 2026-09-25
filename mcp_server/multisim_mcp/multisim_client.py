@@ -35,6 +35,72 @@ PROG_ID = "MultisimInterface.MultisimApp"
 CODEC_PACKAGE = "electronics-workbench-decoder@0.2.0"
 
 
+def _com_cache_root() -> Optional[Path]:
+    """Where pywin32 keeps its generated makepy wrappers for this user."""
+    try:
+        from win32com import client as wc  # noqa: WPS433 (local import is fine)
+
+        return Path(wc.gencache.GetGeneratePath())
+    except Exception:
+        temp = os.environ.get("TEMP") or os.environ.get("TMP")
+        if not temp:
+            return None
+        return Path(temp) / "gen_py"
+
+
+def repair_com_cache() -> Optional[str]:
+    """Delete a broken pywin32 gen_py cache before it can break COM startup.
+
+    WHY THIS EXISTS
+    ---------------
+    pywin32 materialises COM type-library wrappers under
+    ``%TEMP%\\gen_py``.  When that cache is left half-written -- a crashed
+    Multisim, an interrupted makepy, an antivirus sweep -- the directory can
+    end up holding nothing but ``__init__.py``, or a stale ``*.py.<pid>.temp``
+    placeholder.  ``gencache.EnsureDispatch`` then dies while writing the
+    wrapper:
+
+        FileNotFoundError: ... gen_py\\3.11\\<CLSID>x0x1x0\\
+                           MultisimCircuit.py.48716.temp
+
+    which surfaces to the user as "Multisim cannot open the file" even though
+    the .ms14 itself is fine.  It is a cache, so wiping it is safe: pywin32
+    regenerates it on demand.
+
+    Returns a short human-readable note when a repair happened, else None.
+    """
+    root = _com_cache_root()
+    if root is None or not root.exists():
+        return None
+
+    broken: list[str] = []
+    # 1. leftovers from an interrupted generate
+    for temp_file in root.rglob("*.temp"):
+        broken.append(f"stale {temp_file.name}")
+        break
+    # 2. a version dir that has __init__.py but no generated module at all
+    if not broken:
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            if not (child / "__init__.py").exists():
+                continue
+            modules = [p for p in child.iterdir()
+                       if p.suffix == ".py" and p.name != "__init__.py"]
+            if not modules and not any(child.iterdir()):
+                broken.append(f"empty {child.name}")
+                break
+
+    if not broken:
+        return None
+
+    try:
+        shutil.rmtree(root)
+    except Exception as exc:  # pragma: no cover - best-effort housekeeping
+        return f"gen_py cache looked broken ({', '.join(broken)}) but could not be removed: {exc}"
+    return f"removed corrupt gen_py cache ({', '.join(broken)})"
+
+
 def runtime_diagnostics() -> dict:
     """Return actionable runtime details without starting Multisim."""
     bits = struct.calcsize("P") * 8
@@ -120,12 +186,17 @@ class MultisimClient:
         require_compatible_runtime()
         self._ensure_com()
         if self._app is None:
+            # A half-written gen_py cache makes EnsureDispatch fail *while
+            # writing the wrapper* (FileNotFoundError on a *.py.<pid>.temp)
+            # and also poisons later calls. Sweep it before first use.
+            repair_com_cache()
             try:
                 self._app = win32_client.gencache.EnsureDispatch(PROG_ID)
-            except AttributeError as cache_exc:
+            except (AttributeError, FileNotFoundError, OSError) as cache_exc:
                 # A stale/corrupt pywin32 gen_py cache can make EnsureDispatch
                 # fail before COM activation (for example, a generated module
-                # missing CLSIDToClassMap). Dynamic dispatch uses the same
+                # missing CLSIDToClassMap, or a truncated wrapper left behind
+                # by a crashed Multisim). Dynamic dispatch uses the same
                 # registered local COM server without depending on that cache.
                 try:
                     self._app = win32_client.dynamic.Dispatch(PROG_ID)
@@ -814,18 +885,12 @@ class Ms14Codec:
         generated = source + ".xml"
         target = os.path.abspath(output_xml) if output_xml else generated
         if os.path.abspath(target) != os.path.abspath(generated):
-            # The decoder writes beside the source, so a nested destination would
-            # otherwise fail on the copy with a bare WinError 3.
-            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
             shutil.copy2(generated, target)
         return {"xml": target, "size": os.path.getsize(target)}
 
     def encode(self, source_xml: str, output_ms14: Optional[str] = None) -> dict:
         source_xml = os.path.abspath(source_xml)
-        output_ms14 = os.path.abspath(
-            output_ms14 or source_xml.removesuffix(".xml")
-        )
-        os.makedirs(os.path.dirname(output_ms14) or ".", exist_ok=True)
+        output_ms14 = output_ms14 or source_xml.removesuffix(".xml")
         proc = subprocess.run(
             [
                 *self._base_cmd("ewe"),

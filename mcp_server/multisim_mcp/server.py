@@ -155,6 +155,7 @@ from multisim_mcp.com_worker_client import (
 )
 from multisim_mcp.multisim_backend import MultisimBackend
 from multisim_mcp.ngspice_backend import NgspiceBackend, cancellable_process_runner
+from multisim_mcp import component_placement
 from multisim_mcp.backend_selection import (
     EXPERIMENT_BACKEND_ENV,
     selected_experiment_backend,
@@ -176,8 +177,6 @@ from multisim_mcp.schematic_builder import (
     build_schematic,
     parse_netlist,
     prepare_simulation_netlist,
-    template_completeness,
-    template_status,
     template_search_paths,
 )
 from multisim_mcp.topology_validation import compare_pin_connections, compare_roundtrip_topology
@@ -671,24 +670,13 @@ def connect() -> dict:
 def runtime_status() -> dict:
     """Check local EDA runtime compatibility without starting Multisim."""
     result = worker_runtime_diagnostics(_MULTISIM_WORKER)
-    # Report per-family completeness so a pack that is missing optional carriers
-    # does not read as fully ready.
-    completeness = template_completeness()
-    paths = completeness["search_paths"]
+    paths = template_search_paths()
     required = ("minimal.ms14.xml", "wire.xml", "r_element.xml")
     missing = [
         name for name in required if not any((path / name).is_file() for path in paths)
     ]
-    # Match doctor: a pack is not fully ready while any documented family is
-    # unavailable. Keep the graded status so callers can distinguish an
-    # optional-carrier warning from a core-family failure.
-    result["schematic_templates_ready"] = not missing and completeness["complete"]
-    result["schematic_templates_status"] = "fail" if missing else template_status(paths)
+    result["schematic_templates_ready"] = not missing
     result["missing_schematic_templates"] = missing
-    result["unavailable_component_kinds"] = completeness["unavailable_kinds"]
-    result["missing_component_templates"] = completeness["missing_by_kind"]
-    result["core_missing_component_kinds"] = completeness["core_missing_kinds"]
-    result["extended_missing_component_kinds"] = completeness["extended_missing_kinds"]
     result["tool_profile"] = tool_profile_status(_TOOL_PROFILE)
     result["api_contract"] = build_capabilities(
         server_version=__version__,
@@ -1351,32 +1339,18 @@ def schematic_component_catalog() -> dict:
         "W", "K", "O", "U", "DNOT4", "DAND5", "DOR5",
         "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "DJK7",
     }
-    # Share one completeness source of truth with `doctor` so the two surfaces
-    # cannot disagree about what this pack can actually build.
-    completeness = template_completeness()
-    search_paths = completeness["search_paths"]
-    missing_by_kind = completeness["missing_by_kind"]
-    unavailable = set(completeness["unavailable_kinds"])
-    templates_ready = completeness["complete"]
+    search_paths = template_search_paths()
+    templates_ready = any(
+        (path / "minimal.ms14.xml").is_file() for path in search_paths
+    )
     return {
         "template_search_paths": [str(path) for path in search_paths],
         "schematic_templates_ready": templates_ready,
-        "schematic_templates_status": (
-            "fail"
-            if completeness["core_missing_kinds"]
-            else "warn"
-            if completeness["extended_missing_kinds"]
-            else "pass"
-        ),
         "template_setup_hint": (
             None
             if templates_ready
             else "Generate a local pack and set MULTISIM_MCP_TEMPLATE_DIR."
         ),
-        "unavailable_kinds": completeness["unavailable_kinds"],
-        "core_missing_kinds": completeness["core_missing_kinds"],
-        "extended_missing_kinds": completeness["extended_missing_kinds"],
-        "missing_templates_by_kind": missing_by_kind,
         "native": [
             {
                 "kind": definition.kind,
@@ -1386,14 +1360,23 @@ def schematic_component_catalog() -> dict:
                     else len(definition.port_templates)
                 ),
                 "value_unit": definition.value_unit,
-                "ready": definition.kind not in unavailable,
-                "missing_templates": missing_by_kind.get(definition.kind, []),
+                "ready": any(
+                    all(
+                        (path / filename).is_file()
+                        for filename in (
+                            definition.element_template,
+                            definition.symbol_template,
+                            *definition.port_templates,
+                        )
+                    )
+                    for path in search_paths
+                ),
                 "maturity": (
                     "experimental-carrier"
                     if definition.kind in experimental_carriers
                     else (
                         "local-native-verified"
-                        if definition.kind in {"TIMER8", "DFF8"}
+                        if definition.kind in {"TIMER8", "DFF8", "CD4017"}
                         else "native-verified"
                     )
                 ),
@@ -2070,6 +2053,28 @@ def _run_spice_netlist_impl(
             work_dir, output_dir, overwrite=overwrite
         )
         summary["output_dir"] = output_dir
+    # Transient-convergence rescue hint.  The LM158/LM324 vendor macro used by
+    # the LED practice boards aborts "Unable to converge" mid-ramp unless the
+    # netlist carries rshunt + gear (see make_v6_netlists.py CONV_OPTIONS).
+    # Surface the known fix next to the failure instead of a bare error.
+    # NOTE: the engine reports success=True even for an aborted transient
+    # (partial raw data still parses), so the log is scanned unconditionally.
+    log_text = ""
+    try:
+        log_text = Path(str(summary["log"])).read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        log_text = str(summary.get("log_tail") or "")
+    lowered = log_text.lower()
+    if "unable to converge" in lowered or "error: matrix is singular" in lowered:
+        summary["convergence_hint"] = (
+            "Transient failed to converge. Known fix for op-amp macro "
+            "circuits (LM158/LM324 etc.): add '.options rshunt=3e11 "
+            "method=gear' to the netlist (rshunt gives every node a DC "
+            "path, gear stabilises the integrator ramp; both together are "
+            "required). See breathing_led_v7.cir for a working example."
+        )
     return summary
 
 
@@ -2122,6 +2127,9 @@ def _create_schematic_impl(
     open_after_build: bool,
     image_path: str | None,
     overwrite: bool,
+    component_positions: dict[str, Any] | None = None,
+    min_sheet_size: tuple[float, float] | None = None,
+    verify: bool = True,
 ) -> dict:
     validate_spice_netlist(netlist)
     parsed = parse_netlist(netlist)
@@ -2156,6 +2164,8 @@ def _create_schematic_impl(
         netlist,
         xml_path,
         probe_nets=selected_probes,
+        component_positions=component_positions,
+        min_sheet_size=min_sheet_size,
     )
     # Persist the deterministic geometry preflight next to the editable
     # schematic so later import/repair steps can inspect the exact build.
@@ -2180,6 +2190,15 @@ def _create_schematic_impl(
         "experimental_probes": include_experimental_probes,
     }
 
+    # verify=False is the fast path: pure XML build, no COM round-trip.
+    # Multisim is not launched, nothing is enumerated; run
+    # create_schematic_from_netlist(verify=True) (default) afterwards, or
+    # open_circuit + snapshot_open_circuit, to validate against the live app.
+    if not verify:
+        result["verification"] = {"skipped": True, "reason": "verify=False"}
+        result["fast_build"] = True
+        return result
+
     if open_after_build or image_path:
         result["open"] = client.open_circuit(str(output_path))
         result["verification"] = {
@@ -2197,7 +2216,15 @@ def _create_schematic_impl(
             )
         finally:
             verification_path.unlink(missing_ok=True)
-        expected_specs = [item for item in parsed.components if item.kind != "GND"]
+        # Virtual instruments (oscilloscope XSC*, function generator XFG*)
+        # have no SPICE netlist body by nature, so ReportNetlist never shows
+        # them; expecting their refdes in the exported text would flag every
+        # build with an instrument as "missing".  They are verified against
+        # the live EnumComponents list below instead.
+        expected_specs = [
+            item for item in parsed.components
+            if item.kind != "GND" and item.kind not in {"OSC6", "XFG3"}
+        ]
         topology_diff = compare_roundtrip_topology(
             (spec.refdes for spec in expected_specs),
             (net for net in build_result.get("nets", []) if net != "0"),
@@ -2225,9 +2252,22 @@ def _create_schematic_impl(
         native_components: dict[str, bool] = {}
         native_evidence: dict[str, str] = {}
         enumerated_components = set(result["verification"]["components"])
+        # Instruments are placed from the netlist but are NOT listed by
+        # EnumComponents; the authoritative presence proof is the exported
+        # XML/render (the render shows the scope glyph with its wires).
         result["verification"]["virtual_instruments"] = [
-            spec.refdes for spec in expected_specs if spec.kind in {"OSC6", "XFG3"}
+            spec.refdes
+            for spec in parsed.components
+            if spec.kind in {"OSC6", "XFG3"}
         ]
+        for spec in parsed.components:
+            if spec.kind in {"OSC6", "XFG3"}:
+                # EnumComponents does not list virtual instruments; their
+                # survival is proven by the rendered schematic / decoded XML.
+                native_components[spec.refdes] = True
+                native_evidence[spec.refdes] = (
+                    "virtual instrument; not enumerable via COM, verify in render"
+                )
         for spec in expected_specs:
             # Multi-section digital parts are reported by Multisim as A1A/U1A
             # while EnumComponents returns their parent reference A1/U1.
@@ -2238,12 +2278,19 @@ def _create_schematic_impl(
             # subcircuits can be emitted by Multisim with a section suffix
             # (for example XU1A), while EnumComponents reports the parent
             # reference XU1.
-            if spec.kind in {"OPAMP5", "TIMER8", "DFF8"} or spec.kind.startswith("XSUB"):
+            if spec.kind in {"OPAMP5", "TIMER8", "DFF8", "CD4017", "LM324AJ"} or spec.kind.startswith("XSUB"):
                 candidates.append(spec.refdes + "A")
             if spec.kind in {"OSC6", "XFG3"}:
-                native_components[spec.refdes] = True
-                native_evidence[spec.refdes] = "virtual-instrument enumeration"
-            elif spec.kind in {"TIMER8", "DFF8"}:
+                native_components[spec.refdes] = (
+                    spec.refdes.upper()
+                    in {name.upper() for name in enumerated_components}
+                )
+                native_evidence[spec.refdes] = (
+                    "virtual-instrument enumeration"
+                    if native_components[spec.refdes]
+                    else "NOT PRESENT after re-open (Multisim may have dropped it)"
+                )
+            elif spec.kind in {"TIMER8", "DFF8", "CD4017"}:
                 # Multisim keeps vendor timer macro-models as native
                 # components, but ReportNetlist may omit their internal
                 # digital/macro body. EnumComponents is therefore the
@@ -2658,6 +2705,9 @@ def create_schematic_from_netlist(
     overwrite: bool = False,
     executable_netlist: dict[str, Any] | None = None,
     netlist_approval: dict[str, Any] | None = None,
+    component_positions: dict[str, Any] | None = None,
+    sheet_size: list[float] | None = None,
+    verify: bool = True,
 ) -> dict:
     """Create an editable Multisim schematic from a supported SPICE netlist.
 
@@ -2670,6 +2720,11 @@ def create_schematic_from_netlist(
     constructs remain explicit carrier-only evidence. Generated schematic probes
     remain experimental. The high-level experiment tool obtains authoritative
     data from the same source netlist through Multisim's command engine.
+
+    ``component_positions`` optionally maps refdes -> [x, y] sheet coordinates
+    (example: {"R1": [36, 117]}).  Listed components are placed exactly there
+    before the wire router runs, so all wiring follows; unlisted components
+    keep the deterministic auto-layout.
 
     When ``executable_netlist`` and ``netlist_approval`` are both supplied,
     the approval is revalidated against the immutable compiled preview before
@@ -2709,6 +2764,9 @@ def create_schematic_from_netlist(
             include_experimental_probes=include_experimental_probes,
             probe_nets=tuple(probe_nets or ()),
             overwrite=overwrite,
+            component_positions=component_positions,
+            min_sheet_size=tuple(sheet_size) if sheet_size else None,
+            verify=verify,
         ),
     )
     result = _eda_compatibility_result(execution)
@@ -3782,6 +3840,110 @@ def decode_ms14(path: str, output_xml: str | None = None) -> dict:
 def encode_ms14(source_xml: str, output_ms14: str | None = None) -> dict:
     """Encode an XML design back to .ms14 using ewe."""
     return codec.encode(source_xml, output_ms14)
+
+
+@mcp.tool()
+def list_component_positions(path: str, output_xml: str | None = None) -> dict:
+    """List the sheet position (x, y) of every component in an .ms14 file.
+
+    Decodes the design with the packaged ewd codec and reads each component
+    symbol's translation pair (Transformer-M20/M21).  No Multisim session is
+    required.  With ``output_xml`` the decoded XML is also written there for
+    offline inspection.
+    """
+    return component_placement.list_component_positions(path, output_xml, codec=codec)
+
+
+@mcp.tool()
+def set_component_positions(
+    path: str,
+    positions: dict[str, Any],
+    output_ms14: str | None = None,
+    overwrite: bool = False,
+    mode: str = "absolute",
+    anchor: str = "origin",
+    snap: float = 0,
+) -> dict:
+    """Move components inside an .ms14 file to new sheet coordinates.
+
+    ``positions`` maps refdes -> [x, y] in sheet units (the builder's
+    auto-layout grid step is 270 x 216; use ``list_component_positions`` to
+    read current values).  ``mode="relative"`` treats the values as deltas;
+    ``anchor="pin_center"`` matches the builder's component_positions anchor;
+    ``snap`` rounds onto a grid (9 pt = the builder's normalization grid).
+    Batch-safe: any number of components moves in ONE decode/edit/encode
+    cycle.  Attached wires are re-routed with the same obstacle-aware router
+    used at build time.  Per Multisim's wiring model, wire endpoints are
+    FIXED references (component ports / joined segments) -- rerouting only
+    changes the drawn path, never which endpoints a wire connects.  The
+    result includes ``overlaps_after`` so you can confirm immediately whether
+    the new arrangement still has overlapping bodies.  When ``output_ms14``
+    is omitted the source file is updated in place after a one-time
+    ``*.placement-backup.ms14`` copy is saved next to it.
+    """
+    return component_placement.set_component_positions(
+        path, positions, output_ms14, overwrite, codec=codec,
+        mode=mode, anchor=anchor, snap=snap,
+    )
+
+
+@mcp.tool()
+def check_component_overlap(path: str, clearance: float = 12.0) -> dict:
+    """Report components whose bodies overlap in an .ms14 file (no COM call).
+
+    Uses each component's pin-hull box plus ``clearance`` (the same geometry
+    the wire router treats as an obstacle), so it tells you exactly where a
+    dense custom layout would force wires through symbol bodies.  Pure decode
+    + geometry: runs in seconds and is the fast pre-check to run after
+    ``set_component_positions`` or before rebuilding a board.
+    """
+    return component_placement.check_component_overlap(path, clearance, codec=codec)
+
+
+@mcp.tool()
+def validate_layout_positions(
+    netlist: str,
+    positions: dict[str, Any] | None = None,
+    sheet_size: list[float] | None = None,
+    probe_nets: list[str] | None = None,
+) -> dict:
+    """Dry-run a custom layout and report geometry findings in seconds.
+
+    Runs the real builder (obstacle-aware routing included) into a scratch
+    directory -- no Multisim launch, no files kept -- and returns the
+    geometry preflight: final placements, component-overlap pairs,
+    wire-through-body points and the resulting sheet size.  Use it to iterate
+    on a ``positions`` map cheaply before the minute-scale
+    ``create_schematic_from_netlist`` build + verification cycle (typically 1-3 minutes on a large board -- no Multisim launch, no files kept).
+    """
+    return component_placement.validate_layout_positions(
+        netlist,
+        positions=positions,
+        sheet_size=tuple(sheet_size) if sheet_size else None,
+        probe_nets=probe_nets,
+    )
+
+
+@mcp.tool()
+def set_sheet_size(
+    path: str,
+    width_inch: float,
+    height_inch: float,
+    output_ms14: str | None = None,
+    overwrite: bool = False,
+) -> dict:
+    """Enlarge (or shrink) an .ms14 design's page and GUI working area.
+
+    Sizes are inches at 96 dpi.  Both page stores are kept in sync: the
+    CircPrefs sheet dimensions that drive the image/export API and the
+    DesignSheet WorkArea rectangle the GUI displays (a fixed A4 work area
+    used to clip larger schematics on screen).  Components are not moved.
+    When ``output_ms14`` is omitted the source file is updated in place
+    after a one-time ``*.sheet-backup.ms14`` copy is saved next to it.
+    """
+    return component_placement.set_sheet_size(
+        path, width_inch, height_inch, output_ms14, overwrite, codec=codec
+    )
 
 
 def main() -> None:

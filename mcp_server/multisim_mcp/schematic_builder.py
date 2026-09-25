@@ -14,10 +14,9 @@ import os
 import re
 import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from multisim_mcp.layout_validation import validate_schematic_geometry
 from multisim_mcp.orthogonal_routing import route_pins, junction_point, pin_escape
@@ -30,6 +29,13 @@ TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 TEMPLATE_PACK_ENV = "MULTISIM_MCP_TEMPLATE_DIR"
 TEMPLATE_ONLY_ENV = "MULTISIM_MCP_TEMPLATE_ONLY"
 NATIVE_OPAMP_MODELS = {"LM324AJ": "LM158_4"}
+
+# Native carriers whose SPICE template ends in the model placeholder `%m`.
+# Each one needs its CiModel object embedded in the generated .ms14, otherwise
+# Multisim exports an empty `%m` (see the long note in build_schematic_xml).
+NATIVE_MODEL_CARRIERS = frozenset(
+    {"TIMER8", "CD4017", "DFF8", "OPAMP5", "LM324AJ", "XFG3", "OSC6"}
+)
 
 ID_ATTRS = frozenset(
     {
@@ -188,6 +194,38 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         ("mnmos_port1.xml", "mnmos_port2.xml", "mnmos_port3.xml", "mnmos_port4.xml"),
         639, 1017, 180, "switch-model",
     ),
+    # SWB = a voltage-controlled SPST switch used by the v7 LED boards.
+    #
+    # HISTORY / WHY IT IS NOT THE NATIVE NI SYMBOL ANY MORE
+    # ----------------------------------------------------
+    # The first attempt carried the extracted native
+    # VOLTAGE_CONTROLLED_SPST_BOUNCE part (swb_element/sym_swb/swb_port*, whose
+    # SPICE template is `x%p ... SWBOUNCE_%p` + a .subckt with an XSPICE
+    # triggered_pwl A-device).  Multisim deleted that whole component on
+    # re-open, which surfaced as
+    #   RuntimeError: Multisim round-trip topology mismatch: S1, S2, S3, ...
+    # and, one step earlier, as
+    #   Error: RefDes 's1', element 'ss1': Unable to parse parameter name
+    # (the MOSFET carrier emitted `s%p %tD %tG %tS %tSUB SWB` plus MOSFET
+    # geometry params L/W/AD/AS/PD/PS/NRD/NRS, which a switch card rejects).
+    #
+    # So the carrier is now built on the mnmos skeleton that v6 proved Multisim
+    # accepts, with the SPICE card swapped to a plain voltage-controlled
+    # switch:   s%p %tD %tG %tS %tSUB smdl%p
+    #           .model smdl%p SW(RON=0.01 ROFF=1e9 VT=3 VH=0.5)
+    # Trade-off: it draws as the generic 4-terminal symbol rather than a
+    # switch glyph.  Correct simulation beats correct glyph; the glyph can be
+    # swapped by hand in the GUI later.
+    "SWB": ComponentDefinition(
+        "SWB", "swb_element.xml", "sym_mnmos.xml",
+        (
+            "mnmos_port1.xml",
+            "mnmos_port2.xml",
+            "mnmos_port3.xml",
+            "mnmos_port4.xml",
+        ),
+        900, 1017, 180, "switch",
+    ),
     "JN": ComponentDefinition(
         "JN", "qnpn_element.xml", "sym_qnpn.xml",
         ("qnpn_port2.xml", "qnpn_port1.xml", "qnpn_port3.xml"),
@@ -338,12 +376,26 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         ),
         432, 657, 180,
     ),
-    # Local-only LM324AJ section A: IN+, IN-, VS+, VS-, OUT. A separate kind
-    # prevents a real vendor device from inheriting ideal OPAMP5 semantics.
+    # Local-only LM324AJ section A. A separate kind prevents a real vendor
+    # device from inheriting ideal OPAMP5 semantics.
+    #
+    # Port order follows the part's own pin table, NOT the SPICE template.
+    # The extracted LM324AJ carrier carries the full quad pin table in
+    # CiaCollString[39]/[40]:
+    #     names : 1IN+ 1IN- VS- VS+ 1OUT 2IN+ 2IN- VS- VS+ 2OUT 3IN+ ...
+    #     pins  : 3    2    11   4   1    5    6    11   4    7    10  ...
+    # so section A is (3,2,11,4,1) == (1IN+, 1IN-, VS-, VS+, 1OUT).
+    # Multisim's netlister walks that table, and its own SaveAs rewrites our
+    # <Ports> list into this order, so the builder must emit it directly.
+    # Getting this wrong is what makes the exporter reject the instance with
+    #   Error: RefDes 'u41', element 'xu41_a':
+    #          Invalid subckt definition name 'lm158_4__opamp__1'
+    # even though the CiModel object and its card are byte-identical to NI's
+    # own working sample (samples/Non-InvertingOpAmp.ms14).
     "LM324AJ": ComponentDefinition(
         "LM324AJ", "lm324aj_element.xml", "sym_lm324aj.xml",
-        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port4.xml",
-         "lm324aj_port5.xml", "lm324aj_port3.xml"), 432, 657, 180,
+        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port5.xml",
+         "lm324aj_port4.xml", "lm324aj_port3.xml"), 432, 657, 180,
     ),
     # Verified native LM555CN carrier. The files are intentionally supplied
     # by the user-local component pack, not bundled with this open-source
@@ -357,6 +409,21 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
             "timer8_port2.xml", "timer8_port8.xml",
         ),
         432, 837, 180, "native-timer",
+    ),
+    # Verified native CD4017BD_5V carrier (CMOS_5V decade Johnson counter).
+    # Supplied by the user-local pack, never bundled.  Terminal order in the
+    # netlist is: CP0 ~CP1 MR VDD VSS O0 O1 O2 O3 O4 O5 O6 O7 O8 O9 ~O5-9
+    "CD4017": ComponentDefinition(
+        "CD4017", "cd4017_element.xml", "sym_cd4017.xml",
+        (
+            "cd4017_port1.xml", "cd4017_port4.xml", "cd4017_port14.xml",
+            "cd4017_port15.xml", "cd4017_port16.xml", "cd4017_port2.xml",
+            "cd4017_port3.xml", "cd4017_port5.xml", "cd4017_port6.xml",
+            "cd4017_port7.xml", "cd4017_port8.xml", "cd4017_port10.xml",
+            "cd4017_port11.xml", "cd4017_port12.xml", "cd4017_port13.xml",
+            "cd4017_port9.xml",
+        ),
+        432, 837, 180, "native-counter",
     ),
     # Verified native 7474N single-section carrier. The extracted component
     # exposes the A-section's eight logical pins; the local pack must be
@@ -444,6 +511,7 @@ NATIVE_MODEL_ALIASES: dict[str, frozenset[str]] = {
     "OPAMP5": frozenset({"OPAMP5", "IDEALOPAMP"}),
     "TIMER8": frozenset({"TIMER8", "LM555CN", "LM555", "NE555", "HE555"}),
     "DFF8": frozenset({"DFF8", "7474N", "7474", "74LS74N", "74LS74D"}),
+    "CD4017": frozenset({"CD4017", "CD4017B", "4017B_5", "4017BD_5V", "4017BD_5V"}),
 }
 
 
@@ -884,11 +952,63 @@ def _expand_top_level_subcircuits(
     return rendered, expanded_records, failures
 
 
+def _validate_template(name: str, root: ET.Element) -> None:
+    """Fail loudly on a structurally broken template instead of losing parts.
+
+    Two failure modes were hit in practice and both are silent killers:
+
+    1. The extracted SWB pack stored the bare ``<CiComponent>``/``<CiPort>``
+       without the surrounding ``<Item>`` wrapper every other pack uses, so
+       ``element_item.find("./CiComponent")`` returned None and the build died
+       with ``AttributeError: 'NoneType' object has no attribute 'set'``.
+    2. ``sym_swb.xml`` lost its closing ``</Item>``, which only showed up as
+       ``ParseError: no element found``.
+    """
+    if root.tag != "Item":
+        raise ValueError(
+            f"Template {name} is not wrapped in <Item> (root is <{root.tag}>). "
+            "Multisim element/port/symbol templates must be "
+            "<Item Class=\"...\"><CiComponent|CiPort .../></Item>."
+        )
+    inner = list(root)
+    if not inner:
+        raise ValueError(f"Template {name} has an empty <Item> wrapper.")
+
+
+def _normalize_inline_model_cards(root: ET.Element, name: str) -> None:
+    """Put template-embedded ``.model``/``.subckt`` cards on their own line.
+
+    NI's template convention embeds per-instance model cards inside the SPICE
+    template string separated by a NEWLINE (``r%p ... \\n.model r%p r(...)``).
+    A card glued onto the device line with spaces parses fine in the MCP
+    command engine but Multisim's own "Check SPICE Netlist" reads the glued
+    ``SW(...)``/``r(...)`` as a function call on the instance card:
+
+        Error: RefDes 's4', element 'ss4': Expected ')' in function sw
+        Error: RefDes 's4', element 'ss4': Unexpected ')' found in function ''
+        Error: RefDes 's4', element 'ss4': Due to errors, the component 'ss4'
+                                           will be omitted from the simulation
+
+    Hit on the v7 boards: swb_element.xml carried ``s%p ... smdl%p .model
+    smdl%p SW(...)`` on one line.  Repair it here so any pack (current or
+    regenerated) yields GUI-checkable schematics.
+    """
+    pattern = re.compile(r"(?<=\S)[ \t]+(\.(?:model|subckt)\b)")
+    for template in root.iter("CiaSpiceTmpltExprt"):
+        text = template.get("String")
+        if text and pattern.search(text):
+            template.set("String", pattern.sub(r"\n\1", text))
+
+
 def _load_template(name: str) -> ET.Element:
     for root in template_search_paths():
         path = root / name
         if path.is_file():
-            return parse_native_xml(path).getroot()
+            parsed = parse_native_xml(path).getroot()
+            if name.startswith(("sym_", "swb_", "mnmos", "sw_")):
+                _validate_template(name, parsed)
+            _normalize_inline_model_cards(parsed, name)
+            return parsed
     searched = ", ".join(str(path / name) for path in template_search_paths())
     raise FileNotFoundError(
         "Missing local schematic template. Generate a component pack with "
@@ -909,79 +1029,6 @@ def template_search_paths() -> list[Path]:
     if not (override and local_only):
         paths.append(TEMPLATE_DIR)
     return paths
-
-
-# Component families whose absence makes the documented, regression-covered
-# baseline workflows impossible. A missing core template is a failure; a missing
-# optional family is only a warning, so an incomplete optional carrier never
-# hides the real state of the pack (and never silently claims readiness).
-CORE_TEMPLATE_KINDS: Final = frozenset(
-    {
-        "R", "C", "L", "V", "I", "GND",
-        "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "OPAMP5",
-        "DNOT4", "DAND5", "DOR5", "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "DJK7",
-    }
-)
-
-
-def component_template_files(definition: ComponentDefinition) -> tuple[str, ...]:
-    """Return every template file one component family needs to build."""
-    return (
-        definition.element_template,
-        definition.symbol_template,
-        *definition.port_templates,
-    )
-
-
-def template_completeness(
-    paths: list[Path] | None = None,
-) -> dict[str, Any]:
-    """Report per-family availability across the trusted search roots.
-
-    ``template_search_paths`` is an intentional overlay chain: a user-local
-    licensed pack can provide device-specific carriers while the package root
-    supplies generic fallback templates. Each required file therefore only
-    needs to resolve from one trusted root. Doctor, runtime status, and the
-    component catalog all consume this same report.
-    """
-    search_paths = (
-        list(paths) if paths is not None else template_search_paths()
-    )
-    missing_by_kind: dict[str, list[str]] = {}
-    for kind, definition in sorted(COMPONENT_DEFINITIONS.items()):
-        names = component_template_files(definition)
-        absent = [
-            name
-            for name in names
-            if not any((root / name).is_file() for root in search_paths)
-        ]
-        if absent:
-            missing_by_kind[kind] = absent
-    core_missing = sorted(
-        kind for kind in missing_by_kind if kind in CORE_TEMPLATE_KINDS
-    )
-    extended_missing = sorted(
-        kind for kind in missing_by_kind if kind not in CORE_TEMPLATE_KINDS
-    )
-    return {
-        "search_paths": search_paths,
-        "component_kinds": len(COMPONENT_DEFINITIONS),
-        "missing_by_kind": missing_by_kind,
-        "unavailable_kinds": sorted(missing_by_kind),
-        "core_missing_kinds": core_missing,
-        "extended_missing_kinds": extended_missing,
-        "complete": not missing_by_kind,
-    }
-
-
-def template_status(paths: list[Path] | None = None) -> str:
-    """Return ``pass``, ``warn`` or ``fail`` for schematic template readiness."""
-    report = template_completeness(paths)
-    if report["core_missing_kinds"]:
-        return "fail"
-    if report["extended_missing_kinds"]:
-        return "warn"
-    return "pass"
 
 
 def _deepcopy(element: ET.Element) -> ET.Element:
@@ -1224,14 +1271,28 @@ def parse_netlist(text: str) -> ParsedNetlist:
             )
         elif kind == "S" and len(parts) >= 6:
             model = parts[5]
+            # A netlist line "S1 ctrlp ctrln sw1 sw2 SWB" asks for the native
+            # NI SPST-bounce switch.  The refdes prefix is still "S", so the
+            # generic branch above would resolve it to kind "S" -- which is
+            # mapped to mnmos_element.xml (an N-MOS symbol/template) and would
+            # emit  s%p %tD %tG %tS %tSUB SWB  plus the MOSFET geometry params
+            # (L/W/AD/AS/PD/PS/NRD/NRS).  SPICE reads a leading lowercase "s"
+            # as a *voltage-controlled switch* card, which does not accept
+            # those params, hence:
+            #   Error: RefDes 's1', element 'ss1': Unable to parse parameter name
+            # Detect the carrier from the model token and switch to SWB.
+            variant = "SWB" if model.upper() == "SWB" else "S"
             parsed.components.append(
                 ComponentSpec(
-                    kind="S",
+                    kind=variant,
                     refdes=refdes,
                     nodes=[_normalize_net(item)[0] for item in parts[1:5]],
                     model=model,
                     model_definition=model_definitions.get(model.lower()),
-                    parameters=parts[6:],
+                    # SWB carries its own vendor body in the template; the
+                    # trailing tokens after the model name are MOSFET geometry
+                    # and must NOT be forwarded.
+                    parameters=[] if variant == "SWB" else parts[6:],
                 )
             )
         elif kind in {"J", "Z"} and len(parts) >= 5:
@@ -1363,6 +1424,25 @@ def parse_netlist(text: str) -> ParsedNetlist:
                         kind="DFF8",
                         # Multisim's extracted 7474 section is a U-device;
                         # normalize portable XU1 notation to native U1.
+                        refdes=(
+                            refdes[1:]
+                            if refdes[:1].upper() == "X"
+                            and len(refdes) > 1
+                            else refdes
+                        ),
+                        nodes=nodes,
+                        model=model,
+                        parameters=instance_parameters,
+                    )
+                )
+            elif len(nodes) == 16 and model.upper() in {
+                "CD4017", "CD4017B", "4017B", "4017B_5", "4017BD_5V",
+            }:
+                parsed.components.append(
+                    ComponentSpec(
+                        kind="CD4017",
+                        # Native CMOS carrier is a U-device even though the
+                        # portable SPICE instance carries the X prefix.
                         refdes=(
                             refdes[1:]
                             if refdes[:1].upper() == "X"
@@ -2033,9 +2113,21 @@ def _link_symbol_connector(
         )
         if connector_item is None or connector_item.get("ID") != connector_id:
             continue
-        link = connector_item.find("./CIITPinConnectorComp/ConnectList/Item")
-        if link is not None:
-            link.set("ID", extpin_id)
+        connector = connector_item.find("./CIITPinConnectorComp")
+        if connector is None:
+            return
+        link = connector.find("./ConnectList/Item")
+        if link is None:
+            # Extracted native carriers can ship with an empty ConnectList when
+            # the pin happened to be unconnected in the probe circuit. Leaving
+            # it empty makes Multisim drop that terminal on the next open, so
+            # create the placeholder instead of silently no-oping.
+            connect_list = connector.find("./ConnectList")
+            if connect_list is None:
+                connect_list = ET.SubElement(connector, "ConnectList")
+            connect_list.append(ET.Element("Item", {"ID": extpin_id}))
+            return
+        link.set("ID", extpin_id)
         return
 
 
@@ -2142,7 +2234,7 @@ def _set_symbol_labels(
                 value_item.set("Output", f"&ASC{display_value}V ")
             elif kind == "I":
                 value_item.set("Output", f"&ASC{display_value}A ")
-            elif kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
+            elif kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8", "CD4017"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
                 value_item.set("Output", _asc(display_value))
             elif kind.startswith("D"):
                 value_item.set("Output", _asc(display_value))
@@ -2168,7 +2260,7 @@ def _configure_component_semantics(
     if spec.kind not in {
         "R", "V", "I", "BV", "BI", "T", "XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN",
         "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "S", "JN", "JP", "ZN", "ZP", "W", "K", "O", "U",
-        "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "TIMER8", "DFF8", "OPAMP5",
+        "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "TIMER8", "DFF8", "CD4017", "OPAMP5",
     }:
         return
     if spec.kind in {"DNAND5", "DNOR5", "DXOR5", "DXNOR5"}:
@@ -2335,6 +2427,11 @@ def _configure_component_semantics(
             _asc(f"t%p %tD %tG %tS %tSUB {parameters}"),
         )
         return
+    if spec.kind == "CD4017":
+        # CD4017 is a verified native CMOS decade counter. Its extracted
+        # carrier already embeds the vendor digital macro and must not be
+        # rewritten as a generic X subcircuit.
+        return
     if spec.kind == "TIMER8":
         # TIMER8 is a verified native vendor macro. Its extracted carrier
         # already contains the exact named-terminal SPICE template; rewriting
@@ -2422,7 +2519,19 @@ def _configure_component_semantics(
                 rendered = f"{prefix}%p {terminals} {private_model}"
             if instance_parameters:
                 rendered += f" {instance_parameters}"
-            rendered += f"  .model {private_model} {spec.model_definition}"
+            # The private model card must start on its OWN LINE.  Multisim's
+            # SPICE reader only recognises `.model` at the start of a line; if it
+            # is glued onto the device card with spaces the reader rejects the
+            # whole component:
+            #   Error: Element 'd1:':  Expected ')' in function d
+            #   Error: Element 'd1:':  Unexpected ')' found in function ''
+            #   Error: Element 'd1:':  Due to errors, the component 'd1' will
+            #                          be omitted from the simulation
+            # (verified 2026-09-23 against Multisim 14.3's own engine; the
+            # newline form produces a clean log).  NI's own templates do the
+            # same: "&ASCr%p %t1 %t2 #1 vres%p ... \n.model vres%p r(...)\n"
+            # in samples/Analog/LowPassFilter.ms14.xml.
+            rendered += f"\n.model {private_model} {spec.model_definition}\n"
         else:
             if spec.kind == "W":
                 controlling_source, *switch_state = spec.parameters
@@ -2536,6 +2645,188 @@ def _common_emitter_profile(specs: list[ComponentSpec]) -> dict[str, Any] | None
             "vertical": {"RBIAS1", "RBIAS2", "RC", "RE", "RLOAD"}}
 
 
+# ---------------------------------------------------------------------------
+# v7 photo-driven profiles (照原图重建：流水灯 + 呼吸灯)
+# ---------------------------------------------------------------------------
+# 原始来源:剪贴板图片 `clipboard-2026-09-23T16-55-09-631Z-288e6a4a.jpg`,
+#          1440 x 1920 像素; schematic 块大致位于 ( 80, 220 ) ... (1380, 1180)。
+# 坐标单位:与 grid_origin_x/y (36, 117), grid_step_x/y (270, 216) 同一坐标系。
+# 设计原则:
+#   * 仅按 refdes 集合识别(写真型),不依赖通联匹配,跟 simple/opamp/ce profile
+#     的"严格类型匹配"逻辑区分开。
+#   * 当 6 个以上关键 refdes 全部命中时启用,其余仍走网格布局。
+#   * 坐标只把"分区 + 顺序"映射到位,精度不高(± 一两个网距都可),用以改善
+#     "不像原图",不是像素级重构。
+# ---------------------------------------------------------------------------
+_V7_FLOW_FINGERPRINT = {
+    "VUSB", "VCC", "C1", "C3", "C5",
+    "R1", "R2", "R3", "R4", "R5", "R6", "R7",
+    "DL1", "DL2", "DL3", "DL4", "DL5", "DL6", "DL7",
+    "D8", "D9", "D10", "D11", "D12", "D13", "D14",
+    "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+    "XU1", "XU2", "M3", "S1", "S2", "S3",
+    "R8", "R9", "R10", "RP1",
+}
+_V7_BREATH_FINGERPRINT = {
+    "VU3", "VCC", "V33",
+    "R11", "R12", "R13", "R14", "RP2",
+    "C6", "C7", "C8", "C9", "C10",
+    "XU41", "XU42",
+    "Q4", "M5", "S4",
+    "R15", "R16",
+    "D22",
+    "DL8", "DL9", "DL10", "DL11", "DL12", "DL13", "DL14",
+    "DL15", "DL16", "DL17", "DL18", "DL19",
+    "DL20", "DL21", "DL22", "DL23", "DL24", "DL25",
+    "DL26", "DL27", "DL28", "DL29", "DL30", "DL31",
+}
+
+
+def _v7_flow_positions() -> dict[str, tuple[int, int]]:
+    """流水灯 v7:NE555 + CD4017 + SW2 8位 DIP + 7 颗 LED 共阴极。
+
+    GND 节点 ("0") 不写在这里 — 让它回退到网格布局末尾,远离主电路,
+    避免被任意 pin escape 当作 obstacle 阻挡。
+    """
+    return {
+        # 顶部一行:USB1 / VCC / C1..C4 / SW1(VUSB->VCC)
+        "VCC": (630,  90),
+        "VUSB": (360,  90),   # USB 5 V 入
+        "VK1": (90,  90),   # SW1 控制器
+        "C1":  (450, 198),
+        "C2":  (594, 198),
+        "C3":  (738, 198),
+        "C4":  (882, 198),
+        # U1 NE555 居中上方,占 U1=NE555 区域
+        "R8":  (90, 306),
+        "S3":  (270, 306),
+        "VK3": (450, 306),
+        "R9":  (90, 414),
+        "R10": (90, 558),
+        "RP1": (90, 666),
+        "C5":  (270, 666),
+        "C20": (450, 666),
+        "XU1": (270, 522),     # NE555
+        "M3":  (450, 234),
+        "RK4": (450, 162),
+        # U2 CD4017 在 U1 右侧
+        "D8":  (810, 306),
+        "D9":  (810, 378),
+        "D10": (810, 450),
+        "D11": (810, 522),
+        "D12": (810, 594),
+        "D13": (810, 666),
+        "D14": (810, 738),
+        "XU2": (594, 486),
+        # SW2 8 位 DIP 在中部,上方标注 VCC_IN1,VCC_IN2, VCC_IN3
+        "VK2": (90, 918),
+        "S2":  (90, 990),
+        "D1":  (450, 882),
+        "D2":  (450, 918),
+        "D3":  (450, 954),
+        "D4":  (450, 990),
+        "D5":  (450, 1026),
+        "D6":  (450, 1062),
+        "D7":  (450, 1098),
+        "RK3": (306, 1122),
+        "D23": (450, 1122),
+        # 7 路 LED 右列
+        "R1":  (810, 198),
+        "R2":  (810, 270),
+        "R3":  (810, 342),
+        "R4":  (810, 414),
+        "R5":  (810, 486),
+        "R6":  (810, 558),
+        "R7":  (810, 630),
+        "DL1": (1170, 198),
+        "DL2": (1170, 270),
+        "DL3": (1170, 342),
+        "DL4": (1170, 414),
+        "DL5": (1170, 486),
+        "DL6": (1170, 558),
+        "DL7": (1170, 630),
+        # unconnected CD4017 outputs -> pull-downs
+        "R30": (594, 270),
+        "R31": (594, 306),
+        "R32": (594, 342),
+    }
+
+
+def _v7_breath_positions() -> dict[str, tuple[int, int]]:
+    """呼吸灯 v7:LM358 双运放 + Q4/Q5 + SW4 + 24 颗 LED 矩阵。
+
+    GND 节点 ("0") 不写在 profile — 让它回退网格末位。
+    """
+    return {
+        "VCC": (270,  90),     # 5V rail
+        "VU3": (450,  90),     # internal 3V3 source (sim only)
+        "V33": (594,  90),
+        "C6":  (450, 198),
+        "C7":  (594, 198),
+        "C8":  (738, 198),
+        "C9":  (882, 198),
+        # 中分点 vb = 2.5 V mid-rail
+        "R11": (306, 306),
+        "R12": (306, 414),
+        # U41 积分器 (左下)
+        "R13": (450, 414),
+        "R910": (594, 522),
+        "C10": (306, 558),
+        "XU41": (198, 522),
+        # U42 比较器 (右下)
+        "R14": (594, 414),
+        "RP2": (594, 522),
+        "XU42": (198, 666),
+        # Q4 -> SW4 -> D22 -> LED 链 (中右)
+        "Q4":  (450, 810),
+        "VK4": (594, 810),
+        "S4":  (594, 738),
+        "R15": (738, 810),
+        "D22": (738, 666),
+        "R16": (450, 666),
+        "M5":  (738, 522),
+        "RK2": (738, 594),
+        # 24 颗 LED 排成两排,上方 12 (DL8..DL19),下方 12 (DL20..DL31)
+        "DL8":  (270, 990),
+        "DL9":  (378, 990),
+        "DL10": (486, 990),
+        "DL11": (594, 990),
+        "DL12": (702, 990),
+        "DL13": (810, 990),
+        "DL14": (918, 990),
+        "DL15": (1026, 990),
+        "DL16": (1134, 990),
+        "DL17": (1242, 990),
+        "DL18": (1350, 990),
+        "DL19": (1458, 990),
+        "DL20": (270, 1188),
+        "DL21": (378, 1188),
+        "DL22": (486, 1188),
+        "DL23": (594, 1188),
+        "DL24": (702, 1188),
+        "DL25": (810, 1188),
+        "DL26": (918, 1188),
+        "DL27": (1026, 1188),
+        "DL28": (1134, 1188),
+        "DL29": (1242, 1188),
+        "DL30": (1350, 1188),
+        "DL31": (1458, 1188),
+        # sim aid
+        "IKICK": (450, 1188),
+    }
+
+
+def _v7_photo_profile(specs: list[ComponentSpec]) -> dict[str, Any] | None:
+    refdes = {s.refdes for s in specs if s.kind != "GND"}
+    flow_hit = len(refdes & _V7_FLOW_FINGERPRINT)
+    breath_hit = len(refdes & _V7_BREATH_FINGERPRINT)
+    if breath_hit >= flow_hit and breath_hit >= 10:
+        return {"positions": _v7_breath_positions()}
+    if flow_hit >= breath_hit and flow_hit >= 10:
+        return {"positions": _v7_flow_positions()}
+    return None
+
+
 def _component_placement_order(specs: list[ComponentSpec]) -> list[int]:
     """Return a stable connectivity-first order for grid placement."""
     neighbors: dict[int, set[int]] = {index: set() for index in range(len(specs))}
@@ -2611,6 +2902,227 @@ def _make_junction_pins(
         )
         member_ids.append(member_item.get("ID"))
     return owner_item, member_ids
+
+
+def _template_available(name: str) -> bool:
+    """True when a user-local component-pack template file exists."""
+    return any((root / name).is_file() for root in template_search_paths())
+
+
+def _port_native_model_spec(port: ET.Element) -> tuple[str, str, str] | None:
+    """Return (base, family, card) for a native port that owns a SPICE model.
+
+    Digital native ports (a 4017's CP0 / O0 / ...) carry their analog/digital
+    bridge as a sub-circuit: receiver for inputs, driver for outputs.  Multisim
+    does NOT take that card from the port's cached CiaCollString; it looks the
+    CiModel object up by the port's `Model` attribute.  When that object is
+    missing from the .ms14 the port's `%m` comes out empty and the exporter
+    eats the VSS terminal as if it were the sub-circuit name:
+
+        Error: Element 'xu2.cp0': Invalid subckt definition name 'u2_open_vss'
+
+    The card itself is still cached in the port, so it can be recovered here.
+    """
+    for coll in port.iter("CiaCollString"):
+        values = [item.get("Value", "") for item in coll.findall("./strings/Item")]
+        if len(values) < 6:
+            continue
+        card = values[5].removeprefix("&ASC")
+        if not card.lstrip().upper().startswith(".SUBCKT"):
+            continue
+        base = values[3].removeprefix("&ASC").strip()
+        family = values[2].removeprefix("&ASC").strip()
+        if base and family:
+            return base, family, card
+    return None
+
+
+def _component_native_model_spec(comp: ET.Element) -> tuple[str, str, str] | None:
+    """Return (base, family, card) for a component that owns a SPICE model.
+
+    Mirrors _port_native_model_spec() for whole components.  A native part
+    whose SPICE template ends in ``%m`` (``d%p %tA %tK %m``, ``x%p_a ... %m``,
+    ``m%p ... %m``, ``s%p ... %m``, ...) needs the CiModel object that ``%m``
+    expands to.  Multisim does NOT fall back to the card cached on the
+    element; a missing CiModel makes ``%m`` expand to nothing and the exporter
+    then eats the last terminal as the sub-circuit name.
+
+    The card is still cached on the component itself, as
+    ``CiaCollString[5]``, exactly like a native port -- so it can be rebuilt.
+    ``CiaCollString[3]`` / ``[2]`` give the base and family names Multisim uses
+    when it names a copied model ``<base>__<family>__<n>``.
+
+    Returns None when the component carries no usable cached card (a pure
+    built-in part such as a resistor, whose model is inlined in the template).
+    """
+    for coll in comp.iter("CiaCollString"):
+        values = [item.get("Value", "") for item in coll.findall("./strings/Item")]
+        if len(values) < 6:
+            continue
+        card = values[5].removeprefix("&ASC")
+        head = card.lstrip().upper()
+        if not (head.startswith(".SUBCKT") or head.startswith(".MODEL")):
+            continue
+        base = values[3].removeprefix("&ASC").strip()
+        family = values[2].removeprefix("&ASC").strip()
+        if base and family:
+            return base, family, card
+    return None
+
+
+def _bind_component_native_model(
+    comp: ET.Element,
+    cache: dict[str, ET.Element],
+    sequence: dict[tuple[str, str], int],
+    ids: "IdAllocator",
+    circuit_item: ET.Element,
+    elements: ET.Element,
+    model_refs: set[str],
+) -> str | None:
+    """Embed (once per design) the CiModel a native component refers to.
+
+    Returns the CiID the component should point at, or None when the part has
+    no reusable cached card (in which case the caller keeps the original
+    reference, which for built-in parts points at the master database and is
+    resolved by Multisim itself rather than by this builder).
+
+    Numbering follows Multisim's own convention ``<base>__<family>__<n>`` and
+    the ``%m``-visible name inside the card is rewritten to match, so that a
+    re-save of the delivered .ms14 is a no-op -- the same contract
+    _bind_port_native_model() implements for ports.
+    """
+    reference = comp.get("Model")
+    if not reference:
+        return None
+    if reference in cache:
+        return cache[reference].get("CiID")
+
+    spec = _component_native_model_spec(comp)
+    if spec is None:
+        # Built-in part (resistor / capacitor / source): its model is inlined
+        # in the template and the Model attribute legitimately points outside
+        # this design.  Leave it alone; Multisim resolves it from its own
+        # database on load.  Registering the CiID in <Models> without an
+        # object is what used to happen and is harmless for these parts
+        # because their templates never expand %m.
+        return reference
+
+    base, family, card = spec
+    key = (base, family)
+    sequence[key] = sequence.get(key, 0) + 1
+    qualified = f"{base}__{family}__{sequence[key]}"
+    card = re.sub(
+        r"^(\s*\.(?:SUBCKT|MODEL)\s+)\S+",
+        lambda match: match.group(1) + qualified,
+        card,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    item = ET.Element("Item", {"CiID": ids.next_id(), "Class": "CiModel"})
+    model = ET.SubElement(
+        item,
+        "CiModel",
+        {
+            "Class": "CiModel",
+            "LocalName": _asc(qualified),
+            "ChangedByUser": "0",
+            "Scope": circuit_item.get("CiID"),
+        },
+    )
+    attributes = ET.SubElement(model, "Attributes")
+    ET.SubElement(attributes, "Item")
+    holder = ET.SubElement(attributes, "Item")
+    ET.SubElement(
+        holder, "CiaCString", {"Class": "CiaCString", "String": _asc(card)}
+    )
+    ET.SubElement(attributes, "Item")
+    ET.SubElement(attributes, "Item")
+    refcount = ET.SubElement(attributes, "Item")
+    ET.SubElement(
+        refcount,
+        "CiaModelDataRefCount",
+        {"Class": "CiaModelDataRefCount", "RefCnt": "1"},
+    )
+    elements.append(item)
+    model_refs.add(item.get("CiID"))
+    cache[reference] = item
+    return item.get("CiID")
+
+
+def _bind_port_native_model(
+    port: ET.Element,
+    cache: dict[str, ET.Element],
+    sequence: dict[tuple[str, str], int],
+    ids: "IdAllocator",
+    circuit_item: ET.Element,
+    elements: ET.Element,
+    model_refs: set[str],
+) -> None:
+    """Embed (once per design) the CiModel a native carrier port refers to.
+
+    Multisim names copied models ``<base>__<family>__<n>`` and rewrites both
+    the model's own ``.SUBCKT`` line and every ``%m`` expansion to that name
+    (verified against samples/Digital/DecadeCounterUserLoad.ms14.xml, where
+    port term TTL_LSRCV is stored as TTL_LSRCV__NON__2).
+    """
+    reference = port.get("Model")
+    if not reference:
+        return
+    if reference in cache:
+        port.set("Model", cache[reference].get("CiID"))
+        return
+    spec = _port_native_model_spec(port)
+    if spec is None:
+        # Nothing usable to rebuild from: drop the dangling reference so the
+        # port falls back to its own cached card instead of exporting blank.
+        port.attrib.pop("Model", None)
+        return
+    base, family, card = spec
+    key = (base, family)
+    sequence[key] = sequence.get(key, 0) + 1
+    qualified = f"{base}__{family}__{sequence[key]}"
+    card = re.sub(
+        r"^(\s*\.SUBCKT\s+)\S+",
+        lambda match: match.group(1) + qualified,
+        card,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    item = ET.Element("Item", {"CiID": ids.next_id(), "Class": "CiModel"})
+    model = ET.SubElement(
+        item,
+        "CiModel",
+        {
+            "Class": "CiModel",
+            "LocalName": _asc(qualified),
+            "ChangedByUser": "0",
+            "Scope": circuit_item.get("CiID"),
+        },
+    )
+    attributes = ET.SubElement(model, "Attributes")
+    ET.SubElement(attributes, "Item")
+    holder = ET.SubElement(attributes, "Item")
+    ET.SubElement(
+        holder, "CiaCString", {"Class": "CiaCString", "String": _asc(card)}
+    )
+    # NI's own port-bridge CiModels carry a trailing CiaParamList:
+    #   <Item/> <Item><CiaCString/></Item> <Item><CiaParamList/></Item>
+    # (see Up-DownCounter.ms14 -> CMOS_RCV__NON__1 / CMOS_DRV__NON__1 and
+    #  SwitchDebounce.ms14 -> the same two models).  Omitting it made Multisim's
+    # GUI netlister unable to bind the port's %m to this model, so every
+    # CD4017 bridge port exported as
+    #   Error: Element 'xu2.cp0': Invalid subckt definition name 'cmos_rcv__non__1'
+    paramlist = ET.SubElement(attributes, "Item")
+    ET.SubElement(
+        paramlist, "CiaParamList", {"Class": "CiaParamList"}
+    ).extend(
+        ET.Element(tag)
+        for tag in ("doubles", "strings", "parameters", "paramindicators")
+    )
+    elements.append(item)
+    model_refs.add(item.get("CiID"))
+    cache[reference] = item
+    port.set("Model", item.get("CiID"))
 
 
 def _remap_subtree(item: ET.Element, ids: IdAllocator) -> None:
@@ -2690,97 +3202,6 @@ def _refdes_info(
     ET.SubElement(refdes_info, "PinNumbersIR")
     ET.SubElement(refdes_info, "SharedPins")
     return info_item
-
-
-def _component_refdes_info(
-    refdes: str,
-    file_path: str,
-    circuit_name: str,
-    *,
-    sectioned: bool = False,
-) -> ET.Element | None:
-    """Build the native refdes map entry that preserves a generated designator.
-
-    A freshly encoded XML file has the component's ``LocalName`` but no
-    ``CIRToInfoMap`` entry. Multisim then allocates the next free number when
-    the designator ends in a number already considered used (notably ``R0``),
-    including names with nonstandard prefixes such as ``AINV0``. The map is the
-    native identity contract that keeps the requested designator stable.
-    """
-    match = re.fullmatch(r"([A-Za-z]+)(\d+)", refdes)
-    if match is None:
-        return None
-    prefix, number = match.groups()
-    section = "A" if sectioned else ""
-    external = f"{prefix}{number}{section}"
-    refdes_str = f"&ASC!0!0!0{refdes}!0{file_path}!01!0{circuit_name}!0"
-    info_item = ET.Element("CIRToInfoMapItem", {"CIRKey": _asc(external)})
-    info = ET.SubElement(
-        info_item,
-        "RefDesInfo",
-        {
-            "Class": "CIITHierRefDesInfo",
-            "IRPrefix": _asc(prefix),
-            "IRNumber": number,
-            "Locked": "0",
-            "IRSection": _asc(section) if section else "",
-            "IRSectionID": "0" if section else "-1",
-            "SpiceTemplate": "",
-        },
-    )
-    data = ET.SubElement(
-        info,
-        "RefDesInfoData",
-        {
-            "Class": "CIITHierRefDes",
-            "RefDesBufSize": "260",
-            "RefDesStrSize": str(len(refdes_str)),
-            "RefDesCount": "2",
-            "RefDes": refdes_str,
-            "SectionBufSize": "260" if section else "0",
-            "SectionStrSize": "2" if section else "0",
-            "Section": _asc(section) if section else "&ASC(null)",
-            "Prefix": _asc(prefix),
-            "Number": number,
-        },
-    )
-    ET.SubElement(data, "RefDesData")
-    for tag in ("PinOrderCIR", "PinOrderIR", "PinNumbersCIR", "PinNumbersIR", "SharedPins"):
-        ET.SubElement(info, tag)
-    return info_item
-
-
-def _add_component_refdes_map(
-    root: ET.Element,
-    specs: Sequence[ComponentSpec],
-    file_path: str,
-    circuit_name: str,
-) -> None:
-    """Register standard and multi-section component designators in the XML."""
-    container = _find_by_tag(root, "RefDesInfoContainer")
-    if container is None:
-        return
-    mapping = container.find("./CIRToInfoMap")
-    if mapping is None:
-        mapping = ET.SubElement(container, "CIRToInfoMap")
-    existing = {str(item.get("CIRKey") or "") for item in mapping.findall("./CIRToInfoMapItem")}
-    section_kinds = set(DIGITAL_MODEL_KINDS.values()) | {"OPAMP5", "TIMER8", "DFF8"}
-    section_kinds.update({"XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN"})
-    for spec in specs:
-        if spec.kind == "GND":
-            continue
-        key = _asc(f"{spec.refdes}{'A' if spec.kind in section_kinds else ''}")
-        if key in existing:
-            continue
-        item = _component_refdes_info(
-            spec.refdes,
-            file_path,
-            circuit_name,
-            sectioned=spec.kind in section_kinds,
-        )
-        if item is not None:
-            mapping.append(item)
-            existing.add(key)
 
 
 def _refdes_prefix_usage() -> ET.Element:
@@ -3083,12 +3504,25 @@ def build_schematic(
     output_path: str | Path,
     template_path: str | Path | None = None,
     probe_nets: list[str] | None = None,
+    component_positions: dict[str, Any] | None = None,
+    min_sheet_size: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Build an editable Multisim XML design from a simple SPICE netlist.
 
     ``probe_nets`` names the nets that should get voltage probes. When omitted,
     the last non-ground net is probed automatically. Set it to an empty list to
     disable probes.
+
+    ``component_positions`` optionally maps refdes -> ``[x, y]`` sheet
+    coordinates for components that must land at a fixed spot (for example
+    matching an original board photograph).  Components without an entry keep
+    the deterministic auto-layout.  Overrides are applied BEFORE the wire
+    router runs, so all wiring follows the custom positions.
+
+    ``min_sheet_size`` optionally enforces a minimum page in inches
+    (width, height) at 96 dpi; the page still grows further when the content
+    needs more room.  The GUI working area (DesignSheet WorkArea) always
+    follows the final page size.
     """
     parsed = parse_netlist(netlist)
     inductor_refs = {
@@ -3121,6 +3555,12 @@ def build_schematic(
     models = next(root.iter("Models"), None)
     model_refs: set[str] = set()
     native_models: dict[str, ET.Element] = {}
+    # Per-reference cache/sequence for component-owned models.  Keyed by the
+    # template's original CiID so every instance of the same library part
+    # shares ONE embedded CiModel (matching NI's own files, where a linear
+    # resistor chain references a single model object).
+    native_model_cache: dict[str, ET.Element] = {}
+    model_sequence: dict[tuple[str, str], int] = {}
 
     _clear(objects)
     _clear(refs)
@@ -3155,6 +3595,8 @@ def build_schematic(
     connections: dict[str, list[dict[str, Any]]] = {}
     component_items: list[ET.Element] = []
     port_items: list[ET.Element] = []
+    port_model_sequence: dict[tuple[str, str], int] = {}
+    port_model_cache: dict[str, ET.Element] = {}
     net_wires: dict[str, list[list[tuple[float, float]]]] = {}
     net_pin_points: dict[str, list[tuple[float, float]]] = {}
     placements: list[dict[str, Any]] = []
@@ -3174,6 +3616,9 @@ def build_schematic(
     max_component_y = 0.0
     for component_index, spec in enumerate(specs):
         definition = COMPONENT_DEFINITIONS[spec.kind]
+        # One native model object per instance, exactly as Multisim itself
+        # writes them (a two-instance design gets __1 and __2 copies).
+        port_model_cache = {}
         if spec.kind == "XSUBN":
             element_item, symbol_item, component_port_templates = (
                 _make_variable_subcircuit_templates(len(spec.nodes))
@@ -3200,19 +3645,67 @@ def build_schematic(
         _remap_subtree(symbol_item, ids)
         comp = element_item.find("./CiComponent")
         sym = symbol_item.find("./CIITSymbolComp")
-        if spec.kind in NATIVE_OPAMP_MODELS or (spec.kind in {"QNPN", "D"} and not spec.model_definition and (spec.kind == "QNPN" or spec.model.upper() == "1N4001GP")):
+        # ------------------------------------------------------------------
+        # A native part whose SPICE template ends in the model placeholder `%m`
+        # only works when the CiModel object it names exists INSIDE this .ms14.
+        # Multisim resolves `%m` from the model referenced by the component's
+        # `Model` attribute; the element's own cached CiaCollString card is a
+        # stale copy and is NOT used.  A dangling reference therefore exports an
+        # empty `%m`, and the SPICE reader then swallows the last terminal of
+        # the instance card as if it were the sub-circuit name:
+        #   Error: RefDes 'u1', element 'xu1': Invalid subckt definition name 'vsel'
+        #   Error: RefDes 'u2', element 'au2': Unable to identify XSPICE code
+        #          model for simulation in netlist element 'au2'
+        #   Error: Element 'xu2.cp0': Invalid subckt definition name 'u2_open_vss'
+        # The same is true for the ports of a native digital carrier - see
+        # _bind_port_native_model().  NI's own samples embed one CiModel per
+        # instance, named <CiaCollString[3]>__<CiaCollString[2]>__<n>
+        # (samples/Digital/DecadeCounterUserLoad.ms14.xml).
+        # ------------------------------------------------------------------
+        native_model_file = spec.kind.lower() + "_model.xml"
+        carrier_model_bound = False
+        if (
+            spec.kind in NATIVE_OPAMP_MODELS
+            or spec.kind in NATIVE_MODEL_CARRIERS
+            or (spec.kind == "QNPN" and not spec.model_definition)
+        ) and _template_available(native_model_file):
             if spec.kind not in native_models:
-                model_item = _deepcopy(_load_template(spec.kind.lower() + "_model.xml"))
+                model_item = _deepcopy(_load_template(native_model_file))
                 _remap_subtree(model_item, ids)
                 model_item.find("CiModel").set("Scope", circuit_item.get("CiID"))
                 native_models[spec.kind] = model_item
                 elements.append(model_item)
             comp.set("Model", native_models[spec.kind].get("CiID"))
-        if comp is not None and comp.get("Model"):
+            # This path already materialised a real CiModel object, so the
+            # generic binding below must not create a second one.
+            carrier_model_bound = True
+        if comp is not None and comp.get("Model") and not carrier_model_bound:
             # Native components extracted from a licensed Multisim database
             # may point at a CiModel object outside the component subtree.
             # Keep a project-local model placeholder so Multisim does not
             # silently omit the component when exporting its native netlist.
+            #
+            # ★★ A bare CiID registration in <Models> is NOT enough.  Multisim
+            # resolves the `%m` placeholder of the component's SPICE template
+            # from the CiModel OBJECT, not from the <Models> membership list.
+            # If only the CiID is registered, `%m` expands to an empty string
+            # and the exporter eats the last terminal as if it were the
+            # sub-circuit name -- which surfaces as, depending on the part:
+            #   Error: RefDes 'd8', element 'dD8': Invalid subckt definition
+            #          name '<node>'            (discrete diode / mosfet / switch)
+            #   Error: RefDes 'u41', element 'xu41_a': Invalid subckt definition
+            #          name 'lm158_4__opamp__1'  (native op-amp carrier)
+            # The card is still cached on the component as CiaCollString[5], so
+            # recover it exactly the way _bind_port_native_model() does for
+            # native carrier ports.
+            comp.set(
+                "Model",
+                _bind_component_native_model(
+                    comp, native_model_cache, model_sequence, ids,
+                    circuit_item, elements, model_refs,
+                ),
+            )
+        if comp is not None and comp.get("Model"):
             model_refs.add(comp.get("Model"))
         rank = placement_rank[component_index]
         x = grid_origin_x + (rank % grid_columns) * grid_step_x
@@ -3225,6 +3718,9 @@ def build_schematic(
             x, y = ce_profile['positions'][spec.refdes]
         elif rectifier_profile:
             x, y = rectifier_profile['positions'][spec.refdes]
+        position_override = (component_positions or {}).get(spec.refdes)
+        if position_override:
+            x, y = float(position_override[0]), float(position_override[1])
         max_component_x = max(max_component_x, x + 126)
         max_component_y = max(max_component_y, y + 108)
         placements.append({"refdes": spec.refdes, "kind": spec.kind, "x": x, "y": y})
@@ -3327,6 +3823,15 @@ def build_schematic(
             port = port_item.find("./CiPort")
             port_id = port_item.get("CiID")
             port.set("Component", element_item.get("CiID"))
+            _bind_port_native_model(
+                port,
+                port_model_cache,
+                port_model_sequence,
+                ids,
+                circuit_item,
+                elements,
+                model_refs,
+            )
             component_ports.append(ET.Element("Item", {"CiID": port_id}))
             _link_symbol_port(symbol_item, old_port_ciid, port_id)
             if net_name is None:
@@ -3364,6 +3869,19 @@ def build_schematic(
         elements.append(item)
     elements.append(circuit_item)
 
+    # Multisim writes <CiModel> objects LAST inside <Elements> -- after every
+    # component, port, node and the CiCircuit itself -- and its own SaveAs
+    # relocates ours to the end when we emit them first.  Match that layout so
+    # a delivered .ms14 is already byte-comparable with a native re-save
+    # (verified against samples/Non-InvertingOpAmp.ms14 and
+    # samples/Mixed-signal/PulseWidthModulator.ms14).
+    model_items = [el for el in list(elements) if el.get("Class") == "CiModel"]
+    if model_items:
+        for el in model_items:
+            elements.remove(el)
+        for el in model_items:
+            elements.append(el)
+
     if models is not None:
         existing_model_refs = {
             item.get("CiID") for item in models.findall("./Item") if item.get("CiID")
@@ -3385,17 +3903,51 @@ def build_schematic(
             ET.Element("Item", {"CiID": element_item.get("CiID")})
         )
 
+    # Wire-routing obstacles: a box around each component's PIN HULL (+12
+    # clearance) instead of the coarse origin+126x108 body box.  The default
+    # box swallowed neighbouring components whenever a custom
+    # component_positions layout placed parts closer than ~130 pt apart and
+    # made every pin escape "cross" an imaginary neighbour.  The hull hugs
+    # the real pin span, so dense reference layouts route cleanly.
+    pin_points_by_refdes: dict[str, list[tuple[float, float]]] = {}
+    for pins in connections.values():
+        for conn in pins:
+            pin_points_by_refdes.setdefault(conn["refdes"], []).append(
+                (float(conn["x"]), float(conn["y"]))
+            )
+    placement_boxes: list[dict[str, Any]] = []
+    wire_fallbacks: list[tuple[str, str | None, str]] = []
+    for placement in placements:
+        hull = pin_points_by_refdes.get(placement["refdes"])
+        if hull:
+            xs = [p[0] for p in hull]
+            ys = [p[1] for p in hull]
+            placement_boxes.append({
+                "refdes": placement["refdes"],
+                "kind": placement.get("kind"),
+                "x": min(xs) - 12,
+                "y": min(ys) - 12,
+                "width": (max(xs) - min(xs)) + 24,
+                "height": (max(ys) - min(ys)) + 24,
+            })
+            placement["hull_box"] = [
+                min(xs) - 12, min(ys) - 12,
+                (max(xs) - min(xs)) + 24, (max(ys) - min(ys)) + 24,
+            ]
+        else:
+            placement_boxes.append(dict(placement))
+
     for name, conns in connections.items():
         if len(conns) < 2:
             continue
-        routing_obstacles = list(placements)
+        routing_obstacles = list(placement_boxes)
         # Reserve every other net's pin escape before routing the first net.
         # Otherwise an early supply wire can occupy a later signal's only exit.
         for other, pins in connections.items():
             if other == name:
                 continue
             for pin in pins:
-                ex, ey = pin_escape(pin, placements)
+                ex, ey = pin_escape(pin, placement_boxes)
                 px, py = float(pin["x"]), float(pin["y"])
                 routing_obstacles.append({"refdes": "__pin__", "x": min(px, ex)-3,
                     "y": min(py, ey)-3, "width": abs(px-ex)+6, "height": abs(py-ey)+6})
@@ -3427,7 +3979,22 @@ def build_schematic(
             _clear(points)
             occupied = [segment for other, paths in net_wires.items() if other != name
                         for path in paths for segment in zip(path, path[1:])]
-            path = route_pins(start, end, routing_obstacles, occupied)
+            try:
+                path = route_pins(start, end, routing_obstacles, occupied)
+            except ValueError:
+                # Dense custom layouts (component_positions) can leave no
+                # corridor that satisfies every pin-escape reservation.  Keep
+                # the build alive with a plain orthogonal elbow -- always
+                # connected, just possibly less elegant.  Connectivity comes
+                # from the Connect references, not from the geometry.
+                sx, sy = float(start["x"]), float(start["y"])
+                ex, ey = float(end["x"]), float(end["y"])
+                if abs(sx - ex) < 1e-9 or abs(sy - ey) < 1e-9:
+                    path = [(sx, sy), (ex, ey)]
+                else:
+                    mid_y = (sy + ey) / 2
+                    path = [(sx, sy), (sx, mid_y), (ex, mid_y), (ex, ey)]
+                wire_fallbacks.append((name, start.get("refdes"), end_id))
             for px, py in path:
                 points.append(ET.Element("Item", {"X": f"{px:g}", "Y": f"{py:g}"}))
             modifier = wire.find("./ElectricalObject/ModifierInfo/Element")
@@ -3574,13 +4141,6 @@ def build_schematic(
             )
 
     new_circuit_id = circuit_item.get("CiID")
-    circuit_name = str(circuit_item.get("LocalName") or "minimal").removeprefix("&ASC")
-    _add_component_refdes_map(
-        root,
-        specs,
-        str(Path(output_path).with_suffix(".ms14")),
-        circuit_name,
-    )
     for el in root.iter():
         if "Circuit" in el.attrib:
             el.set("Circuit", new_circuit_id)
@@ -3591,6 +4151,13 @@ def build_schematic(
     extent_y = [max_component_y] + [p[1] for paths in net_wires.values() for path in paths for p in path]
     sheet_width = max(960, math.ceil((max(extent_x) + 240) / 96) * 96)
     sheet_height = max(720, math.ceil((max(extent_y) + 144) / 96) * 96)
+    # An explicit minimum sheet size (inches) wins over the auto-fit when it
+    # is larger, so callers can reserve room for instruments or later edits.
+    if min_sheet_size:
+        min_w = math.ceil(float(min_sheet_size[0]) * 96)
+        min_h = math.ceil(float(min_sheet_size[1]) * 96)
+        sheet_width = max(sheet_width, min_w)
+        sheet_height = max(sheet_height, min_h)
     sheet_settings = {"Sheet Width": sheet_width, "Sheet Height": sheet_height,
                       "Sheet Width In Inch": sheet_width / 96, "Sheet Height In Inch": sheet_height / 96}
     for setting in diagram.findall("./CircPrefs/CIITCircuitPrefs/Settings/Element"):
@@ -3605,6 +4172,17 @@ def build_schematic(
         "PageHeight",
         f"{sheet_height / 96:g}",
     )
+    # Keep the GUI working area (DesignSheet WorkArea, nanometres, centred on
+    # the origin) in sync with the grown page.  The minimal template ships a
+    # fixed A4 work area, so a schematic wider than 297 mm was clipped on
+    # screen even though CircPrefs already described the larger page.
+    half_w_nm = round(sheet_width / 96 * 25.4 / 2 * 1_000_000)
+    half_h_nm = round(sheet_height / 96 * 25.4 / 2 * 1_000_000)
+    for sheet in root.iter("DesignSheet"):
+        sheet.set("WorkAreaLeft", f"{-half_w_nm}")
+        sheet.set("WorkAreaRight", f"{half_w_nm}")
+        sheet.set("WorkAreaBottom", f"{-half_h_nm}")
+        sheet.set("WorkAreaTop", f"{half_h_nm}")
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3625,10 +4203,10 @@ def build_schematic(
         editable_model_status = "not_applicable"
 
     layout_validation = validate_schematic_geometry(
-        placements,
+        placement_boxes,
         net_wires,
         pin_points=net_pin_points,
-        pin_exits={net: [((c['x'],c['y']), pin_escape(c,placements)) for c in pins]
+        pin_exits={net: [((c['x'],c['y']), pin_escape(c,placement_boxes)) for c in pins]
                    for net,pins in connections.items()},
     )
 
@@ -3663,6 +4241,16 @@ def build_schematic(
         "unsupported": parsed.unsupported,
         "model_warnings": model_warnings,
         "layout_validation": layout_validation,
+        "sheet": {
+            "width_px_96dpi": sheet_width,
+            "height_px_96dpi": sheet_height,
+            "width_inch": sheet_width / 96,
+            "height_inch": sheet_height / 96,
+        },
+        "wire_fallbacks": [
+            {"net": net, "from": refdes, "to_endpoint": endpoint}
+            for net, refdes, endpoint in wire_fallbacks
+        ],
         "probes": probes,
         "counts": {
             "components": len(component_items),
@@ -3677,7 +4265,6 @@ def build_schematic(
 
 __all__ = [
     "COMPONENT_DEFINITIONS",
-    "CORE_TEMPLATE_KINDS",
     "DIGITAL_MODEL_KINDS",
     "TEMPLATE_PACK_ENV",
     "TEMPLATE_ONLY_ENV",
@@ -3687,11 +4274,8 @@ __all__ = [
     "ParsedNetlist",
     "SubcircuitDefinition",
     "build_schematic",
-    "component_template_files",
     "parse_netlist",
     "parse_spice_value",
     "prepare_simulation_netlist",
-    "template_completeness",
     "template_search_paths",
-    "template_status",
 ]
