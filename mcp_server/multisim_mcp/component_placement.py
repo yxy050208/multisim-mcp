@@ -714,6 +714,8 @@ def validate_layout_positions(
         "component_count": lv.get("component_count"),
         "wire_count": lv.get("wire_count"),
         "different_net_crossings": lv.get("different_net_crossings"),
+        "crossings_per_wire": lv.get("crossings_per_wire"),
+        "crossings_limit_per_wire": lv.get("crossings_limit_per_wire"),
         "findings": lv.get("findings", []),
         "error_count": sum(
             1 for f in lv.get("findings", []) if f.get("severity") == "error"
@@ -722,5 +724,5 @@ def validate_layout_positions(
         "sheet": result.get("sheet"),
         "wire_fallbacks": len(result.get("wire_fallbacks", [])),
         "note": "dry-run: built into a scratch directory, nothing was kept; "
-                "error findings are clearance-level reports, not build failures",
+                "callers must require status=pass before delivery",
     }
