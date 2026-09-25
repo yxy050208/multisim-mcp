@@ -4141,6 +4141,13 @@ def build_schematic(
             )
 
     new_circuit_id = circuit_item.get("CiID")
+    circuit_name = str(circuit_item.get("LocalName") or "minimal").removeprefix("&ASC")
+    _add_component_refdes_map(
+        root,
+        specs,
+        str(Path(output_path).with_suffix(".ms14")),
+        circuit_name,
+    )
     for el in root.iter():
         if "Circuit" in el.attrib:
             el.set("Circuit", new_circuit_id)
@@ -4263,8 +4270,130 @@ def build_schematic(
     }
 
 
+# Component families whose absence makes the documented baseline workflows
+# impossible. Optional carriers remain a warning rather than a false failure.
+CORE_TEMPLATE_KINDS: Final = frozenset(
+    {
+        "R", "C", "L", "V", "I", "GND",
+        "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "OPAMP5",
+        "DNOT4", "DAND5", "DOR5", "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "DJK7",
+    }
+)
+
+
+def component_template_files(definition: ComponentDefinition) -> tuple[str, ...]:
+    """Return every template file one component family needs to build."""
+    return (
+        definition.element_template,
+        definition.symbol_template,
+        *definition.port_templates,
+    )
+
+
+def template_completeness(
+    paths: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Report per-family availability across the trusted search paths."""
+    search_paths = list(paths) if paths is not None else template_search_paths()
+    missing_by_kind: dict[str, list[str]] = {}
+    for kind, definition in sorted(COMPONENT_DEFINITIONS.items()):
+        absent = [
+            name
+            for name in component_template_files(definition)
+            if not any((root / name).is_file() for root in search_paths)
+        ]
+        if absent:
+            missing_by_kind[kind] = absent
+    core_missing = sorted(kind for kind in missing_by_kind if kind in CORE_TEMPLATE_KINDS)
+    extended_missing = sorted(kind for kind in missing_by_kind if kind not in CORE_TEMPLATE_KINDS)
+    return {
+        "search_paths": search_paths,
+        "component_kinds": len(COMPONENT_DEFINITIONS),
+        "missing_by_kind": missing_by_kind,
+        "unavailable_kinds": sorted(missing_by_kind),
+        "core_missing_kinds": core_missing,
+        "extended_missing_kinds": extended_missing,
+        "complete": not missing_by_kind,
+    }
+
+
+def template_status(paths: list[Path] | None = None) -> str:
+    """Return ``pass``, ``warn`` or ``fail`` for schematic readiness."""
+    report = template_completeness(paths)
+    if report["core_missing_kinds"]:
+        return "fail"
+    if report["extended_missing_kinds"]:
+        return "warn"
+    return "pass"
+
+
+def _component_refdes_info(
+    refdes: str,
+    file_path: str,
+    circuit_name: str,
+    *,
+    sectioned: bool = False,
+) -> ET.Element | None:
+    """Build the native map entry that preserves a generated designator."""
+    match = re.fullmatch(r"([A-Za-z]+)(\d+)", refdes)
+    if match is None:
+        return None
+    prefix, number = match.groups()
+    section = "A" if sectioned else ""
+    external = f"{prefix}{number}{section}"
+    refdes_str = f"&ASC!0!0!0{refdes}!0{file_path}!01!0{circuit_name}!0"
+    info_item = ET.Element("CIRToInfoMapItem", {"CIRKey": _asc(external)})
+    info = ET.SubElement(info_item, "RefDesInfo", {
+        "Class": "CIITHierRefDesInfo", "IRPrefix": _asc(prefix),
+        "IRNumber": number, "Locked": "0", "IRSection": _asc(section) if section else "",
+        "IRSectionID": "0" if section else "-1", "SpiceTemplate": "",
+    })
+    data = ET.SubElement(info, "RefDesInfoData", {
+        "Class": "CIITHierRefDes", "RefDesBufSize": "260",
+        "RefDesStrSize": str(len(refdes_str)), "RefDesCount": "2",
+        "RefDes": refdes_str, "SectionBufSize": "260" if section else "0",
+        "SectionStrSize": "2" if section else "0", "Section": _asc(section) if section else "&ASC(null)",
+        "Prefix": _asc(prefix), "Number": number,
+    })
+    ET.SubElement(data, "RefDesData")
+    for tag in ("PinOrderCIR", "PinOrderIR", "PinNumbersCIR", "PinNumbersIR", "SharedPins"):
+        ET.SubElement(info, tag)
+    return info_item
+
+
+def _add_component_refdes_map(
+    root: ET.Element,
+    specs: Sequence[ComponentSpec],
+    file_path: str,
+    circuit_name: str,
+) -> None:
+    """Register standard and multi-section component designators in XML."""
+    container = _find_by_tag(root, "RefDesInfoContainer")
+    if container is None:
+        return
+    mapping = container.find("./CIRToInfoMap")
+    if mapping is None:
+        mapping = ET.SubElement(container, "CIRToInfoMap")
+    existing = {str(item.get("CIRKey") or "") for item in mapping.findall("./CIRToInfoMapItem")}
+    section_kinds = set(DIGITAL_MODEL_KINDS.values()) | {"OPAMP5", "TIMER8", "DFF8"}
+    section_kinds.update({"XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN"})
+    for spec in specs:
+        if spec.kind == "GND":
+            continue
+        key = _asc(f"{spec.refdes}{'A' if spec.kind in section_kinds else ''}")
+        if key in existing:
+            continue
+        item = _component_refdes_info(
+            spec.refdes, file_path, circuit_name, sectioned=spec.kind in section_kinds
+        )
+        if item is not None:
+            mapping.append(item)
+            existing.add(key)
+
+
 __all__ = [
     "COMPONENT_DEFINITIONS",
+    "CORE_TEMPLATE_KINDS",
     "DIGITAL_MODEL_KINDS",
     "TEMPLATE_PACK_ENV",
     "TEMPLATE_ONLY_ENV",
@@ -4274,8 +4403,11 @@ __all__ = [
     "ParsedNetlist",
     "SubcircuitDefinition",
     "build_schematic",
+    "component_template_files",
     "parse_netlist",
     "parse_spice_value",
     "prepare_simulation_netlist",
     "template_search_paths",
+    "template_completeness",
+    "template_status",
 ]
