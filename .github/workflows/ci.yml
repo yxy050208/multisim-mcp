@@ -186,7 +186,7 @@ jobs:
                   assert "retry_experiment_job" in names
                   # The 1.3 development branch exposes the expanded design,
                   # approval, and native-sweep surface.
-                  assert len(names) == 107
+                  assert len(names) == 112
                   assert len(prompts.prompts) == 5
                   assert len(resources.resource_templates) == 20
                   print(f"{mode}: {len(names)} tools")
