@@ -75,7 +75,7 @@
   `excessive-wire-crossings` 错误；数字逻辑新增按低扇出信号链排序的布局 profile，
   负载元件会跟随其驱动器放置。`create_schematic_from_netlist` 新增可选的
   `require_layout_pass=true` 交付门禁：失败时保留 XML 与布局报告供修复，不编码
-  `.ms14`，并已覆盖到受控 handoff 执行路径。
+  `.ms14`，并已覆盖到受控 handoff 及完整 Multisim 实验流水线。
 - 新增 `optimize_natural_rectifier`：固定负载的九候选原生参数搜索、八个容差组合、启动验收、选定保存文件无改参复验及对比报告。真实 MCP 测试完成27次运行，12V/100mA/≤0.3V案例选定3900μF，较4700μF基线减少17.02%。
 - 处理 Multisim SetRLCValue 的旧数值缓存：验证有效参数字符串与原生RLCValue，记录缓存差异，保留严格证据门槛。开发版 full/experiment/optimization profile 为107/84/70。
 

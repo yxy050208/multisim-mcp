@@ -2267,6 +2267,7 @@ def _create_schematic_impl(
             {spec.refdes: list(spec.nodes) for spec in expected_specs},
             exported,
         )
+        topology_diff["pin_connections"] = pin_diff
         topology_diff_path = output_path.with_name(output_path.stem + ".topology-diff.json")
         topology_diff_path.write_text(
             json.dumps(topology_diff, ensure_ascii=False, indent=2),
@@ -2274,13 +2275,10 @@ def _create_schematic_impl(
         )
         result["topology_diff"] = topology_diff
         result["topology_diff_path"] = str(topology_diff_path)
-        topology_diff["pin_connections"] = pin_diff
-        topology_diff_path.write_text(
-            json.dumps(topology_diff, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        if topology_diff["status"] != "pass":
+        if topology_diff["status"] != "pass" or pin_diff["status"] == "fail":
             missing = topology_diff["missing_components"] + topology_diff["missing_nets"]
+            if pin_diff["status"] == "fail":
+                missing.append("pin-connections")
             raise RuntimeError("Multisim round-trip topology mismatch: " + ", ".join(missing))
         native_components: dict[str, bool] = {}
         native_evidence: dict[str, str] = {}

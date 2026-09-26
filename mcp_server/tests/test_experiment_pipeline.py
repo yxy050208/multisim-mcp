@@ -53,6 +53,7 @@ ARTIFACT_NAMES = (
 def _schematic_executor(
     netlist: str, output_ms14: str, **kwargs: object
 ) -> dict[str, object]:
+    assert kwargs["require_layout_pass"] is True
     design = Path(output_ms14)
     design.write_bytes(b"new-ms14")
     xml = Path(str(design) + ".xml")

@@ -448,15 +448,23 @@ class MultisimExperimentPipeline:
             image_path = stage / "schematic.png"
             report_path = stage / "report.md"
             chart_path = stage / "plot.svg"
+            schematic_kwargs = {
+                "probe_nets": [],
+                "include_experimental_probes": False,
+                "open_after_build": True,
+                "image_path": str(image_path),
+                "overwrite": False,
+            }
+            if self._editable_schematic:
+                # A complete editable experiment must never publish a native
+                # artifact whose geometry preflight already failed. Portable
+                # diagrams do not use the Multisim layout gate.
+                schematic_kwargs["require_layout_pass"] = True
             schematic = dict(
                 self._schematic_executor(
                     netlist,
                     str(design_path),
-                    probe_nets=[],
-                    include_experimental_probes=False,
-                    open_after_build=True,
-                    image_path=str(image_path),
-                    overwrite=False,
+                    **schematic_kwargs,
                 )
             )
             notify("simulation", 42, f"Running validated {self._backend_display_name} analysis")

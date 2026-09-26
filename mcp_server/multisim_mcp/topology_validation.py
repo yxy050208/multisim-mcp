@@ -8,6 +8,7 @@ from typing import Any
 
 
 _TOKEN = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_.:$-]*)(?![A-Za-z0-9_])")
+_SEPARATOR = re.compile(r"^-{5,}$")
 
 
 def _present(text: str, name: str) -> bool:
@@ -50,9 +51,71 @@ def compare_pin_connections(
     expected: dict[str, list[str]],
     exported_netlist: str,
 ) -> dict[str, Any]:
-    """Best-effort pin/net comparison for common SPICE ReportNetlist output."""
+    """Compare pin/net connections in SPICE or Multisim report output.
+
+    Multisim's ``ReportNetlist`` is a fixed-width connection table rather than
+    SPICE text.  Its numeric pin rows can be checked exactly; XSPICE digital
+    models expose named and hidden power pins instead, so those entries are
+    reported as ``unverified`` rather than mistaken for a mismatch.
+    """
+    table_lines = [line.strip() for line in exported_netlist.splitlines() if line.strip()]
+    separators = [index for index, line in enumerate(table_lines) if _SEPARATOR.fullmatch(line)]
+    if len(separators) >= 3:
+        rows = [
+            line.split()
+            for line in table_lines[separators[1] + 1 : separators[-1]]
+            if len(line.split()) >= 3
+        ]
+        mismatches: list[dict[str, Any]] = []
+        unverified: list[str] = []
+        checked = 0
+        for refdes, expected_nets in expected.items():
+            aliases = {refdes.casefold(), (refdes + "A").casefold()}
+            matches = [row for row in rows if row[2].casefold() in aliases]
+            if not matches:
+                continue
+            pin_rows = [(row[3], row[0]) for row in matches if len(row) >= 4]
+            if len(pin_rows) != len(expected_nets) or not all(
+                pin.isdigit() for pin, _ in pin_rows
+            ):
+                unverified.append(refdes)
+                continue
+            by_pin = {int(pin): net for pin, net in pin_rows}
+            expected_pin_numbers = set(range(1, len(expected_nets) + 1))
+            if set(by_pin) != expected_pin_numbers:
+                unverified.append(refdes)
+                continue
+            actual = [by_pin[index] for index in range(1, len(expected_nets) + 1)]
+            checked += 1
+            if [item.casefold() for item in actual] != [
+                item.casefold() for item in expected_nets
+            ]:
+                mismatches.append(
+                    {
+                        "refdes": refdes,
+                        "expected_nets": expected_nets,
+                        "actual_nets": actual,
+                    }
+                )
+        status = "fail" if mismatches else "unverified" if unverified else "pass"
+        return {
+            "schema_version": 1,
+            "status": status,
+            "checked_components": checked,
+            "unverified_components": unverified,
+            "mismatches": mismatches,
+            "evidence": (
+                "numeric pin rows from the Multisim ReportNetlist connection table; "
+                "named/hidden XSPICE pins require model-level evidence"
+            ),
+        }
+
     mismatches: list[dict[str, Any]] = []
-    lines = [line.strip() for line in exported_netlist.splitlines() if line.strip() and not line.lstrip().startswith(("*", ";", "#", "."))]
+    lines = [
+        line.strip()
+        for line in exported_netlist.splitlines()
+        if line.strip() and not line.lstrip().startswith(("*", ";", "#", "."))
+    ]
     for refdes, expected_nets in expected.items():
         matches = [line.split() for line in lines if line.split() and line.split()[0].casefold() == refdes.casefold()]
         if not matches:
@@ -65,6 +128,7 @@ def compare_pin_connections(
         "schema_version": 1,
         "status": "pass" if not mismatches else "fail",
         "checked_components": len(expected),
+        "unverified_components": [],
         "mismatches": mismatches,
         "evidence": "ordered pin/net tokens from common SPICE ReportNetlist lines",
     }
