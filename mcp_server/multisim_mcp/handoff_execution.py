@@ -182,6 +182,7 @@ def validate_handoff(payload: dict[str, Any], project_root: str | Path) -> Valid
         "executable_netlist",
         "netlist_approval",
     }
+    optional_schematic = {"require_layout_pass"}
     required_simulation = {
         "spec",
         "output_dir",
@@ -192,7 +193,9 @@ def validate_handoff(payload: dict[str, Any], project_root: str | Path) -> Valid
         "netlist_approval",
         "simulation_plan_approval",
     }
-    if set(schematic_raw) != required_schematic:
+    if not required_schematic.issubset(schematic_raw) or (
+        set(schematic_raw) - required_schematic - optional_schematic
+    ):
         raise ValueError("steps[0].arguments has unknown or missing fields")
     if set(simulation_raw) != required_simulation:
         raise ValueError("steps[1].arguments has unknown or missing fields")
@@ -204,6 +207,8 @@ def validate_handoff(payload: dict[str, Any], project_root: str | Path) -> Valid
         raise ValueError("steps[0].arguments.probe_nets must be a string array")
     for field in ("include_experimental_probes", "open_after_build", "overwrite"):
         _bool(schematic_raw[field], f"steps[0].arguments.{field}")
+    require_layout_pass = schematic_raw.get("require_layout_pass", False)
+    _bool(require_layout_pass, "steps[0].arguments.require_layout_pass")
     _bool(simulation_raw["overwrite"], "steps[1].arguments.overwrite")
     timeout = _bounded_number(
         simulation_raw["timeout"],
@@ -282,6 +287,9 @@ def validate_handoff(payload: dict[str, Any], project_root: str | Path) -> Valid
     schematic = dict(schematic_raw)
     schematic["output_ms14"] = str(schematic_output)
     schematic["image_path"] = str(image_path)
+    # Normalize the optional field so legacy and new handoffs propagate a
+    # deterministic value through execute and submit modes.
+    schematic["require_layout_pass"] = require_layout_pass
     simulation = dict(simulation_raw)
     simulation["output_dir"] = str(output_dir)
     return ValidatedHandoff(root, output_dir, schematic, simulation, approval_identity)

@@ -142,6 +142,7 @@ class HandoffExecutionTest(unittest.TestCase):
             def schematic(**kwargs):
                 calls.append("schematic")
                 self.assertTrue(kwargs["output_ms14"].endswith("approved-plan.ms14"))
+                self.assertFalse(kwargs["require_layout_pass"])
                 return {"success": False, "error": {"type": "fixture"}}
 
             with patch("multisim_mcp.server.create_schematic_from_netlist", side_effect=schematic), patch(
@@ -153,6 +154,19 @@ class HandoffExecutionTest(unittest.TestCase):
             self.assertFalse(result["simulation_started"])
             self.assertEqual(calls, ["schematic"])
             simulation.assert_not_called()
+
+    def test_optional_layout_gate_is_propagated_through_handoff(self) -> None:
+        payload = _payload()
+        payload["steps"][0]["arguments"]["require_layout_pass"] = True
+        with tempfile.TemporaryDirectory() as tmp:
+            handoff = validate_handoff(payload, tmp)
+            with patch(
+                "multisim_mcp.server.create_schematic_from_netlist",
+                return_value={"success": False, "error": {"type": "layout"}},
+            ) as schematic:
+                result = execute_handoff(handoff)
+            self.assertFalse(result["success"])
+            self.assertTrue(schematic.call_args.kwargs["require_layout_pass"])
 
     def test_execution_runs_simulation_after_successful_schematic(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -193,6 +193,7 @@ class SchematicRequest:
     component_positions: dict[str, Any] | None = None
     min_sheet_size: tuple[float, float] | None = None
     verify: bool = True
+    require_layout_pass: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.design, CircuitDesign):
@@ -226,6 +227,7 @@ class SchematicRequest:
             "open_after_build",
             "include_experimental_probes",
             "overwrite",
+            "require_layout_pass",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a boolean")

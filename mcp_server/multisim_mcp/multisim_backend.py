@@ -199,6 +199,7 @@ class MultisimBackend:
             component_positions=request.component_positions,
             min_sheet_size=request.min_sheet_size,
             verify=request.verify,
+            require_layout_pass=request.require_layout_pass,
         )
         success = result.get("success") is True
         paths = [ms14, Path(str(ms14) + ".xml")]

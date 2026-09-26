@@ -2141,6 +2141,7 @@ def _create_schematic_impl(
     component_positions: dict[str, Any] | None = None,
     min_sheet_size: tuple[float, float] | None = None,
     verify: bool = True,
+    require_layout_pass: bool = False,
 ) -> dict:
     validate_spice_netlist(netlist)
     parsed = parse_netlist(netlist)
@@ -2187,6 +2188,27 @@ def _create_schematic_impl(
         json.dumps(build_result.get("layout_validation", {}), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    layout_validation = build_result.get("layout_validation", {})
+    if require_layout_pass and layout_validation.get("status") != "pass":
+        findings = layout_validation.get("findings", [])
+        finding_count = len(findings) if isinstance(findings, list) else 0
+        return {
+            "success": False,
+            "maturity": "experimental",
+            "supported_schematic_components": list(COMPONENT_DEFINITIONS),
+            "build": build_result,
+            "layout_validation": layout_validation,
+            "layout_validation_path": str(layout_report_path),
+            "experimental_probes": include_experimental_probes,
+            "delivery_status": "blocked-layout",
+            "error": {
+                "type": "LayoutValidationError",
+                "message": (
+                    "Schematic delivery blocked because layout validation did not pass"
+                ),
+                "finding_count": finding_count,
+            },
+        }
     encode_result = codec.encode(str(xml_path), str(output_path))
     result: dict = {
         "success": True,
@@ -2196,7 +2218,7 @@ def _create_schematic_impl(
         "encode": encode_result,
         "ms14": str(output_path),
         "xml": str(xml_path),
-        "layout_validation": build_result.get("layout_validation", {}),
+        "layout_validation": layout_validation,
         "layout_validation_path": str(layout_report_path),
         "experimental_probes": include_experimental_probes,
     }
@@ -2719,6 +2741,7 @@ def create_schematic_from_netlist(
     component_positions: dict[str, Any] | None = None,
     sheet_size: list[float] | None = None,
     verify: bool = True,
+    require_layout_pass: bool = False,
 ) -> dict:
     """Create an editable Multisim schematic from a supported SPICE netlist.
 
@@ -2742,6 +2765,10 @@ def create_schematic_from_netlist(
     any schematic work begins. The supplied ``netlist`` must exactly match the
     approved preview's bound SPICE text. This path opens schematic generation
     only; it does not approve or start a simulation.
+
+    When ``require_layout_pass`` is true, geometry findings are a delivery
+    gate: the XML preflight and layout report are retained for repair, but no
+    encoded ``.ms14`` file is produced until the layout passes.
     """
     approved_handoff = executable_netlist is not None or netlist_approval is not None
     if approved_handoff:
@@ -2778,6 +2805,7 @@ def create_schematic_from_netlist(
             component_positions=component_positions,
             min_sheet_size=tuple(sheet_size) if sheet_size else None,
             verify=verify,
+            require_layout_pass=require_layout_pass,
         ),
     )
     result = _eda_compatibility_result(execution)

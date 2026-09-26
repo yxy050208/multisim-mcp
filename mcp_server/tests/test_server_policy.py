@@ -251,6 +251,63 @@ class ArtifactPreflightTest(unittest.TestCase):
             )
 
 
+class SchematicLayoutGateTest(unittest.TestCase):
+    def test_require_layout_pass_blocks_encoding_and_keeps_report(self) -> None:
+        netlist = "V1 a 0 1\nR1 a 0 1k\n.end\n"
+        failed_layout = {
+            "schema_version": 1,
+            "status": "fail",
+            "component_count": 2,
+            "wire_count": 1,
+            "findings": [{"severity": "error", "code": "wire-crosses-component"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            server,
+            "build_schematic",
+            return_value={"layout_validation": failed_layout, "nets": []},
+        ), patch.object(server.codec, "encode") as encode:
+            output = Path(tmp) / "blocked.ms14"
+            result = server._create_schematic_impl(
+                netlist,
+                str(output),
+                probe_nets=[],
+                include_experimental_probes=False,
+                open_after_build=False,
+                image_path=None,
+                overwrite=False,
+                verify=False,
+                require_layout_pass=True,
+            )
+            self.assertFalse(result["success"])
+            self.assertEqual(result["delivery_status"], "blocked-layout")
+            self.assertEqual(result["error"]["type"], "LayoutValidationError")
+            self.assertEqual(result["layout_validation"], failed_layout)
+            self.assertTrue(Path(result["layout_validation_path"]).is_file())
+            self.assertFalse(output.exists())
+            encode.assert_not_called()
+
+    def test_layout_gate_is_opt_in_for_legacy_callers(self) -> None:
+        netlist = "V1 a 0 1\nR1 a 0 1k\n.end\n"
+        failed_layout = {"schema_version": 1, "status": "fail", "findings": []}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            server,
+            "build_schematic",
+            return_value={"layout_validation": failed_layout, "nets": []},
+        ), patch.object(server.codec, "encode", return_value={"success": True}) as encode:
+            result = server._create_schematic_impl(
+                netlist,
+                str(Path(tmp) / "legacy.ms14"),
+                probe_nets=[],
+                include_experimental_probes=False,
+                open_after_build=False,
+                image_path=None,
+                overwrite=False,
+                verify=False,
+            )
+
+        self.assertTrue(result["success"])
+        encode.assert_called_once()
+
 RAW_FIXTURE = """Title: fixture
 Plotname: Operating Point
 Flags: real
