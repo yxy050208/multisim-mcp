@@ -15,6 +15,13 @@ class TopologyValidationTest(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["missing_components"], ["C1"])
 
+    def test_roundtrip_accepts_multisim_hidden_xspice_supply_alias(self) -> None:
+        result = compare_roundtrip_topology(
+            ["A1"], ["high"], "VDD circuit A1\nA1 circuit 1"
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["accepted_net_aliases"], {"high": "vdd"})
+
     def test_pin_connections_report_wrong_order_or_net(self) -> None:
         result = compare_pin_connections({"R1": ["vin", "out"]}, "R1 out 0 1k")
         self.assertEqual(result["status"], "fail")

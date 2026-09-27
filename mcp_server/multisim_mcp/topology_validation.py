@@ -9,6 +9,12 @@ from typing import Any
 
 _TOKEN = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9_.:$-]*)(?![A-Za-z0-9_])")
 _SEPARATOR = re.compile(r"^-{5,}$")
+_NET_ALIASES = {
+    # Multisim's XSPICE digital models expose hidden supply pins as VDD/VSS
+    # in ReportNetlist even when the source schematic uses high/low nets.
+    "high": ("vdd",),
+    "low": ("vss",),
+}
 
 
 def _present(text: str, name: str) -> bool:
@@ -31,7 +37,20 @@ def compare_roundtrip_topology(
         return _present(exported_netlist, name) or _present(exported_netlist, name + "A")
 
     missing_components = [item for item in components if not _seen(item)]
-    missing_nets = [item for item in nets if not _present(exported_netlist, item)]
+    missing_nets: list[str] = []
+    accepted_net_aliases: dict[str, str] = {}
+    for item in nets:
+        if _present(exported_netlist, item):
+            continue
+        aliases = _NET_ALIASES.get(item.casefold(), ())
+        alias = next(
+            (candidate for candidate in aliases if _present(exported_netlist, candidate)),
+            None,
+        )
+        if alias is None:
+            missing_nets.append(item)
+        else:
+            accepted_net_aliases[item] = alias
     # Extra names are intentionally not inferred from arbitrary tokens: vendor
     # netlists contain model names and internal nodes that are not source nets.
     return {
@@ -43,6 +62,7 @@ def compare_roundtrip_topology(
         "missing_nets": missing_nets,
         "extra_components": [],
         "extra_nets": [],
+        "accepted_net_aliases": accepted_net_aliases,
         "evidence": "Multisim ReportNetlist text presence; internal vendor nodes are not treated as extras",
     }
 
