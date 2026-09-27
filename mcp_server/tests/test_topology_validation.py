@@ -57,6 +57,25 @@ VSS circuit A1A
         self.assertEqual(result["status"], "unverified")
         self.assertEqual(result["unverified_components"], ["A1"])
 
+    def test_named_xspice_ports_are_checked_against_model_inventory(self) -> None:
+        report = """title
+-----
+header
+-----
+din circuit A1A I1
+dout circuit A1A O1
+VDD circuit A1A
+VSS circuit A1A
+-----
+"""
+        result = compare_pin_connections(
+            {"A1": ["din", "dout", "high", "0"]},
+            report,
+            declared_ports={"A1": ["I1", "O1", "VDD", "VSS"]},
+        )
+        self.assertEqual(result["model_port_evidence"][0]["state"], "present")
+        self.assertEqual(result["model_port_evidence"][0]["unknown_ports"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

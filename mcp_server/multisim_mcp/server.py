@@ -2285,9 +2285,31 @@ def _create_schematic_impl(
         topology_diff["dangling_nets_policy"] = (
             "singleton source nets are informational; connected nets remain strict"
         )
+        declared_ports: dict[str, list[str]] = {}
+        try:
+            native_inventory = extract_native_component_metadata(
+                str(xml_path),
+                expected_refdes={spec.refdes for spec in expected_specs},
+            )
+            declared_ports = {
+                str(item["refdes"]): [str(port) for port in item.get("port_names", [])]
+                for item in native_inventory.get("components", [])
+                if isinstance(item, Mapping) and item.get("refdes")
+            }
+            topology_diff["native_model_port_inventory"] = {
+                "state": native_inventory.get("state"),
+                "component_count": native_inventory.get("component_count", 0),
+                "source_xml_sha256": native_inventory.get("source_xml_sha256"),
+            }
+        except Exception as exc:
+            topology_diff["native_model_port_inventory"] = {
+                "state": "unavailable",
+                "error": str(exc)[:512],
+            }
         pin_diff = compare_pin_connections(
             {spec.refdes: list(spec.nodes) for spec in expected_specs},
             exported,
+            declared_ports=declared_ports,
         )
         topology_diff["pin_connections"] = pin_diff
         topology_diff_path = output_path.with_name(output_path.stem + ".topology-diff.json")

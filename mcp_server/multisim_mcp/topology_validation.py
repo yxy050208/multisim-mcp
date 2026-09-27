@@ -70,6 +70,7 @@ def compare_roundtrip_topology(
 def compare_pin_connections(
     expected: dict[str, list[str]],
     exported_netlist: str,
+    declared_ports: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Compare pin/net connections in SPICE or Multisim report output.
 
@@ -88,6 +89,7 @@ def compare_pin_connections(
         ]
         mismatches: list[dict[str, Any]] = []
         unverified: list[str] = []
+        model_port_evidence: list[dict[str, Any]] = []
         checked = 0
         for refdes, expected_nets in expected.items():
             aliases = {refdes.casefold(), (refdes + "A").casefold()}
@@ -95,6 +97,37 @@ def compare_pin_connections(
             if not matches:
                 continue
             pin_rows = [(row[3], row[0]) for row in matches if len(row) >= 4]
+            if declared_ports and refdes in declared_ports:
+                declared = {
+                    str(item).casefold() for item in declared_ports[refdes] if str(item)
+                }
+                named = [pin for pin, _ in pin_rows if not pin.isdigit()]
+                hidden_named = [
+                    row[0]
+                    for row in matches
+                    if len(row) == 3 and row[0].casefold() in declared
+                ]
+                observed_named = list(dict.fromkeys([*named, *hidden_named]))
+                unknown = [pin for pin in observed_named if pin.casefold() not in declared]
+                port_state = (
+                    "mismatch"
+                    if unknown
+                    else "not_observed"
+                    if not observed_named
+                    else "present"
+                    if {pin.casefold() for pin in observed_named} == declared
+                    else "partial"
+                )
+                model_port_evidence.append(
+                    {
+                        "refdes": refdes,
+                        "declared_ports": list(declared_ports[refdes]),
+                        "observed_named_ports": observed_named,
+                        "state": port_state,
+                        "unknown_ports": unknown,
+                        "mapping": "port identity only; named port to source-net mapping remains unverified",
+                    }
+                )
             if len(pin_rows) != len(expected_nets) or not all(
                 pin.isdigit() for pin, _ in pin_rows
             ):
@@ -124,9 +157,11 @@ def compare_pin_connections(
             "checked_components": checked,
             "unverified_components": unverified,
             "mismatches": mismatches,
+            "model_port_evidence": model_port_evidence,
             "evidence": (
                 "numeric pin rows from the Multisim ReportNetlist connection table; "
-                "named/hidden XSPICE pins require model-level evidence"
+                "CiPort model inventory checks named-port identity, while named/hidden "
+                "port-to-net mapping remains unverified"
             ),
         }
 
