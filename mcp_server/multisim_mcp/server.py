@@ -2258,10 +2258,32 @@ def _create_schematic_impl(
             item for item in parsed.components
             if item.kind != "GND" and item.kind not in {"OSC6", "XFG3"}
         ]
+        # Multisim omits a net that terminates at one dangling model pin when
+        # it reopens a schematic.  This is expected for unused macro outputs
+        # (for example the final ~Q of a counter), and does not indicate that
+        # a component or a connected wire was lost.  Keep every net with at
+        # least two source pins as a strict round-trip requirement; retain the
+        # omitted singleton names in the diagnostic for transparency.
+        net_pin_counts: dict[str, int] = {}
+        for spec in expected_specs:
+            for node in spec.nodes:
+                if node == "0":
+                    continue
+                net_pin_counts[node] = net_pin_counts.get(node, 0) + 1
+        required_nets = sorted(
+            node for node, count in net_pin_counts.items() if count >= 2
+        )
+        dangling_nets = sorted(
+            node for node, count in net_pin_counts.items() if count == 1
+        )
         topology_diff = compare_roundtrip_topology(
             (spec.refdes for spec in expected_specs),
-            (net for net in build_result.get("nets", []) if net != "0"),
+            required_nets,
             exported,
+        )
+        topology_diff["dangling_source_nets"] = dangling_nets
+        topology_diff["dangling_nets_policy"] = (
+            "singleton source nets are informational; connected nets remain strict"
         )
         pin_diff = compare_pin_connections(
             {spec.refdes: list(spec.nodes) for spec in expected_specs},
