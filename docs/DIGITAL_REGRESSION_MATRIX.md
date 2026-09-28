@@ -1,0 +1,45 @@
+# 复杂数字电路回归矩阵
+
+回归矩阵覆盖从组合逻辑到多级时序链的完整路径。每个案例都应执行：
+
+1. 解析网表和适配器；
+2. 生成可编辑 `.ms14`；
+3. 用 Multisim 重开并导出 `ReportNetlist`；
+4. 检查器件、连接网络、模型端口和布局；
+5. 运行瞬态实验；
+6. 检查输出波形并保存实验报告。
+
+当前矩阵包含五类案例：
+
+| 案例 | 覆盖边界 | 输出 |
+| --- | --- | --- |
+| `logic_chain_load` | NOT → AND → OR，带电阻负载 | `dout`, `n2` |
+| `dff_load` | `@DFF` 适配器、时钟、复位和负载 | `q`, `qb` |
+| `counter4_load` | 四位异步计数器和四路负载 | `q0..q3` |
+| `shift4_load` | 四位串入并出移位寄存器和四路负载 | `s0..s3` |
+| `counter4_decode_load` | 计数器输出扇出到四个反相器和负载 | `d0..d3` |
+
+本机实测运行需要 32 位 Python、Multisim 和本地模板包：
+
+```powershell
+$env:PYTHONPATH = "mcp_server"
+$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\AppData\Local\multisim-mcp\component-pack-rc3"
+python tools/run_digital_regression.py --output C:\Temp\multisim-digital-regression
+```
+
+只运行单个案例：
+
+```powershell
+python tools/run_digital_regression.py --case counter4_load --output C:\Temp\counter4-regression
+```
+
+运行器会为每个案例保存原理图、仿真数据和报告，并在根目录写入 `matrix.json`。矩阵通过条件包括：
+
+- 生成流程成功；
+- 布局状态为 `pass`，交叉率不超过 2.0；
+- 重开拓扑状态为 `pass`；
+- 所有生成器件出现在 Multisim 原生连接表中；
+- 瞬态仿真成功；
+- 声明的输出网络有可观察波形。
+
+本地模板和实验产物只用于验证，不应提交到开源仓库。
