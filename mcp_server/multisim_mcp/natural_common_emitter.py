@@ -4,7 +4,20 @@ import re
 from decimal import Decimal
 from typing import Any
 from .transistor_acceptance import validate_common_emitter_netlist, estimate_common_emitter_bias
-from .preferred_values import format_spice_scalar
+from .preferred_values import format_spice_scalar, generate_preferred_values, parse_spice_scalar
+
+
+def _candidate_resistors(value: float, *, limit: int = 5) -> list[float]:
+    """Return a small deterministic E24 neighbourhood around an estimated RE."""
+    if value <= 0 or not isinstance(value, (int, float)):
+        raise ValueError("estimated emitter resistance must be positive")
+    lower = format_spice_scalar(Decimal(str(value * 0.7)))
+    upper = format_spice_scalar(Decimal(str(value * 1.3)))
+    preferred = [float(parse_spice_scalar(item)) for item in generate_preferred_values("E24", lower, upper)]
+    if not preferred:
+        preferred = [value]
+    preferred.sort(key=lambda item: (abs(item - value) / value, item))
+    return sorted(preferred[:limit])
 
 
 def parse_natural_common_emitter(text: str) -> dict[str, Any]:
@@ -54,16 +67,19 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         {"analysis":"tran", "net":"in", "quantity":"value", "min":.00099, "max":.00101, "time_min_s":.0011, "time_max_s":.0012},
         {"analysis":"tran", "net":"out", "quantity":"value", "min":-.001*gain*1.2, "max":-.001*gain*.8, "time_min_s":.0011, "time_max_s":.0012},
     ]
+    candidate_resistors = _candidate_resistors(re_)
     return {
         "planning_method":"bounded-common-emitter-parser", "text":text.strip(),
         "template_family":"transistor_discrete", "topology":"single_npn_common_emitter",
         "derived":{"supply_v":voltage,"target_gain":gain,"rc_ohm":rc,"re_ohm":re_,"rb1_ohm":rb1,"rb2_ohm":rb2},
+        "candidate_resistors_ohm": candidate_resistors,
         "structural_acceptance":validate_common_emitter_netlist(net),
         "bias_estimate":estimate_common_emitter_bias(net, voltage),
         "proposal":{"title":"2N3904共射放大器", "application":text.strip(), "netlist":net,
                     "probe_nets":["in","out","base","emitter","collector","vcc"],
                     "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 2m"}], "checks":checks},
         "assumptions":["固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
+                       "候选搜索仅比较估算值附近最多5个E24发射极电阻，最终以原生实测增益选择。",
                        "偏置公式只是初始估算；实际工作点、增益和脉冲响应以原生仿真为准。",
                        "未进行温度、容差、功率级、噪声和实物板验证。"],
         "status":"unverified-native-proposal",

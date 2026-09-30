@@ -2,12 +2,46 @@
 from pathlib import Path
 import html
 import json
+import re
+from typing import Any
 
 from .engineering_task_contract import finalize_task_result
 from .generated_analog_run import run_generated_analog_project
 from .native_xml import parse_native_xml
 from .natural_common_emitter import parse_natural_common_emitter
 from .schematic_builder import parse_netlist, voltage_source_stem
+
+
+def _candidate_proposal(plan: dict[str, Any], resistance: float) -> dict[str, Any]:
+    """Copy the bounded proposal and change only the declared RE value."""
+    proposal = dict(plan['proposal'])
+    netlist = re.sub(
+        r'(?im)^RE\s+emitter\s+0\s+\S+',
+        f"RE emitter 0 {format_resistance(resistance)}",
+        plan['proposal']['netlist'],
+        count=1,
+    )
+    if netlist == plan['proposal']['netlist']:
+        raise ValueError('common-emitter proposal has no RE line')
+    proposal['netlist'] = netlist
+    return proposal
+
+
+def format_resistance(value: float) -> str:
+    from decimal import Decimal
+    from .preferred_values import format_spice_scalar
+    return format_spice_scalar(Decimal(str(value)))
+
+
+def _measured_gain(result: dict[str, Any], target: float) -> tuple[float | None, float | None]:
+    acceptance = result.get('measurement_acceptance') or {}
+    for check in acceptance.get('checks', []):
+        requirement = check.get('requirement', {})
+        if requirement.get('analysis') == 'ac' and requirement.get('quantity') == 'magnitude':
+            measured = check.get('measured_max')
+            if isinstance(measured, (int, float)) and measured == measured:
+                return float(measured), abs(float(measured) - target) / max(target, 1e-12)
+    return None, None
 
 
 def verify_ce_presentation(path: Path, plan: dict) -> dict:
@@ -42,21 +76,90 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
         sources = {p.refdes: voltage_source_stem(p) for p in parse_netlist(plan['proposal']['netlist']).components if p.kind == 'V'}
         if sources != {'VCC': 'vdc', 'VIN': 'vpulse'}:
             raise ValueError('Rebuild the local component pack: native VDC and VPULSE carriers are required for this workflow')
-    result = run_generated_analog_project(plan['proposal'], output, execute=execute)
-    result['natural_language_plan'] = plan
+    root = Path(output).expanduser().resolve()
+    if root.exists() or root == Path(root.anchor):
+        raise FileExistsError('output must be a new directory')
     if not execute:
-        return result
-    root = Path(result['output_dir'])
-    if result['success']:
-        result['presentation_acceptance'] = verify_ce_presentation(root/'native-model.xml', plan)
-        if not result['presentation_acceptance']['ok']:
-            result['success'] = False
-            result['verification_status'] = 'native-presentation-mismatch'
-    result['delivery_status'] = 'requires-visual-review' if result['success'] else 'not-ready'
-    result['limitations'] = plan['assumptions']
-    report = root/'report.html'
-    if report.is_file():
-        report.write_text(report.read_text(encoding='utf-8') + '<h2>工程图文件核查</h2><pre>' + html.escape(json.dumps(
-            {'presentation_acceptance':result.get('presentation_acceptance'), 'delivery_status':result['delivery_status']},
-            ensure_ascii=False,indent=2)) + '</pre>', encoding='utf-8')
+        result = {
+            'success': True, 'mode': 'preview', 'output_dir': str(root),
+            'proposal': plan['proposal'], 'natural_language_plan': plan,
+            'candidates': [{'resistance_ohm': value, 'status': 'planned'}
+                           for value in plan['candidate_resistors_ohm']],
+            'optimization': {'method': 'native-measured-gain-neighbourhood',
+                             'candidate_count': len(plan['candidate_resistors_ohm'])},
+            'verification_status': 'unverified', 'simulation_started': False,
+        }
+        from .engineering_task_contract import normalize_task_result
+        return normalize_task_result(result)
+
+    root.mkdir(parents=True, exist_ok=False)
+    (root / 'input.txt').write_text(text, encoding='utf-8')
+    (root / 'proposal.json').write_text(json.dumps(plan, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    result: dict[str, Any] = {
+        'success': False, 'mode': 'execute', 'output_dir': str(root),
+        'proposal': plan['proposal'], 'natural_language_plan': plan, 'candidates': [],
+        'verification_status': 'failed', 'simulation_started': False,
+    }
+    try:
+        for index, resistance in enumerate(plan['candidate_resistors_ohm'], 1):
+            proposal = _candidate_proposal(plan, resistance)
+            candidate_dir = root / f'candidate-{index:03d}'
+            candidate = run_generated_analog_project(proposal, str(candidate_dir), execute=True)
+            measured_gain, target_error = _measured_gain(candidate, plan['derived']['target_gain'])
+            candidate_record: dict[str, Any] = {
+                'directory': candidate_dir.name,
+                'project': f'{candidate_dir.name}/native/circuit.ms14',
+                'resistance_ohm': resistance,
+                'success': bool(candidate.get('success')),
+                'measured_gain': measured_gain,
+                'target_error_fraction': target_error,
+                'verification_status': candidate.get('verification_status'),
+                'result': candidate,
+            }
+            if candidate_record['success']:
+                model_xml = candidate_dir / 'native-model.xml'
+                if not model_xml.is_file():
+                    candidate_record['success'] = False
+                    candidate_record['verification_status'] = 'native-presentation-missing'
+                else:
+                    presentation = verify_ce_presentation(model_xml, plan)
+                    candidate_record['presentation_acceptance'] = presentation
+                    candidate_record['success'] = presentation['ok']
+                    if not presentation['ok']:
+                        candidate_record['verification_status'] = 'native-presentation-mismatch'
+            result['candidates'].append(candidate_record)
+        feasible = [item for item in result['candidates']
+                    if item['success'] and item['target_error_fraction'] is not None]
+        if feasible:
+            selected = min(feasible, key=lambda item: (item['target_error_fraction'], item['resistance_ohm']))
+            result['selected'] = selected
+            result['success'] = True
+            result['verification_status'] = 'passed-common-emitter-candidate-search'
+            result['simulation_started'] = True
+            result['delivery_status'] = 'requires-visual-review'
+        else:
+            result['error'] = {'type': 'RuntimeError', 'message': 'no common-emitter candidate passed native acceptance'}
+            result['delivery_status'] = 'not-ready'
+    except Exception as exc:
+        result['error'] = {'type': type(exc).__name__, 'message': str(exc)}
+        result['delivery_status'] = 'not-ready'
+    report_rows = ''.join(
+        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+            item['resistance_ohm'], item.get('measured_gain') if item.get('measured_gain') is not None else '—',
+            f"{100 * item['target_error_fraction']:.3f}%" if item.get('target_error_fraction') is not None else '—',
+            html.escape(str(item.get('verification_status'))), '是' if item['success'] else '否')
+        for item in result['candidates'])
+    selected = result.get('selected')
+    conclusion = (f"选中 RE={selected['resistance_ohm']:g} Ω，实测增益 {selected['measured_gain']:.6g}。"
+                  if selected else '没有候选通过原生验收。')
+    (root / 'report.html').write_text(
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>共射放大器候选搜索</title>'
+        '<style>body{font:16px/1.7 system-ui;max-width:1100px;margin:40px auto;padding:20px}'
+        'table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style>'
+        '<h1>2N3904 共射放大器候选搜索</h1>'
+        f'<p>状态：{html.escape(result["verification_status"])}；{html.escape(conclusion)}</p>'
+        '<table><tr><th>RE</th><th>实测增益</th><th>目标误差</th><th>状态</th><th>通过</th></tr>'
+        + report_rows + '</table><p>每个候选均为独立原生工程副本，保留其 Multisim 工程、CSV、图纸和 manifest。</p>'
+        '<p><a href="proposal.json">需求与候选</a> · <a href="acceptance.json">验收记录</a> · <a href="manifest.json">完整性清单</a></p></html>',
+        encoding='utf-8')
     return finalize_task_result(root, result)

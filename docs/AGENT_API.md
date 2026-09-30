@@ -141,8 +141,10 @@ POST /api/model-engineering/run
 `plan_natural_common_emitter(text)` 返回候选方案和估算，不能代替实际验收。
 `run_natural_common_emitter(text, output_dir, execute=false)` 默认仅预览；
 `execute=true` 要求新的输出目录和含 VDC、VPULSE 的用户本地元件包。
-工具属于 experiment/full profile。成功返回原生 OP/AC/TRAN 采样结果、模型和引脚
-核验、实际源属性核查、工程和报告路径。`delivery_status=requires-visual-review`
+工具属于 experiment/full profile。执行版会在估算值附近测试最多 5 个 E24 发射极电阻，
+每个候选独立保存到 `candidate-NNN/`，按原生 1kHz 增益误差选择。成功返回原生
+OP/AC/TRAN 采样结果、模型和引脚核验、实际源属性核查、工程和报告路径；
+`optimization` 记录候选数量和选择结果。`delivery_status=requires-visual-review`
 表示仍应查看最终电路图；不等于任意电路已通过工程认证。
 
 复现实例和限制见 [共射原生验收记录](COMMON_EMITTER_NATIVE_ACCEPTANCE.md)。
