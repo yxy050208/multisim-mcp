@@ -39,6 +39,13 @@ def digital_port_net_map(kind: str, nodes: Iterable[str]) -> dict[str, str]:
     return dict(zip(ports, values))
 
 
+def _net_key(value: str) -> str:
+    lowered = str(value).casefold()
+    return {"high": "vdd", "vdd": "vdd", "low": "vss", "vss": "vss"}.get(
+        lowered, lowered
+    )
+
+
 def _present(text: str, name: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", text, re.I) is not None
 
@@ -94,6 +101,7 @@ def compare_pin_connections(
     exported_netlist: str,
     declared_ports: dict[str, list[str]] | None = None,
     expected_named_ports: dict[str, dict[str, str]] | None = None,
+    native_port_nets: dict[str, dict[str, list[str]]] | None = None,
 ) -> dict[str, Any]:
     """Compare pin/net connections in SPICE or Multisim report output.
 
@@ -172,6 +180,20 @@ def compare_pin_connections(
                     elif len(actual) > 1:
                         state = "fail"
                         reason = "duplicate named pin rows"
+                    if state == "unverified":
+                        native_actual = (native_port_nets or {}).get(refdes, {}).get(pin, [])
+                        if len(native_actual) == 1:
+                            state = (
+                                "pass"
+                                if _net_key(native_actual[0]) == _net_key(net)
+                                else "fail"
+                            )
+                            reason = "decoded native XML port/node mapping"
+                            actual = list(native_actual)
+                        elif len(native_actual) > 1:
+                            state = "fail"
+                            reason = "native XML port maps to multiple nodes"
+                            actual = list(native_actual)
                     if state == "fail":
                         mismatches.append({"refdes": refdes, "pin": pin,
                                            "expected_net": net, "actual_nets": actual})
@@ -193,6 +215,17 @@ def compare_pin_connections(
             if len(pin_rows) != len(expected_nets) or not all(
                 pin.isdigit() for pin, _ in pin_rows
             ):
+                native = (native_port_nets or {}).get(refdes, {})
+                native_actual = [
+                    (native.get(str(index)) or [""])[0]
+                    for index in range(1, len(expected_nets) + 1)
+                ]
+                if all(native_actual) and all(
+                    _net_key(actual) == _net_key(expected)
+                    for actual, expected in zip(native_actual, expected_nets)
+                ):
+                    checked += 1
+                    continue
                 unverified.append(refdes)
                 continue
             by_pin = {int(pin): net for pin, net in pin_rows}

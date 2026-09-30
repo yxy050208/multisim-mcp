@@ -2286,6 +2286,7 @@ def _create_schematic_impl(
             "singleton source nets are informational; connected nets remain strict"
         )
         declared_ports: dict[str, list[str]] = {}
+        native_port_nets: dict[str, dict[str, list[str]]] = {}
         try:
             native_inventory = extract_native_component_metadata(
                 str(xml_path),
@@ -2293,6 +2294,15 @@ def _create_schematic_impl(
             )
             declared_ports = {
                 str(item["refdes"]): [str(port) for port in item.get("port_names", [])]
+                for item in native_inventory.get("components", [])
+                if isinstance(item, Mapping) and item.get("refdes")
+            }
+            native_port_nets = {
+                str(item["refdes"]): {
+                    str(port): [str(node) for node in nodes]
+                    for port, nodes in (item.get("port_nodes") or {}).items()
+                    if isinstance(nodes, list)
+                }
                 for item in native_inventory.get("components", [])
                 if isinstance(item, Mapping) and item.get("refdes")
             }
@@ -2315,6 +2325,7 @@ def _create_schematic_impl(
                 for spec in expected_specs
                 if digital_port_net_map(spec.kind, spec.nodes)
             },
+            native_port_nets=native_port_nets,
         )
         topology_diff["pin_connections"] = pin_diff
         topology_diff_path = output_path.with_name(output_path.stem + ".topology-diff.json")

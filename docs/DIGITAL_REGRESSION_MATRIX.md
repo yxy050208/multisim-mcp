@@ -48,7 +48,9 @@ Multisim 省略的悬空输出脚会进入 `partially_verified_cases`。这类�
 `unverified`，不会被转换成 `pass`；出现实际引脚不匹配时会记录到
 `mismatch_cases`，并由实验流水线失败。
 
-对于数字器件，`named_pin_counts` 进一步统计可见信号端子的逐引脚结果。
+对于数字器件，`named_pin_counts` 进一步统计可见信号端子的逐引脚结果；当
+ReportNetlist 省略 `VDD/VSS` 等隐藏端子时，回归器会读取同一次 Multisim
+重开后保存的解码 XML，核对端口的 `CiNode` 网络引用。
 例如 `I1/O1`、`J/K/CLK/Q` 等端口可以有 `pass`，而 `VDD/VSS` 或 Multisim
 省略的悬空端子会保持 `unverified`。这使回归结果能证明实际信号链已经接对，
 同时保留原生报告对隐藏端子的限制。

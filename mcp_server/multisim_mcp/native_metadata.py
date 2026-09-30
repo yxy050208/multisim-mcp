@@ -68,6 +68,12 @@ def extract_native_component_metadata(
     refdes_map = _external_refdes_map(root)
     expected = {item.casefold() for item in expected_refdes or set()}
     ports: dict[str, str] = {}
+    node_names = {
+        str(item.get("CiID")): _decode(node.get("LocalName"))
+        for item in root.iter("Item")
+        for node in [item.find("./CiNode")]
+        if node is not None and item.get("CiID") and node.get("LocalName")
+    }
     for item in root.iter("Item"):
         port = item.find("./CiPort")
         if port is not None and item.get("CiID"):
@@ -100,6 +106,29 @@ def extract_native_component_metadata(
             for port in component.findall("./Ports/Item")
         ]
         port_names = [name for name in port_names if name]
+        port_nodes: dict[str, list[str]] = {}
+        for port in component.findall("./Ports/Item"):
+            port_id = str(port.get("CiID") or "")
+            port_name = ports.get(port_id, "")
+            if not port_name:
+                continue
+            global_item = next(
+                (
+                    candidate
+                    for candidate in root.iter("Item")
+                    if candidate.get("CiID") == port_id
+                    and candidate.find("./CiPort") is not None
+                ),
+                None,
+            )
+            if global_item is None:
+                port_nodes[port_name] = []
+                continue
+            port_nodes[port_name] = [
+                node_names[node.get("CiID", "")]
+                for node in global_item.findall("./CiPort/Nodes/Item")
+                if node.get("CiID", "") in node_names
+            ]
         metadata = {
             "schema_version": NATIVE_METADATA_SCHEMA_VERSION,
             "refdes": external,
@@ -113,6 +142,7 @@ def extract_native_component_metadata(
             "description": _at(primary, 20),
             "port_names": port_names,
             "port_count": len(port_names),
+            "port_nodes": port_nodes,
             "model_definition_sha256": _sha256(model_material),
             "spice_template_sha256": _sha256(template_text),
             "model_verified": bool(model_name and (model_material or template_text)),

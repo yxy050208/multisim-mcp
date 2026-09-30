@@ -125,6 +125,29 @@ VSS circuit A1A
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["named_pin_counts"]["fail"], 1)
 
+    def test_native_xml_mapping_completes_hidden_power_rows(self) -> None:
+        report = """title
+-----
+header
+-----
+din circuit A1A I1
+dout circuit A1A O1
+-----
+"""
+        result = compare_pin_connections(
+            {"A1": ["din", "dout", "high", "0"]},
+            report,
+            declared_ports={"A1": ["I1", "O1", "VDD", "VSS"]},
+            expected_named_ports={
+                "A1": digital_port_net_map("DNOT4", ["din", "dout", "high", "0"])
+            },
+            native_port_nets={
+                "A1": {"VDD": ["high"], "VSS": ["0"]}
+            },
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["named_pin_counts"], {"pass": 4, "fail": 0, "unverified": 0})
+
     def test_digital_port_contract_rejects_wrong_arity(self) -> None:
         self.assertEqual(digital_port_net_map("DNOT4", ["in", "out"]), {})
 
