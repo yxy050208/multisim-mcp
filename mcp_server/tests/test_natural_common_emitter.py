@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from unittest.mock import patch
 from multisim_mcp.natural_common_emitter import parse_natural_common_emitter
 from multisim_mcp.natural_common_emitter_run import (
     _candidate_proposal,
+    _distortion_acceptance,
     _frequency_response_acceptance,
     run_natural_common_emitter,
 )
@@ -23,6 +25,15 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertGreaterEqual(len(plan["candidate_resistors_ohm"]), 1)
         self.assertLessEqual(len(plan["candidate_resistors_ohm"]), 5)
         self.assertTrue(all(value > 0 for value in plan["candidate_resistors_ohm"]))
+
+    def test_sine_request_enables_native_thd_mode(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，THD不超过1%"
+        )
+        self.assertEqual(plan["waveform"], "sine")
+        self.assertEqual(plan["thd_limit_percent"], 1.0)
+        self.assertIn("SIN(0 1m 1k)", plan["proposal"]["netlist"])
+        self.assertEqual(plan["proposal"]["experiments"][-1]["commands"], "tran 10u 3m")
 
     def test_candidate_changes_only_emitter_resistor(self):
         plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")
@@ -69,6 +80,23 @@ class CommonEmitterTest(unittest.TestCase):
             self.assertGreater(response["upper_cutoff_hz"], 10000)
             self.assertLess(response["upper_cutoff_hz"], 100000)
             self.assertGreater(response["bandwidth_hz"], 0)
+
+    def test_distortion_acceptance_measures_sine_window(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，THD不超过1%"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            native = Path(tmp) / "native" / "analysis-003"
+            native.mkdir(parents=True)
+            lines = ["time_s,V(OutProbe1).value"]
+            for index in range(32):
+                time = .001 + index * (.001 / 31)
+                value = .01 * math.sin(2 * math.pi * 1000 * (time - .001))
+                lines.append(f"{time},{value}")
+            (native / "data.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            result = _distortion_acceptance(Path(tmp), plan)
+            self.assertEqual(result["status"], "passed-thd")
+            self.assertLess(result["thd_percent"], 1.0)
 
     def test_rejects_power_stage(self):
         with self.assertRaises(ValueError):

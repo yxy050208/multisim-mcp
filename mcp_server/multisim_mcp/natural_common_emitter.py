@@ -49,9 +49,15 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     rc, re_, rb1, rb2 = [float(f"{v:.4g}") for v in (rc, re_, rb1, rb2)]
     def resistor(value: float) -> str:
         return format_spice_scalar(Decimal(str(value)))
+    sine_requested = bool(re.search(r"正弦|THD|失真|无失真", text, re.I))
+    thd_matches = re.findall(r"(?:THD|总谐波失真)\s*(?:不超过|小于|<=|≤|约为|为|=)?\s*([0-9]+(?:\.[0-9]+)?)\s*%?", text, re.I)
+    thd_limit_percent = float(thd_matches[0]) if thd_matches else 1.0
+    if not 0 < thd_limit_percent <= 100:
+        raise ValueError("THD 限值需为0–100%")
+    input_source = "VIN in 0 DC 0 AC 1 SIN(0 1m 1k)" if sine_requested else "VIN in 0 DC 0 AC 1 PULSE(0 1m 1m 1u 1u 1m 2m)"
     net = (
         f"VCC vcc 0 DC {voltage:g}\n"
-        "VIN in 0 DC 0 AC 1 PULSE(0 1m 1m 1u 1u 1m 2m)\n"
+        f"{input_source}\n"
         f"RBIAS1 vcc base {resistor(rb1)}\nRBIAS2 base 0 {resistor(rb2)}\n"
         f"RC vcc collector {resistor(rc)}\nRE emitter 0 {resistor(re_)}\n"
         "Q1 collector base emitter 2N3904\nCIN in base 10u\n"
@@ -64,8 +70,16 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         {"analysis":"op", "net":"collector", "subtract_net":"base", "quantity":"value", "min":.3, "max":voltage},
         {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"magnitude", "min":gain*.9, "max":gain*1.1, "frequency_min_hz":1000, "frequency_max_hz":1000},
         {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"phase_deg", "min":-180, "max":-150, "frequency_min_hz":1000, "frequency_max_hz":1000},
-        {"analysis":"tran", "net":"in", "quantity":"value", "min":.00099, "max":.00101, "time_min_s":.0011, "time_max_s":.0012},
-        {"analysis":"tran", "net":"out", "quantity":"value", "min":-.001*gain*1.2, "max":-.001*gain*.8, "time_min_s":.0011, "time_max_s":.0012},
+        {"analysis":"tran", "net":"in", "quantity":"value",
+         "min":-.0011 if sine_requested else .00099,
+         "max":.0011 if sine_requested else .00101,
+         "time_min_s":.001 if sine_requested else .0011,
+         "time_max_s":.002 if sine_requested else .0012},
+        {"analysis":"tran", "net":"out", "quantity":"value",
+         "min":-.002*gain if sine_requested else -.001*gain*1.2,
+         "max":.002*gain if sine_requested else -.001*gain*.8,
+         "time_min_s":.001 if sine_requested else .0011,
+         "time_max_s":.002 if sine_requested else .0012},
     ]
     candidate_resistors = _candidate_resistors(re_)
     return {
@@ -75,12 +89,14 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         "candidate_resistors_ohm": candidate_resistors,
         "structural_acceptance":validate_common_emitter_netlist(net),
         "bias_estimate":estimate_common_emitter_bias(net, voltage),
+        "waveform":"sine" if sine_requested else "pulse",
+        "thd_limit_percent":thd_limit_percent if sine_requested else None,
         "proposal":{"title":"2N3904共射放大器", "application":text.strip(), "netlist":net,
                     "probe_nets":["in","out","base","emitter","collector","vcc"],
-                    "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 2m"}], "checks":checks},
-        "assumptions":["固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
+                    "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 3m" if sine_requested else "tran 10u 2m"}], "checks":checks},
+        "assumptions":["固定本地2N3904模型、100kΩ负载、1mV正弦输入；增益在1kHz验收。" if sine_requested else "固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
                        "候选搜索仅比较估算值附近最多5个E24发射极电阻，最终以原生实测增益选择。",
-                       "偏置公式只是初始估算；实际工作点、增益和脉冲响应以原生仿真为准。",
-                       "未进行温度、容差、功率级、噪声和实物板验证。"],
+                       "偏置公式只是初始估算；实际工作点、增益和波形响应以原生仿真为准。",
+                       "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；未进行温度、容差、功率级、噪声和实物板验证。" if sine_requested else "未进行温度、容差、功率级、噪声和实物板验证。"],
         "status":"unverified-native-proposal",
     }

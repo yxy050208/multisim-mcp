@@ -122,12 +122,59 @@ def _frequency_response_acceptance(candidate_dir: Path, plan: dict[str, Any]) ->
     return result
 
 
-def _distortion_acceptance(plan: dict[str, Any]) -> dict[str, Any]:
-    """State why THD is not claimed until a sinusoidal native source exists."""
+def _distortion_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    """Calculate bounded THD evidence for the optional native sine mode."""
+    if plan.get("waveform") != "sine":
+        return {
+            "status": "unverified",
+            "reason": "the default native transient experiment uses a pulse source; request 正弦 or THD to enable a VSIN transient run",
+        }
+    experiments = plan["proposal"].get("experiments", [])
+    tran_index = next((i for i, item in enumerate(experiments, 1) if item.get("type") == "tran"), None)
+    if tran_index is None:
+        return {"status": "unverified", "reason": "no native sine transient was requested"}
+    csv_path = candidate_dir / "native" / f"analysis-{tran_index:03d}" / "data.csv"
+    if not csv_path.is_file():
+        return {"status": "unverified", "reason": "native sine transient data.csv is missing"}
+    try:
+        output_index = plan["proposal"]["probe_nets"].index("out")
+        signal = f"V(OutProbe{output_index if output_index else ''})"
+        rows = []
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            for row in csv.DictReader(stream):
+                time = float(row["time_s"])
+                value = float(row[f"{signal}.value"])
+                if math.isfinite(time) and math.isfinite(value) and .001 <= time <= .002:
+                    rows.append((time, value))
+    except (KeyError, ValueError, TypeError) as exc:
+        return {"status": "unverified", "reason": f"native sine transient data is invalid: {exc}"}
+    if len(rows) < 16:
+        return {"status": "unverified", "reason": "steady-state sine window has fewer than 16 samples", "samples": len(rows)}
+    rows.sort()
+    frequency = 1000.0
+    mean = sum(value for _, value in rows) / len(rows)
+    amplitudes = []
+    start = rows[0][0]
+    for harmonic in range(1, 6):
+        coefficient = sum(
+            (value - mean) * complex(math.cos(-2 * math.pi * harmonic * frequency * (time - start)),
+                                     math.sin(-2 * math.pi * harmonic * frequency * (time - start)))
+            for time, value in rows
+        ) / len(rows)
+        amplitudes.append(2 * abs(coefficient))
+    fundamental = amplitudes[0]
+    if fundamental <= 1e-15:
+        return {"status": "unverified", "reason": "fundamental amplitude is zero", "samples": len(rows)}
+    thd_fraction = math.sqrt(sum(amplitude * amplitude for amplitude in amplitudes[1:])) / fundamental
+    thd_percent = 100 * thd_fraction
+    limit = float(plan.get("thd_limit_percent") or 1.0)
     return {
-        "status": "unverified",
-        "reason": "the current native transient experiment uses a pulse source; THD requires a VSIN transient run with declared steady-state window and harmonics",
-        "required_next_step": "add and verify a native VSIN carrier, then run a dedicated transient experiment",
+        "status": "passed-thd" if thd_percent <= limit else "target-not-met",
+        "criterion": "H2..H5 RMS-equivalent amplitude divided by fundamental",
+        "samples": len(rows), "window_start_s": rows[0][0], "window_stop_s": rows[-1][0],
+        "fundamental_frequency_hz": frequency, "fundamental_amplitude_v": fundamental,
+        "harmonic_amplitudes_v": amplitudes[1:], "thd_fraction": thd_fraction,
+        "thd_percent": thd_percent, "limit_percent": limit,
     }
 
 
@@ -136,9 +183,12 @@ def verify_ce_presentation(path: Path, plan: dict) -> dict:
     root = parse_native_xml(path).getroot()
     components = {c.get('LocalName', '').removeprefix('&ASC'): c for c in root.iter('CiComponent')}
     checks = {}
+    vin_sine = plan.get("waveform") == "sine"
     for ref, identity, parameters in (
         ('VCC', 'DC_POWER', {1: plan['derived']['supply_v']}),
-        ('VIN', 'PULSE_VOLTAGE', {1: 0., 3: .001, 5: .001, 7: .000001, 9: .000001, 11: .001, 13: .002}),
+        ('VIN', 'AC_VOLTAGE' if vin_sine else 'PULSE_VOLTAGE',
+         ({1: .001, 3: 0., 5: 1000., 13: 1., 15: 0.} if vin_sine else
+          {1: 0., 3: .001, 5: .001, 7: .000001, 9: .000001, 11: .001, 13: .002})),
     ):
         component = components.get(ref)
         if component is None:
@@ -161,8 +211,9 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
     plan = parse_natural_common_emitter(text)
     if execute:
         sources = {p.refdes: voltage_source_stem(p) for p in parse_netlist(plan['proposal']['netlist']).components if p.kind == 'V'}
-        if sources != {'VCC': 'vdc', 'VIN': 'vpulse'}:
-            raise ValueError('Rebuild the local component pack: native VDC and VPULSE carriers are required for this workflow')
+        expected_sources = {'VCC': 'vdc', 'VIN': 'v' if plan.get('waveform') == 'sine' else 'vpulse'}
+        if sources != expected_sources:
+            raise ValueError('Rebuild the local component pack: native VDC and waveform carriers are required for this workflow')
     root = Path(output).expanduser().resolve()
     if root.exists() or root == Path(root.anchor):
         raise FileExistsError('output must be a new directory')
@@ -203,7 +254,7 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
                 'verification_status': candidate.get('verification_status'),
                 'result': candidate,
                 'frequency_response': _frequency_response_acceptance(candidate_dir, plan),
-                'distortion_acceptance': _distortion_acceptance(plan),
+                'distortion_acceptance': _distortion_acceptance(candidate_dir, plan),
             }
             if candidate_record['success']:
                 model_xml = candidate_dir / 'native-model.xml'
@@ -216,6 +267,9 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
                     candidate_record['success'] = presentation['ok']
                     if not presentation['ok']:
                         candidate_record['verification_status'] = 'native-presentation-mismatch'
+            if candidate_record['success'] and candidate_record['distortion_acceptance']['status'] == 'target-not-met':
+                candidate_record['success'] = False
+                candidate_record['verification_status'] = 'target-not-met'
             result['candidates'].append(candidate_record)
         feasible = [item for item in result['candidates']
                     if item['success'] and item['target_error_fraction'] is not None]
