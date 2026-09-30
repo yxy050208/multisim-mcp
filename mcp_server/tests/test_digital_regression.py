@@ -54,6 +54,7 @@ class DigitalRegressionMatrixTest(unittest.TestCase):
         self.assertFalse(summary["fully_verified"])
         self.assertEqual(summary["mismatch_count"], 0)
         self.assertEqual(summary["model_port_states"], {"present": 1, "not_observed": 1})
+        self.assertEqual(summary["named_pin_counts"], {"pass": 0, "fail": 0, "unverified": 0})
 
 
 if __name__ == "__main__":

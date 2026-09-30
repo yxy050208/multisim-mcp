@@ -66,6 +66,9 @@ def _pin_evidence_summary(topology: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(mismatches, list):
         mismatches = []
     status = str(pin_connections.get("status", "unverified"))
+    named_counts = pin_connections.get("named_pin_counts", {})
+    if not isinstance(named_counts, dict):
+        named_counts = {}
     return {
         "status": status,
         "fully_verified": status == "pass",
@@ -73,6 +76,11 @@ def _pin_evidence_summary(topology: dict[str, Any]) -> dict[str, Any]:
         "unverified_components": [str(item) for item in unverified],
         "mismatch_count": len(mismatches),
         "model_port_states": states,
+        "named_pin_counts": {
+            "pass": int(named_counts.get("pass", 0) or 0),
+            "fail": int(named_counts.get("fail", 0) or 0),
+            "unverified": int(named_counts.get("unverified", 0) or 0),
+        },
     }
 
 
@@ -158,6 +166,13 @@ def main() -> int:
                 item.get("pin_evidence", {}).get("mismatch_count", 0) > 0
                 for item in results
             ),
+            "named_pin_counts": {
+                state: sum(
+                    int(item.get("pin_evidence", {}).get("named_pin_counts", {}).get(state, 0) or 0)
+                    for item in results
+                )
+                for state in ("pass", "fail", "unverified")
+            },
             "policy": (
                 "unverified pin-to-net mapping remains explicit evidence; it is "
                 "never promoted to a passing claim"

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from multisim_mcp.topology_validation import compare_pin_connections, compare_roundtrip_topology
+from multisim_mcp.topology_validation import (
+    compare_pin_connections,
+    compare_roundtrip_topology,
+    digital_port_net_map,
+)
 
 
 class TopologyValidationTest(unittest.TestCase):
@@ -75,6 +79,54 @@ VSS circuit A1A
         )
         self.assertEqual(result["model_port_evidence"][0]["state"], "present")
         self.assertEqual(result["model_port_evidence"][0]["unknown_ports"], [])
+
+    def test_named_digital_signal_rows_are_checked_against_source_nodes(self) -> None:
+        report = """title
+-----
+header
+-----
+din circuit A1A I1
+dout circuit A1A O1
+VDD circuit A1A
+VSS circuit A1A
+-----
+"""
+        result = compare_pin_connections(
+            {"A1": ["din", "dout", "high", "0"]},
+            report,
+            declared_ports={"A1": ["I1", "O1", "VDD", "VSS"]},
+            expected_named_ports={
+                "A1": digital_port_net_map("DNOT4", ["din", "dout", "high", "0"])
+            },
+        )
+        self.assertEqual(result["status"], "unverified")
+        self.assertEqual(result["named_pin_counts"]["pass"], 2)
+        self.assertEqual(result["named_pin_counts"]["unverified"], 2)
+
+    def test_named_digital_signal_row_mismatch_fails(self) -> None:
+        report = """title
+-----
+header
+-----
+wrong circuit A1A I1
+dout circuit A1A O1
+VDD circuit A1A
+VSS circuit A1A
+-----
+"""
+        result = compare_pin_connections(
+            {"A1": ["din", "dout", "high", "0"]},
+            report,
+            declared_ports={"A1": ["I1", "O1", "VDD", "VSS"]},
+            expected_named_ports={
+                "A1": digital_port_net_map("DNOT4", ["din", "dout", "high", "0"])
+            },
+        )
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["named_pin_counts"]["fail"], 1)
+
+    def test_digital_port_contract_rejects_wrong_arity(self) -> None:
+        self.assertEqual(digital_port_net_map("DNOT4", ["in", "out"]), {})
 
 
 if __name__ == "__main__":

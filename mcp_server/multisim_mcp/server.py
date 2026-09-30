@@ -181,7 +181,7 @@ from multisim_mcp.schematic_builder import (
     template_status,
     template_search_paths,
 )
-from multisim_mcp.topology_validation import compare_pin_connections, compare_roundtrip_topology
+from multisim_mcp.topology_validation import compare_pin_connections, compare_roundtrip_topology, digital_port_net_map
 from multisim_mcp.spice_raw import parse_raw, summarize_columns, write_csv
 from multisim_mcp.spice_adapter import circuit_design_from_spice
 from multisim_mcp.spice_provenance import (
@@ -2310,6 +2310,11 @@ def _create_schematic_impl(
             {spec.refdes: list(spec.nodes) for spec in expected_specs},
             exported,
             declared_ports=declared_ports,
+            expected_named_ports={
+                spec.refdes: digital_port_net_map(spec.kind, spec.nodes)
+                for spec in expected_specs
+                if digital_port_net_map(spec.kind, spec.nodes)
+            },
         )
         topology_diff["pin_connections"] = pin_diff
         topology_diff_path = output_path.with_name(output_path.stem + ".topology-diff.json")
