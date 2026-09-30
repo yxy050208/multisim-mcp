@@ -33,6 +33,18 @@ python tools/run_digital_regression.py --output C:\Temp\multisim-digital-regress
 python tools/run_digital_regression.py --case counter4_load --output C:\Temp\counter4-regression
 ```
 
+为了量化数字专用信号链布局的收益，可以运行受控的通用网格消融。它复用同一网表、
+元件包、Multisim 重开、拓扑检查和瞬态仿真，只关闭数字布局 profile；`matrix.json`
+会记录 `layout_profile_mode=generic`，因此结果可以和默认 `digital` 模式逐项比较：
+
+```powershell
+python tools/run_digital_regression.py --case counter4_load `
+  --layout-profile generic --output C:\Temp\counter4-generic-ablation
+```
+
+这项消融只用于测量布局交叉率和几何质量，不改变通过条件，也不把通用网格当作生产
+布局策略。两次运行都应保留本地证据，不能用消融结果替代 Multisim 原生验收。
+
 运行器会为每个案例保存原理图、仿真数据和报告，并在根目录写入 `matrix.json`。矩阵通过条件包括：
 
 - 生成流程成功；

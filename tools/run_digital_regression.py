@@ -126,13 +126,34 @@ def run_case(case: DigitalRegressionCase, root: Path) -> dict[str, Any]:
     }
 
 
+def _disable_digital_layout_profile() -> None:
+    """Use the deterministic generic grid for the controlled layout ablation.
+
+    The rest of the pipeline remains unchanged: the same netlist, component
+    templates, Multisim project round-trip, topology checks and simulation are
+    still exercised.  This is deliberately an in-process switch rather than
+    an imitation of an older release whose other behaviour is not controlled.
+    """
+    import multisim_mcp.schematic_builder as schematic_builder
+
+    schematic_builder._digital_stage_profile = lambda specs: None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--case", help="run one case; omit to run the full matrix")
+    parser.add_argument(
+        "--layout-profile",
+        choices=("digital", "generic"),
+        default="digital",
+        help="digital signal-chain profile (default) or the generic grid ablation",
+    )
     args = parser.parse_args()
     cases = select_digital_regression_cases(args.case)
     args.output.mkdir(parents=True, exist_ok=False)
+    if args.layout_profile == "generic":
+        _disable_digital_layout_profile()
     results: list[dict[str, Any]] = []
     try:
         for case in cases:
@@ -150,6 +171,7 @@ def main() -> int:
         client.disconnect()
     summary = {
         "schema_version": 1,
+        "layout_profile_mode": args.layout_profile,
         "matrix": [case.manifest() for case in cases],
         "results": results,
         "passed": bool(results) and all(item.get("passed") is True for item in results),
