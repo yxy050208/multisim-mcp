@@ -11,6 +11,25 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client, get_default_environment
 
 
+def _nested_ok(result: dict, key: str):
+    """Return a nested acceptance flag without masking a failed stage.
+
+    Failed native runs intentionally persist ``null`` for acceptance sections
+    that were never reached.  The acceptance runner must still serialize that
+    failure rather than crash while building its summary.
+    """
+    value = result.get(key)
+    return value.get('ok') if isinstance(value, dict) else None
+
+
+def _report_path(result: dict, output: Path) -> str:
+    """Return a report path for both success and failed native runs."""
+    report = result.get('report')
+    if isinstance(report, str) and report:
+        return report
+    return str(output / 'report.html')
+
+
 async def run(text: str, output: Path) -> dict:
     environment = get_default_environment()
     environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1]/'mcp_server')
@@ -33,12 +52,13 @@ async def run(text: str, output: Path) -> dict:
             raise RuntimeError('artifact hash mismatch: '+entry['path'])
     return {'success':result['success'], 'verification_status':result['verification_status'],
             'rectifier':result.get('rectifier_acceptance'),
-            'model_ok':result.get('model_acceptance',{}).get('ok'),
-            'topology_ok':result.get('topology_acceptance',{}).get('ok'),
+            'model_ok':_nested_ok(result, 'model_acceptance'),
+            'topology_ok':_nested_ok(result, 'topology_acceptance'),
             'presentation':result.get('presentation_acceptance'),
             'measurements':result.get('measurement_acceptance'),
             'manifest_entries':len(manifest['artifacts']), 'native_project':result.get('native_project'),
-            'report':result['report'], 'delivery_status':result['delivery_status']}
+            'report':_report_path(result, output),
+            'delivery_status':result.get('delivery_status')}
 
 
 if __name__ == '__main__':

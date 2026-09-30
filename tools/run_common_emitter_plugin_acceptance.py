@@ -11,6 +11,31 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters, stdio_client, get_default_environment
 
 
+def _nested_ok(result: dict, key: str):
+    """Return a nested acceptance flag while preserving an unreached stage."""
+    value = result.get(key)
+    return value.get('ok') if isinstance(value, dict) else None
+
+
+def _report_path(result: dict, output: Path) -> str:
+    """Resolve the report emitted by the task contract.
+
+    Candidate-search results keep the detailed report on the selected native
+    run, while the top-level contract only records it as a manifest artifact.
+    The runner must handle both shapes so a successful MCP call is not turned
+    into a false failure while formatting its summary.
+    """
+    report = result.get('report')
+    if isinstance(report, str) and report:
+        return report
+    selected = result.get('selected')
+    if isinstance(selected, dict):
+        nested = selected.get('result')
+        if isinstance(nested, dict) and isinstance(nested.get('report'), str):
+            return nested['report']
+    return str(output / 'report.html')
+
+
 async def run(text: str, output: Path) -> dict:
     environment = get_default_environment()
     environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1]/'mcp_server')
@@ -32,12 +57,13 @@ async def run(text: str, output: Path) -> dict:
         if hashlib.sha256((output/entry['path']).read_bytes()).hexdigest() != entry['sha256']:
             raise RuntimeError('artifact hash mismatch: '+entry['path'])
     return {'success':result['success'], 'verification_status':result['verification_status'],
-            'model_ok':result.get('model_acceptance',{}).get('ok'),
-            'topology_ok':result.get('topology_acceptance',{}).get('ok'),
+            'model_ok':_nested_ok(result, 'model_acceptance'),
+            'topology_ok':_nested_ok(result, 'topology_acceptance'),
             'presentation':result.get('presentation_acceptance'),
             'measurements':result.get('measurement_acceptance'),
             'manifest_entries':len(manifest['artifacts']), 'native_project':result.get('native_project'),
-            'report':result['report'], 'delivery_status':result['delivery_status']}
+            'report':_report_path(result, output),
+            'delivery_status':result.get('delivery_status')}
 
 
 if __name__ == '__main__':
