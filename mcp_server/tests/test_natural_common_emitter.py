@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from multisim_mcp.natural_common_emitter import parse_natural_common_emitter
-from multisim_mcp.natural_common_emitter_run import _candidate_proposal, run_natural_common_emitter
+from multisim_mcp.natural_common_emitter_run import (
+    _candidate_proposal,
+    _frequency_response_acceptance,
+    run_natural_common_emitter,
+)
 from multisim_mcp.preferred_values import parse_spice_scalar
 
 
@@ -24,6 +28,45 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertIn("RE emitter 0 560", proposal["netlist"])
         self.assertIn("RC vcc collector", proposal["netlist"])
         self.assertEqual(proposal["netlist"].count("RE emitter 0"), 1)
+
+    def test_frequency_response_reports_unverified_when_edges_are_outside_sweep(self):
+        plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")
+        with tempfile.TemporaryDirectory() as tmp:
+            native = Path(tmp) / "native" / "analysis-002"
+            native.mkdir(parents=True)
+            path = native / "data.csv"
+            path.write_text(
+                "frequency_hz,V(OutProbe).real,V(OutProbe).imaginary,"
+                "V(OutProbe1).real,V(OutProbe1).imaginary\n"
+                "10,1,0,9,0\n100,1,0,9.5,0\n"
+                "1000,1,0,10,0\n10000,1,0,9.5,0\n100000,1,0,9,0\n",
+                encoding="utf-8",
+            )
+            response = _frequency_response_acceptance(Path(tmp), plan)
+            self.assertEqual(response["status"], "unverified")
+            self.assertEqual(response["samples"], 5)
+            self.assertIsNone(response["lower_cutoff_hz"])
+            self.assertIsNone(response["upper_cutoff_hz"])
+
+    def test_frequency_response_interpolates_both_minus_three_db_edges(self):
+        plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")
+        with tempfile.TemporaryDirectory() as tmp:
+            native = Path(tmp) / "native" / "analysis-002"
+            native.mkdir(parents=True)
+            (native / "data.csv").write_text(
+                "frequency_hz,V(OutProbe).real,V(OutProbe).imaginary,"
+                "V(OutProbe1).real,V(OutProbe1).imaginary\n"
+                "10,1,0,1,0\n100,1,0,8,0\n"
+                "1000,1,0,10,0\n10000,1,0,8,0\n100000,1,0,1,0\n",
+                encoding="utf-8",
+            )
+            response = _frequency_response_acceptance(Path(tmp), plan)
+            self.assertEqual(response["status"], "passed-sweep-minus3db")
+            self.assertGreater(response["lower_cutoff_hz"], 10)
+            self.assertLess(response["lower_cutoff_hz"], 100)
+            self.assertGreater(response["upper_cutoff_hz"], 10000)
+            self.assertLess(response["upper_cutoff_hz"], 100000)
+            self.assertGreater(response["bandwidth_hz"], 0)
 
     def test_rejects_power_stage(self):
         with self.assertRaises(ValueError):

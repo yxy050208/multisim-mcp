@@ -17,6 +17,19 @@ def _nested_ok(result: dict, key: str):
     return value.get('ok') if isinstance(value, dict) else None
 
 
+def _selected_result(result: dict) -> dict:
+    selected = result.get('selected')
+    nested = selected.get('result') if isinstance(selected, dict) else None
+    return nested if isinstance(nested, dict) else {}
+
+
+def _section(result: dict, key: str):
+    value = result.get(key)
+    if value is not None:
+        return value
+    return _selected_result(result).get(key)
+
+
 def _report_path(result: dict, output: Path) -> str:
     """Resolve the report emitted by the task contract.
 
@@ -57,10 +70,10 @@ async def run(text: str, output: Path) -> dict:
         if hashlib.sha256((output/entry['path']).read_bytes()).hexdigest() != entry['sha256']:
             raise RuntimeError('artifact hash mismatch: '+entry['path'])
     return {'success':result['success'], 'verification_status':result['verification_status'],
-            'model_ok':_nested_ok(result, 'model_acceptance'),
-            'topology_ok':_nested_ok(result, 'topology_acceptance'),
-            'presentation':result.get('presentation_acceptance'),
-            'measurements':result.get('measurement_acceptance'),
+            'model_ok':_nested_ok({'model_acceptance':_section(result, 'model_acceptance')}, 'model_acceptance'),
+            'topology_ok':_nested_ok({'topology_acceptance':_section(result, 'topology_acceptance')}, 'topology_acceptance'),
+            'presentation':result.get('selected', {}).get('presentation_acceptance') if isinstance(result.get('selected'), dict) else result.get('presentation_acceptance'),
+            'measurements':_section(result, 'measurement_acceptance'),
             'manifest_entries':len(manifest['artifacts']), 'native_project':result.get('native_project'),
             'report':_report_path(result, output),
             'delivery_status':result.get('delivery_status')}

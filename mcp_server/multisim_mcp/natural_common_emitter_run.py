@@ -1,7 +1,9 @@
 """Native common-emitter execution with saved-file presentation checks."""
 from pathlib import Path
 import html
+import csv
 import json
+import math
 import re
 from typing import Any
 
@@ -42,6 +44,91 @@ def _measured_gain(result: dict[str, Any], target: float) -> tuple[float | None,
             if isinstance(measured, (int, float)) and measured == measured:
                 return float(measured), abs(float(measured) - target) / max(target, 1e-12)
     return None, None
+
+
+def _frequency_response_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[str, Any]:
+    """Measure the available native AC sweep and report honest -3 dB evidence.
+
+    This is deliberately a derived report metric rather than a new hard gate:
+    the current common-emitter contract requests 10 Hz..100 kHz, and some
+    valid devices do not reach either -3 dB edge in that window.  In that case
+    the result is ``unverified`` with the missing edge recorded explicitly.
+    """
+    experiments = plan["proposal"].get("experiments", [])
+    ac_index = next((i for i, item in enumerate(experiments, 1) if item.get("type") == "ac"), None)
+    if ac_index is None:
+        return {"status": "unverified", "reason": "no native AC sweep requested"}
+    csv_path = candidate_dir / "native" / f"analysis-{ac_index:03d}" / "data.csv"
+    if not csv_path.is_file():
+        return {"status": "unverified", "reason": "native AC data.csv is missing"}
+    probe_nets = plan["proposal"].get("probe_nets", [])
+    try:
+        in_index = probe_nets.index("in")
+        out_index = probe_nets.index("out")
+    except ValueError:
+        return {"status": "unverified", "reason": "in/out probes are not declared"}
+    def signal(index: int) -> str:
+        return f"V(OutProbe{index if index else ''})"
+    in_signal, out_signal = signal(in_index), signal(out_index)
+    rows = []
+    try:
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            for row in csv.DictReader(stream):
+                frequency = float(row["frequency_hz"])
+                input_value = complex(float(row[f"{in_signal}.real"]), float(row[f"{in_signal}.imaginary"]))
+                output_value = complex(float(row[f"{out_signal}.real"]), float(row[f"{out_signal}.imaginary"]))
+                if frequency > 0 and math.isfinite(frequency) and abs(input_value) > 1e-15:
+                    gain = abs(output_value / input_value)
+                    if math.isfinite(gain):
+                        rows.append((frequency, gain))
+    except (KeyError, ValueError, TypeError) as exc:
+        return {"status": "unverified", "reason": f"native AC data is invalid: {exc}"}
+    if len(rows) < 3:
+        return {"status": "unverified", "reason": "native AC sweep has fewer than three usable samples", "samples": len(rows)}
+    rows.sort()
+    peak_frequency, peak_gain = max(rows, key=lambda item: item[1])
+    threshold = peak_gain / (10 ** (3 / 20))
+    peak_index = next(index for index, item in enumerate(rows) if item == (peak_frequency, peak_gain))
+
+    def crossing(left: tuple[float, float], right: tuple[float, float]) -> float | None:
+        f1, g1 = left
+        f2, g2 = right
+        if (g1 - threshold) * (g2 - threshold) > 0 or g1 == g2 or f1 == f2:
+            return None
+        fraction = (threshold - g1) / (g2 - g1)
+        # Frequency sweeps are logarithmic in the native contract.  Log-space
+        # interpolation avoids overstating an edge between decades.
+        return 10 ** (math.log10(f1) + fraction * (math.log10(f2) - math.log10(f1)))
+
+    lower = next((crossing(rows[index - 1], rows[index]) for index in range(peak_index, 0, -1)
+                  if crossing(rows[index - 1], rows[index]) is not None), None)
+    upper = next((crossing(rows[index], rows[index + 1]) for index in range(peak_index, len(rows) - 1)
+                  if crossing(rows[index], rows[index + 1]) is not None), None)
+    result = {
+        "status": "passed-sweep-minus3db" if lower is not None and upper is not None else "unverified",
+        "criterion": "peak gain minus 3 dB",
+        "samples": len(rows),
+        "sweep_start_hz": rows[0][0],
+        "sweep_stop_hz": rows[-1][0],
+        "peak_frequency_hz": peak_frequency,
+        "peak_gain": peak_gain,
+        "threshold_gain": threshold,
+        "lower_cutoff_hz": lower,
+        "upper_cutoff_hz": upper,
+        "bandwidth_hz": upper - lower if lower is not None and upper is not None else None,
+    }
+    if lower is None or upper is None:
+        result["reason"] = "one or both -3 dB edges lie outside the requested native sweep"
+    return result
+
+
+def _distortion_acceptance(plan: dict[str, Any]) -> dict[str, Any]:
+    """State why THD is not claimed until a sinusoidal native source exists."""
+    return {
+        "status": "unverified",
+        "reason": "the current native transient experiment uses a pulse source; THD requires a VSIN transient run with declared steady-state window and harmonics",
+        "required_next_step": "add and verify a native VSIN carrier, then run a dedicated transient experiment",
+    }
 
 
 def verify_ce_presentation(path: Path, plan: dict) -> dict:
@@ -115,6 +202,8 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
                 'target_error_fraction': target_error,
                 'verification_status': candidate.get('verification_status'),
                 'result': candidate,
+                'frequency_response': _frequency_response_acceptance(candidate_dir, plan),
+                'distortion_acceptance': _distortion_acceptance(plan),
             }
             if candidate_record['success']:
                 model_xml = candidate_dir / 'native-model.xml'
@@ -144,9 +233,10 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
         result['error'] = {'type': type(exc).__name__, 'message': str(exc)}
         result['delivery_status'] = 'not-ready'
     report_rows = ''.join(
-        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
             item['resistance_ohm'], item.get('measured_gain') if item.get('measured_gain') is not None else '—',
             f"{100 * item['target_error_fraction']:.3f}%" if item.get('target_error_fraction') is not None else '—',
+            html.escape(str(item.get('frequency_response', {}).get('status', 'unverified'))),
             html.escape(str(item.get('verification_status'))), '是' if item['success'] else '否')
         for item in result['candidates'])
     selected = result.get('selected')
@@ -158,8 +248,9 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
         'table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style>'
         '<h1>2N3904 共射放大器候选搜索</h1>'
         f'<p>状态：{html.escape(result["verification_status"])}；{html.escape(conclusion)}</p>'
-        '<table><tr><th>RE</th><th>实测增益</th><th>目标误差</th><th>状态</th><th>通过</th></tr>'
+        '<table><tr><th>RE</th><th>实测增益</th><th>目标误差</th><th>频带证据</th><th>状态</th><th>通过</th></tr>'
         + report_rows + '</table><p>每个候选均为独立原生工程副本，保留其 Multisim 工程、CSV、图纸和 manifest。</p>'
+        '<p>频带指标从原生 AC 扫频派生；当前脉冲瞬态输入不能用于 THD，失真状态保持 unverified，直到 VSIN 原生载体完成验证。</p>'
         '<p><a href="proposal.json">需求与候选</a> · <a href="acceptance.json">验收记录</a> · <a href="manifest.json">完整性清单</a></p></html>',
         encoding='utf-8')
     return finalize_task_result(root, result)
