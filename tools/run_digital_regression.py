@@ -42,6 +42,40 @@ def _observed_outputs(case: DigitalRegressionCase, result: dict[str, Any]) -> di
     }
 
 
+def _pin_evidence_summary(topology: dict[str, Any]) -> dict[str, Any]:
+    """Summarize pin evidence without turning unobserved data into a pass."""
+    pin_connections = topology.get("pin_connections", {})
+    if not isinstance(pin_connections, dict):
+        return {
+            "status": "unverified",
+            "checked_components": 0,
+            "unverified_components": [],
+            "mismatch_count": 0,
+            "model_port_states": {},
+        }
+    states: dict[str, int] = {}
+    for item in pin_connections.get("model_port_evidence", []):
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state", "unverified"))
+        states[state] = states.get(state, 0) + 1
+    unverified = pin_connections.get("unverified_components", [])
+    if not isinstance(unverified, list):
+        unverified = []
+    mismatches = pin_connections.get("mismatches", [])
+    if not isinstance(mismatches, list):
+        mismatches = []
+    status = str(pin_connections.get("status", "unverified"))
+    return {
+        "status": status,
+        "fully_verified": status == "pass",
+        "checked_components": int(pin_connections.get("checked_components", 0) or 0),
+        "unverified_components": [str(item) for item in unverified],
+        "mismatch_count": len(mismatches),
+        "model_port_states": states,
+    }
+
+
 def run_case(case: DigitalRegressionCase, root: Path) -> dict[str, Any]:
     output_dir = root / case.case_id
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -58,6 +92,7 @@ def run_case(case: DigitalRegressionCase, root: Path) -> dict[str, Any]:
     layout = schematic.get("layout_validation", {}) if isinstance(schematic, dict) else {}
     topology = schematic.get("topology_diff", {}) if isinstance(schematic, dict) else {}
     observed = _observed_outputs(case, result)
+    pin_evidence = _pin_evidence_summary(topology)
     checks = {
         "pipeline_success": result.get("success") is True,
         "layout_pass": layout.get("status") == "pass"
@@ -76,6 +111,7 @@ def run_case(case: DigitalRegressionCase, root: Path) -> dict[str, Any]:
         "layout": layout,
         "topology": topology,
         "digital_observation": observed,
+        "pin_evidence": pin_evidence,
         "output_dir": str(output_dir),
         "report": result.get("report"),
         "experiment_id": result.get("experiment_id"),
@@ -109,6 +145,24 @@ def main() -> int:
         "matrix": [case.manifest() for case in cases],
         "results": results,
         "passed": bool(results) and all(item.get("passed") is True for item in results),
+        "pin_evidence": {
+            "fully_verified_cases": sum(
+                item.get("pin_evidence", {}).get("fully_verified") is True
+                for item in results
+            ),
+            "partially_verified_cases": sum(
+                item.get("pin_evidence", {}).get("status") == "unverified"
+                for item in results
+            ),
+            "mismatch_cases": sum(
+                item.get("pin_evidence", {}).get("mismatch_count", 0) > 0
+                for item in results
+            ),
+            "policy": (
+                "unverified pin-to-net mapping remains explicit evidence; it is "
+                "never promoted to a passing claim"
+            ),
+        },
     }
     (args.output / "matrix.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

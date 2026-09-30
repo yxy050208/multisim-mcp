@@ -42,4 +42,10 @@ python tools/run_digital_regression.py --case counter4_load --output C:\Temp\cou
 - 瞬态仿真成功；
 - 声明的输出网络有可观察波形。
 
+`matrix.json` 还会单独写出 `pin_evidence`。其中 `fully_verified_cases` 只统计
+ReportNetlist 能完整证明引脚到网络映射的案例；数字 XSPICE 模型的隐藏电源脚和
+Multisim 省略的悬空输出脚会进入 `partially_verified_cases`。这类结果保持为
+`unverified`，不会被转换成 `pass`；出现实际引脚不匹配时会记录到
+`mismatch_cases`，并由实验流水线失败。
+
 本地模板和实验产物只用于验证，不应提交到开源仓库。
