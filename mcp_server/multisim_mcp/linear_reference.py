@@ -73,13 +73,18 @@ def validated_components(netlist: str, *, allow_vendor: bool = False) -> list[An
 
 
 def validate_native_source(spec: Any) -> None:
-    """Bounded DC/AC source with optional seven-parameter transient pulse."""
+    """Bounded DC/AC source with optional pulse or sine transient waveform."""
     expression = spec.model or f"DC {spec.value}"
-    sine = re.fullmatch(r"(?i)DC\s+(\S+)\s+SIN\s*\(([^()]*)\)", expression)
+    sine = re.fullmatch(
+        r"(?i)DC\s+(\S+)(?:\s+AC\s+(\S+)(?:\s+(\S+))?)?\s+SIN\s*\(([^()]*)\)",
+        expression,
+    )
     if sine:
-        values = [scalar(v) for v in sine[2].split()]
+        values = [scalar(v) for v in sine[4].split()]
         if len(values) != 3 or values[1] <= 0 or values[2] <= 0 or scalar(sine[1]) != values[0]:
             raise ValueError("SIN requires offset, positive peak amplitude and frequency; DC must equal offset")
+        if sine[2] is not None and scalar(sine[2]) < 0:
+            raise ValueError("SIN AC magnitude must not be negative")
         return
     pulse = re.search(r"(?i)\bPULSE\s*\(([^()]*)\)\s*$", expression)
     if not pulse:

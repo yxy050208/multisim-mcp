@@ -10,6 +10,8 @@ from multisim_mcp.natural_common_emitter_run import (
     _frequency_response_acceptance,
     run_natural_common_emitter,
 )
+from multisim_mcp.linear_reference import validate_native_source
+from multisim_mcp.schematic_builder import parse_netlist, voltage_pin_order
 from multisim_mcp.preferred_values import parse_spice_scalar
 
 
@@ -71,6 +73,12 @@ class CommonEmitterTest(unittest.TestCase):
     def test_rejects_power_stage(self):
         with self.assertRaises(ValueError):
             parse_natural_common_emitter("设计一个24V MOSFET功率放大器")
+
+    def test_sine_source_can_carry_ac_small_signal_metadata(self):
+        parsed = parse_netlist("V1 in 0 DC 0 AC 1 SIN(0 1m 1k)\nR1 in 0 1k\n.end\n")
+        source = next(part for part in parsed.components if part.refdes == "V1")
+        validate_native_source(source)
+        self.assertEqual(voltage_pin_order(source), [1, 2])
 
     def test_preview_lists_native_candidates_without_side_effects(self):
         with tempfile.TemporaryDirectory() as tmp:

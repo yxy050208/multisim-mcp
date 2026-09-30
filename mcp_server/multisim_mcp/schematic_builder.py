@@ -2142,7 +2142,10 @@ def voltage_source_stem(spec: ComponentSpec) -> str:
 
 
 def voltage_pin_order(spec: ComponentSpec) -> list[int]:
-    if re.fullmatch(r"(?i)DC\s+\S+\s+SIN\s*\([^()]*\)", spec.model or ""):
+    if re.fullmatch(
+        r"(?i)DC\s+\S+(?:\s+AC\s+\S+(?:\s+\S+)?)?\s+SIN\s*\([^()]*\)",
+        spec.model or "",
+    ):
         return [1, 2]  # Native AC_VOLTAGE: top terminal is positive.
     return [1, 2] if voltage_source_stem(spec) in {"vdc", "vpulse"} else [2, 1]
 
@@ -2319,7 +2322,10 @@ def _configure_component_semantics(
             raise ValueError(f"Native carrier for {spec.kind} has no SPICE template")
         carrier_values = element_item.findall("./CiComponent/Attributes/Item/CiaCollString/strings/Item")
         carrier_identity = carrier_values[1].get("Value", "").removeprefix("&ASC") if len(carrier_values) > 1 else None
-        sine = re.fullmatch(r"(?i)DC\s+(\S+)\s+SIN\s*\(([^()]*)\)", spec.model or "")
+        sine = re.fullmatch(
+            r"(?i)DC\s+(\S+)(?:\s+AC\s+(\S+)(?:\s+(\S+))?)?\s+SIN\s*\(([^()]*)\)",
+            spec.model or "",
+        )
         if spec.kind == "V" and sine:
             from .linear_reference import validate_native_source
             validate_native_source(spec)
@@ -2327,14 +2333,23 @@ def _configure_component_semantics(
                 raise ValueError("SIN requires the local native AC_VOLTAGE carrier")
             param_list = element_item.find("./CiComponent//CiaParamList")
             doubles, params = param_list.findall("./doubles/Item"), param_list.findall("./parameters/Item")
-            offset, amplitude, frequency = sine[2].split()
-            for index, token in {1:amplitude, 3:offset, 5:frequency, 7:"0", 9:"0", 11:"0", 13:"0", 15:"0", 17:"0", 19:"0", 21:"0", 23:"0"}.items():
+            offset, amplitude, frequency = sine[4].split()
+            ac_magnitude = sine[2] or "0"
+            ac_phase = sine[3] or "0"
+            parameters = {
+                1: amplitude, 3: offset, 5: frequency, 7: "0", 9: "0", 11: "0",
+                13: ac_magnitude, 15: ac_phase, 17: "0", 19: "0", 21: "0", 23: "0",
+            }
+            for index, token in parameters.items():
                 if index >= min(len(doubles), len(params)):
                     raise ValueError("native sine carrier has an incomplete parameter table")
                 value, display = parse_spice_value(token)
                 doubles[index].set("Value", format(value, ".17g"))
                 params[index].set("Value", _asc(display))
-            template.set("String", _asc("v%p %t1 %t2 dc #3 sin(#3 #1 #5 #7 #9 #11)"))
+            template.set(
+                "String",
+                _asc("v%p %t1 %t2 dc #3 ac #13 #15 sin(#3 #1 #5 #7 #9 #11)"),
+            )
             return
         if spec.kind == "V" and voltage_source_stem(spec) in {"vdc", "vpulse"} and carrier_identity in {"DC_POWER", "PULSE_VOLTAGE"}:
             param_list = element_item.find("./CiComponent//CiaParamList")
