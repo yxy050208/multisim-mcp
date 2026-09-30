@@ -71,6 +71,76 @@
       "template": "opamp5_element.xml",
       "verified": false,
       "evidence": "carrier enumerates but generated output was zero; do not auto-select"
+    },
+    {
+      "logical_family": "digital-not",
+      "native_name": "DNOT4",
+      "model_source": "local-template-pack",
+      "pin_signature": ["I1", "O1", "VDD", "VSS"],
+      "supported_versions": ["14.3"],
+      "template": "dnot4_element.xml",
+      "verified": true,
+      "evidence": "complex digital regression: named I1/O1 rows plus native XML VDD/VSS node mapping"
+    },
+    {
+      "logical_family": "digital-and2",
+      "native_name": "DAND5",
+      "model_source": "local-template-pack",
+      "pin_signature": ["1A", "1B", "1Y", "VDD", "VSS"],
+      "supported_versions": ["14.3"],
+      "template": "dand5_element.xml",
+      "verified": true,
+      "evidence": "complex digital regression: named signal rows plus native XML VDD/VSS node mapping"
+    },
+    {
+      "logical_family": "digital-or2",
+      "native_name": "DOR5",
+      "model_source": "local-template-pack",
+      "pin_signature": ["1A", "1B", "1Y", "VDD", "VSS"],
+      "supported_versions": ["14.3"],
+      "template": "dor5_element.xml",
+      "verified": true,
+      "evidence": "complex digital regression: named signal rows plus native XML VDD/VSS node mapping"
+    },
+    {
+      "logical_family": "digital-jk",
+      "native_name": "DJK7",
+      "model_source": "local-template-pack",
+      "pin_signature": ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"],
+      "supported_versions": ["14.3"],
+      "template": "djk7_element.xml",
+      "verified": true,
+      "evidence": "complex digital regression: JK signal pins and native XML supply node mapping"
+    },
+    {
+      "logical_family": "digital-dff-adapter",
+      "native_name": "@DFF",
+      "model_source": "generated-adapter",
+      "pin_signature": ["d", "clk", "set", "reset", "q", "qbar", "high", "low"],
+      "supported_versions": ["14.3"],
+      "template": "djk7_element.xml",
+      "verified": true,
+      "evidence": "DFF adapter expands to DNOT4 plus DJK7; end-to-end dff_load regression"
+    },
+    {
+      "logical_family": "digital-counter4-adapter",
+      "native_name": "@COUNTER4",
+      "model_source": "generated-adapter",
+      "pin_signature": ["clk", "reset", "q0", "q1", "q2", "q3", "high", "low"],
+      "supported_versions": ["14.3"],
+      "template": "djk7_element.xml",
+      "verified": true,
+      "evidence": "counter4_load and counter4_decode_load regressions with four native JK stages"
+    },
+    {
+      "logical_family": "digital-shift-register4-adapter",
+      "native_name": "@SHIFT_REGISTER4",
+      "model_source": "generated-adapter",
+      "pin_signature": ["data", "clk", "reset", "q0", "q1", "q2", "q3", "high", "low"],
+      "supported_versions": ["14.3"],
+      "template": "djk7_element.xml",
+      "verified": true,
+      "evidence": "shift4_load regression with four native JK stages and native XML pin mapping"
     }
   ]
 }

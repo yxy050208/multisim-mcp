@@ -49,3 +49,26 @@ class ComponentCompatibilityTest(unittest.TestCase):
         self.assertEqual(load_manifest_for_version(root, "14.3")["multisim_version"], "14.3")
         with self.assertRaises(ValueError):
             load_manifest_for_version(root, "13.0")
+
+    def test_14_3_manifest_covers_verified_digital_contracts(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2] / "compatibility"
+        manifest = load_manifest_for_version(root, "14.3")
+        required = {
+            "digital-not": ["I1", "O1", "VDD", "VSS"],
+            "digital-and2": ["1A", "1B", "1Y", "VDD", "VSS"],
+            "digital-or2": ["1A", "1B", "1Y", "VDD", "VSS"],
+            "digital-jk": ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"],
+        }
+        result = require_verified_mappings(manifest, "14.3", required)
+        self.assertEqual(set(result["mappings"]), set(required))
+
+    def test_digital_mapping_fails_closed_for_unverified_version(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2] / "compatibility"
+        with self.assertRaises(ValueError):
+            require_verified_mappings(
+                load_manifest_for_version(root, "14.3"),
+                "14.4",
+                {"digital-jk": ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"]},
+            )

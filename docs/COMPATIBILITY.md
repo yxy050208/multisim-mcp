@@ -2,6 +2,8 @@
 
 本表区分“协议可发现”“无 COM 测试”“真实 Multisim 打开/回导”“真实仿真”四个层级。
 `derived` 表示公开宏展开为已支持原语；它不等于 Multisim 数据库中的专用外观元件。
+数字器件的端口契约同时记录在 `compatibility/components-14.3.json`，并由复杂数字
+回归矩阵验证 `ReportNetlist` 信号行和重开 XML 的 `CiNode` 映射。
 
 | 能力 | Windows 32-bit + Multisim 14.3 | Windows 64-bit | Linux/Docker | 证据状态 |
 | --- | --- | --- | --- | --- |
@@ -35,3 +37,7 @@
 The table separates protocol discovery, COM-free validation, native open/export,
 and real simulation. Portable adapters are derived SPICE models rather than NI
 database parts. Missing Bode phase data remains explicitly unavailable.
+
+Digital mappings are versioned in the component manifest. A Multisim version without
+an exact verified manifest is rejected by the automatic mapping resolver; it is not
+silently treated as compatible with 14.3.
