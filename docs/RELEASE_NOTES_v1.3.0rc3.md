@@ -31,5 +31,6 @@
 ## 安装边界
 
 源码候选版要求本机安装并授权 Multisim 14+，由独立 32 位 Python worker 执行
-COM；MCP 前端可以使用 32 或 64 位 Python。公开 npm Harness bundle 目前仍是
-`1.3.0-rc.1`，直到单独发布新 bundle 前不要把它写成 rc3。
+COM；MCP 前端可以使用 32 或 64 位 Python。独立 npm Harness bundle 随本候选版
+发布为 `multisim-mcp-dsh-plugin@1.3.0-rc.3`；它仍然只调用用户本地配置的
+Python MCP server，不内置 Python、Multisim 或本地模板。

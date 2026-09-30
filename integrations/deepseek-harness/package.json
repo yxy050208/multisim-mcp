@@ -1,6 +1,6 @@
 {
   "name": "multisim-mcp-dsh-plugin",
-  "version": "1.3.0-rc.1",
+  "version": "1.3.0-rc.3",
   "description": "DeepSeek Harness plugin for NI Multisim circuit generation, simulation, optimization, and lab reports via MCP",
   "license": "MIT",
   "type": "module",

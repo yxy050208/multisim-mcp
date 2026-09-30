@@ -1,10 +1,8 @@
-# 1.3.0-rc.1 public bundle / 1.3.0rc3 source compatibility
+# 1.3.0-rc.3 npm bundle / 1.3.0rc3 source compatibility
 
-The published npm bundle remains `multisim-mcp-dsh-plugin@1.3.0-rc.1` and the
-published Python candidate is `multisim-mcp==1.3.0rc1`. The source tree also
-contains the unreleased `1.3.0rc3` core; the compatibility manifest records it
-as compatible, but it must be installed from a local checkout until a package
-and tag are published. This adapter uses the configured Python MCP server; it
+The npm bundle is `multisim-mcp-dsh-plugin@1.3.0-rc.3`. The public Python
+candidate remains `multisim-mcp==1.3.0rc1`; the source tree also contains the
+newer `1.3.0rc3` core. This adapter uses the configured Python MCP server; it
 does not bundle Python or Multisim. New capabilities remain limited to the
 documented validated circuit families.
 
@@ -21,7 +19,7 @@ documented validated circuit families.
 ```powershell
 $env:MULTISIM_MCP_PYTHON = "C:\path\to\python32\python.exe"
 & $env:MULTISIM_MCP_PYTHON -m pip install "multisim-mcp==1.3.0rc1"
-dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.0-rc.1"
+dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.0-rc.3"
 dsh --profile web --dump-config
 ```
 
@@ -70,8 +68,8 @@ MCP 服务器命令在 agent 沙箱之外执行，应当只安装可信发布物
 ## English summary
 
 This package is an installable DeepSeek Harness bundle for Multisim MCP. Install
-it with `dsh plugin --profile web add multisim-mcp-dsh-plugin@1.1.0`, set
-`MULTISIM_MCP_PYTHON` to the 32-bit Python interpreter containing
-`multisim-mcp==1.1.0`, and restart the profile. Model credentials remain in
+it with `dsh plugin --profile web add multisim-mcp-dsh-plugin@1.3.0-rc.3`, set
+`MULTISIM_MCP_PYTHON` to the 32-bit Python interpreter containing the compatible
+`multisim-mcp` release, and restart the profile. Model credentials remain in
 Harness and are never forwarded to the MCP child process. Maintainer release
 instructions are in `docs/DEEPSEEK_HARNESS_NPM_RELEASE.md`.

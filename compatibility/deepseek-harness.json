@@ -24,7 +24,7 @@
     "mcp_prompts_bridged": false,
     "skill_discovery_root": ".dsh/skills",
     "bundle_package": "multisim-mcp-dsh-plugin",
-    "bundle_version": "1.3.0-rc.1",
+    "bundle_version": "1.3.0-rc.3",
     "compatible_core_versions": [
       "1.1.0",
       "1.2.0",

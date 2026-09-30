@@ -6,7 +6,7 @@ on:
       version:
         description: Exact plugin version from package.json
         required: true
-        default: "1.3.0-rc.1"
+        default: "1.3.0-rc.3"
         type: string
       operation:
         description: Verify only, or stage an update to an existing npm package
