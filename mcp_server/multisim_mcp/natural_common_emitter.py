@@ -25,7 +25,7 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         raise ValueError("请输入有效的共射放大器需求")
     if not re.search(r"共射|common[ -]?emitter|npn", text, re.I):
         raise ValueError("当前入口需要明确单管共射放大器")
-    if re.search(r"mos|功率|多管|差分|振荡|power|multi|温度|容差|BC547|2N2222", text, re.I):
+    if re.search(r"mos|功率|多管|差分|振荡|power|multi|温度|BC547|2N2222", text, re.I):
         raise ValueError("需求超出单NPN共射放大器合同范围")
     supplies = re.findall(r"([0-9]+(?:\.[0-9]+)?)\s*V(?![a-z])", text, re.I)
     gains = re.findall(r"(?:增益|gain)\s*(?:约|为|=)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.I)
@@ -54,6 +54,13 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     thd_limit_percent = float(thd_matches[0]) if thd_matches else 1.0
     if not 0 < thd_limit_percent <= 100:
         raise ValueError("THD 限值需为0–100%")
+    tolerance_matches = re.findall(
+        r"(?:容差|tolerance)\s*(?:不超过|小于|<=|≤|约为|为|=)?\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
+        text, re.I,
+    )
+    tolerance_percent = float(tolerance_matches[0]) if tolerance_matches else None
+    if tolerance_percent is not None and not 0 < tolerance_percent <= 20:
+        raise ValueError("元件容差需为0–20%")
     input_source = "VIN in 0 DC 0 AC 1 SIN(0 1m 1k)" if sine_requested else "VIN in 0 DC 0 AC 1 PULSE(0 1m 1m 1u 1u 1m 2m)"
     net = (
         f"VCC vcc 0 DC {voltage:g}\n"
@@ -91,12 +98,13 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         "bias_estimate":estimate_common_emitter_bias(net, voltage),
         "waveform":"sine" if sine_requested else "pulse",
         "thd_limit_percent":thd_limit_percent if sine_requested else None,
+        "tolerance_percent": tolerance_percent,
         "proposal":{"title":"2N3904共射放大器", "application":text.strip(), "netlist":net,
                     "probe_nets":["in","out","base","emitter","collector","vcc"],
                     "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 3m" if sine_requested else "tran 10u 2m"}], "checks":checks},
         "assumptions":["固定本地2N3904模型、100kΩ负载、1mV正弦输入；增益在1kHz验收。" if sine_requested else "固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
                        "候选搜索仅比较估算值附近最多5个E24发射极电阻，最终以原生实测增益选择。",
                        "偏置公式只是初始估算；实际工作点、增益和波形响应以原生仿真为准。",
-                       "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；未进行温度、容差、功率级、噪声和实物板验证。" if sine_requested else "未进行温度、容差、功率级、噪声和实物板验证。"],
+                       "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。" if sine_requested else "容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。"],
         "status":"unverified-native-proposal",
     }

@@ -12,6 +12,8 @@ from multisim_mcp.natural_common_emitter_run import (
     _distortion_acceptance,
     _frequency_response_acceptance,
     _operating_margin_acceptance,
+    _tolerance_corners,
+    _tolerance_proposal,
     _run_amplitude_scan,
     _sine_amplitude_proposal,
     run_natural_common_emitter,
@@ -38,6 +40,17 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertEqual(plan["thd_limit_percent"], 1.0)
         self.assertIn("SIN(0 1m 1k)", plan["proposal"]["netlist"])
         self.assertEqual(plan["proposal"]["experiments"][-1]["commands"], "tran 10u 3m")
+
+    def test_tolerance_request_is_bounded_and_generates_resistor_corners(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，元件容差5%"
+        )
+        self.assertEqual(plan["tolerance_percent"], 5.0)
+        corners = _tolerance_corners(plan["proposal"], plan["tolerance_percent"])
+        self.assertEqual(len(corners), 13)
+        proposal = _tolerance_proposal(plan["proposal"], corners[1]["values"])
+        self.assertIn("RE emitter 0", proposal["netlist"])
+        self.assertNotEqual(proposal["netlist"], plan["proposal"]["netlist"])
 
     def test_sine_amplitude_proposal_changes_source_and_keeps_checks_broad(self):
         plan = parse_natural_common_emitter(
