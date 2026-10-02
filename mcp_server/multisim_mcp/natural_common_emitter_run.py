@@ -29,6 +29,33 @@ def _candidate_proposal(plan: dict[str, Any], resistance: float) -> dict[str, An
     return proposal
 
 
+def _sine_amplitude_proposal(proposal: dict[str, Any], amplitude: float) -> dict[str, Any]:
+    """Copy a sine proposal and change only the input peak amplitude."""
+    if not isinstance(amplitude, (int, float)) or not math.isfinite(amplitude) or amplitude <= 0:
+        raise ValueError("sine amplitude must be a positive finite number")
+    updated = dict(proposal)
+    source = proposal.get("netlist", "")
+    replacement = f"SIN(0 {format_resistance(amplitude)} 1k)"
+    pattern = r"(?i)SIN\s*\(\s*0\s+\S+\s+1k\s*\)"
+    if re.search(pattern, source) is None:
+        raise ValueError("sine proposal has no 1 kHz SIN source")
+    netlist = re.sub(pattern, replacement, source, count=1)
+    updated["netlist"] = netlist
+    checks = []
+    for check in proposal.get("checks", []):
+        item = dict(check)
+        if item.get("analysis") == "tran":
+            # The scan is diagnostic; use a deliberately broad output bound so
+            # the native run can reveal clipping through THD rather than fail
+            # early on the nominal small-signal check.
+            scale = 1.1 if item.get("net") == "in" else 50.0
+            item["min"] = -amplitude * scale
+            item["max"] = amplitude * scale
+        checks.append(item)
+    updated["checks"] = checks
+    return updated
+
+
 def format_resistance(value: float) -> str:
     from decimal import Decimal
     from .preferred_values import format_spice_scalar
@@ -172,10 +199,66 @@ def _distortion_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[st
         "status": "passed-thd" if thd_percent <= limit else "target-not-met",
         "criterion": "H2..H5 RMS-equivalent amplitude divided by fundamental",
         "samples": len(rows), "window_start_s": rows[0][0], "window_stop_s": rows[-1][0],
+        "peak_to_peak_v": max(value for _, value in rows) - min(value for _, value in rows),
         "fundamental_frequency_hz": frequency, "fundamental_amplitude_v": fundamental,
         "harmonic_amplitudes_v": amplitudes[1:], "thd_fraction": thd_fraction,
         "thd_percent": thd_percent, "limit_percent": limit,
     }
+
+
+def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
+    """Run an ascending native sine-amplitude scan for the selected candidate."""
+    if plan.get("waveform") != "sine":
+        return {"status": "unverified", "reason": "amplitude scan requires sine mode"}
+    amplitudes = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+    base = _candidate_proposal(plan, float(selected["resistance_ohm"]))
+    scan_root = root / "swing-scan"
+    scan_root.mkdir(parents=True, exist_ok=False)
+    points = []
+    for index, amplitude in enumerate(amplitudes, 1):
+        proposal = _sine_amplitude_proposal(base, amplitude)
+        scan_plan = dict(plan)
+        scan_plan["proposal"] = proposal
+        point_dir = scan_root / f"amplitude-{index:03d}"
+        try:
+            native = run_generated_analog_project(proposal, str(point_dir), execute=True)
+            distortion = _distortion_acceptance(point_dir, scan_plan)
+            point = {
+                "directory": point_dir.relative_to(root).as_posix(),
+                "input_peak_v": amplitude,
+                "success": bool(native.get("success")),
+                "verification_status": native.get("verification_status"),
+                "distortion": distortion,
+                "native_project": native.get("native_project"),
+                "report": native.get("report"),
+            }
+        except Exception as exc:
+            point = {
+                "directory": point_dir.relative_to(root).as_posix(),
+                "input_peak_v": amplitude,
+                "success": False,
+                "verification_status": "failed",
+                "distortion": {"status": "failed", "reason": str(exc)},
+            }
+        points.append(point)
+        if not point["success"] or distortion.get("status") == "target-not-met":
+            break
+    passed = [point for point in points if point["success"] and point["distortion"].get("status") == "passed-thd"]
+    failed = next((point for point in points if not point["success"] or point["distortion"].get("status") == "target-not-met"), None)
+    result: dict[str, Any] = {
+        "status": "passed-amplitude-scan" if passed else "failed",
+        "criterion": f"THD <= {float(plan.get('thd_limit_percent') or 1.0):g}%",
+        "points": points,
+        "scan_limit_input_peak_v": amplitudes[len(points) - 1] if points else None,
+        "max_undistorted_input_peak_v": passed[-1]["input_peak_v"] if passed else None,
+        "max_undistorted_output_peak_to_peak_v": passed[-1]["distortion"].get("peak_to_peak_v") if passed else None,
+    }
+    if failed is None and passed:
+        result["status"] = "unverified-scan-limit"
+        result["reason"] = "all scanned amplitudes remained below the THD limit; extend the scan before claiming maximum swing"
+    elif failed is not None:
+        result["first_limit_exceeding_input_peak_v"] = failed["input_peak_v"]
+    return result
 
 
 def verify_ce_presentation(path: Path, plan: dict) -> dict:
@@ -280,6 +363,7 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
             result['verification_status'] = 'passed-common-emitter-candidate-search'
             result['simulation_started'] = True
             result['delivery_status'] = 'requires-visual-review'
+            result['amplitude_scan'] = _run_amplitude_scan(root, plan, selected)
         else:
             result['error'] = {'type': 'RuntimeError', 'message': 'no common-emitter candidate passed native acceptance'}
             result['delivery_status'] = 'not-ready'
@@ -296,15 +380,25 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
     selected = result.get('selected')
     conclusion = (f"选中 RE={selected['resistance_ohm']:g} Ω，实测增益 {selected['measured_gain']:.6g}。"
                   if selected else '没有候选通过原生验收。')
+    amplitude_scan = result.get('amplitude_scan')
+    if isinstance(amplitude_scan, dict):
+        scan_text = (
+            f"幅值扫描：{amplitude_scan.get('status')}；最大已验证输入峰值 "
+            f"{amplitude_scan.get('max_undistorted_input_peak_v', '—')} V，"
+            f"首个超限点 {amplitude_scan.get('first_limit_exceeding_input_peak_v', '—')} V。"
+        )
+    else:
+        scan_text = "幅值扫描：未启用（需要正弦模式）。"
     (root / 'report.html').write_text(
         '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>共射放大器候选搜索</title>'
         '<style>body{font:16px/1.7 system-ui;max-width:1100px;margin:40px auto;padding:20px}'
         'table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px}</style>'
         '<h1>2N3904 共射放大器候选搜索</h1>'
         f'<p>状态：{html.escape(result["verification_status"])}；{html.escape(conclusion)}</p>'
+        f'<p>{html.escape(scan_text)}</p>'
         '<table><tr><th>RE</th><th>实测增益</th><th>目标误差</th><th>频带证据</th><th>状态</th><th>通过</th></tr>'
         + report_rows + '</table><p>每个候选均为独立原生工程副本，保留其 Multisim 工程、CSV、图纸和 manifest。</p>'
-        '<p>频带指标从原生 AC 扫频派生；当前脉冲瞬态输入不能用于 THD，失真状态保持 unverified，直到 VSIN 原生载体完成验证。</p>'
+        '<p>频带指标从原生 AC 扫频派生；正弦模式会额外扫描输入幅值并以 THD 识别摆幅边界，普通脉冲模式的失真状态保持 unverified。</p>'
         '<p><a href="proposal.json">需求与候选</a> · <a href="acceptance.json">验收记录</a> · <a href="manifest.json">完整性清单</a></p></html>',
         encoding='utf-8')
     return finalize_task_result(root, result)

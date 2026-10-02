@@ -10,6 +10,7 @@ from multisim_mcp.natural_common_emitter_run import (
     _candidate_proposal,
     _distortion_acceptance,
     _frequency_response_acceptance,
+    _sine_amplitude_proposal,
     run_natural_common_emitter,
 )
 from multisim_mcp.linear_reference import validate_native_source
@@ -34,6 +35,16 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertEqual(plan["thd_limit_percent"], 1.0)
         self.assertIn("SIN(0 1m 1k)", plan["proposal"]["netlist"])
         self.assertEqual(plan["proposal"]["experiments"][-1]["commands"], "tran 10u 3m")
+
+    def test_sine_amplitude_proposal_changes_source_and_keeps_checks_broad(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，THD不超过1%"
+        )
+        proposal = _sine_amplitude_proposal(plan["proposal"], 0.05)
+        self.assertIn("SIN(0 50m 1k)", proposal["netlist"])
+        tran_checks = [item for item in proposal["checks"] if item["analysis"] == "tran"]
+        self.assertAlmostEqual(tran_checks[0]["min"], -0.055)
+        self.assertAlmostEqual(tran_checks[1]["max"], 2.5)
 
     def test_candidate_changes_only_emitter_resistor(self):
         plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")
