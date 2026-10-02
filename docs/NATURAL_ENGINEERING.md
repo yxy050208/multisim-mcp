@@ -41,6 +41,11 @@ RLC 的 `native_rlc_acceptance.evaluate_rlc` 已加入原生 AC 矩阵验收层�
 已接通 `run_natural_rlc_engineering_request`：它会对候选 R1 逐个执行原生 OP/AC，
 保留未达目标但模型一致的候选，并按实测峰值频率选择最佳值。实机多候选证据目录为
 `sample_multisim/natural_rlc_auto_20260908_fixed`，共 4 个候选，选中 10 Ω，峰值 1 kHz。
+
+后续回归将候选搜索改为阻尼模型中心，并把原生 AC 扫频加密到每十倍频程 400 点；在
+Multisim 14.3 上对 `L=10mH、C=2.5uF、目标1kHz` 的 5 个 E24 候选全部实测通过，
+证据目录为本机 `multisim-evidence/rlc_auto_20261003`。选中的 `10Ω` 峰值为
+`1000.2397Hz`，误差 `0.02397%`，1601 点复数频响最大误差 `2.56×10⁻9`。
 - `run_natural_engineering_request(text, output_dir, execute=false)`：同一流程的预览或执行入口。
 - `plan_model_engineering_request(text, provider_config_path=...)`：调用已配置模型，但模型只能调用
   `propose_natural_requirement`，返回内容仍需本地规则验证。

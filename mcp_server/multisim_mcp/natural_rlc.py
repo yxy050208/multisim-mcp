@@ -66,13 +66,37 @@ def parse_natural_rlc_request(text: str) -> dict[str, Any]:
         inductance = 1 / ((2 * math.pi * target) ** 2 * capacitance)
     if not 1e-9 <= inductance <= 10 or not 1e-12 <= capacitance <= 1e-3:
         raise ValueError("RLC 范围：L 1 nH–10 H，C 1 pF–1 mF")
-    ideal_r = 2 * math.pi * target * inductance / 2
-    nearby = [float(parse_spice_scalar(v)) for v in generate_preferred_values("E24", _fmt(ideal_r / 2), _fmt(ideal_r * 2))]
-    nearby = sorted(sorted(nearby, key=lambda v: abs(math.log(v / ideal_r)))[:3])
+    # For the low-pass topology used here, ``1/(2*pi*sqrt(LC))`` is the
+    # undamped natural frequency, while the measured pass-band peak moves
+    # down as R increases.  The old ``pi*f*L`` heuristic is a convenient
+    # impedance scale, but it is not a peak-frequency design rule: for the
+    # 1 kHz / 10 mH / 2.5 uF example it searched only 30--36 ohm and every
+    # native run peaked near 944 Hz.  Solve the second-order denominator for
+    # the damping that places the peak at the requested target, then search
+    # preferred values around that physically meaningful estimate.
+    natural_frequency = 1 / (2 * math.pi * math.sqrt(inductance * capacitance))
+    if target < natural_frequency:
+        damping_resistance = math.sqrt(
+            2 * inductance / capacitance * (1 - (target / natural_frequency) ** 2)
+        )
+    else:
+        # A target at/above the undamped frequency is approached by reducing
+        # damping.  Use five percent of critical resistance as a finite search
+        # centre; the native sweep still decides the best available E24 part.
+        critical_resistance = 2 * math.sqrt(inductance / capacitance)
+        damping_resistance = max(1.0, 0.05 * critical_resistance)
+    damping_resistance = max(1.0, damping_resistance)
+    nearby_values = generate_preferred_values(
+        "E24", _fmt(damping_resistance / 2), _fmt(damping_resistance * 2)
+    )
+    nearby = [float(parse_spice_scalar(v)) for v in nearby_values]
+    nearby = sorted(
+        sorted(nearby, key=lambda v: abs(math.log(v / damping_resistance)))[:5]
+    )
     if resistance is None:
         if not automatic:
             raise ValueError("需要明确电阻值，或要求自动选值")
-        resistance = min(nearby, key=lambda v: abs(math.log(v / ideal_r)))
+        resistance = min(nearby, key=lambda v: abs(math.log(v / damping_resistance)))
     if not 1 <= resistance <= 1e8:
         raise ValueError("RLC 电阻范围为 1 Ω–100 MΩ")
     candidates = sorted(set([resistance] + (nearby if automatic else [])))
@@ -83,12 +107,19 @@ def parse_natural_rlc_request(text: str) -> dict[str, Any]:
     request = {"schema_version": 1, "title": "自然语言生成 RLC 二阶低通工程", "application": text.strip(),
                "constraints": [{"text": item} for item in assumptions], "boards": [{"id": "main", "role": "primary"}],
                "experiments": [{"type": "op", "outputs": ["V(OutProbe)", "V(OutProbe1)"]},
-                               {"type": "ac", "commands": f"ac dec 40 {_fmt(target/100)} {_fmt(target*100)}", "outputs": ["V(OutProbe)", "V(OutProbe1)"]}],
+                               # A 40-point sweep is adequate for a pass/fail
+                               # tolerance but too coarse to rank nearby E24
+                               # damping values: several candidates can share
+                               # the same sampled maximum.  Use a denser native
+                               # sweep so optimization is driven by the actual
+                               # measured peak rather than a grid tie.
+                               {"type": "ac", "commands": f"ac dec 400 {_fmt(target/100)} {_fmt(target*100)}", "outputs": ["V(OutProbe)", "V(OutProbe1)"]}],
                "objectives": [{"metric": "target_frequency_hz", "direction": "target", "target": target, "tolerance": .02}]}
     return {"text": text, "planning_method": "bounded-rlc-rule-parser", "request": request, "netlist": netlist,
             "requirement_contract": {"schema_version": 1, "topology": "rlc_second_order_low_pass", "explicit_parameters": explicit, "automatic_selection": automatic},
             "assumptions": assumptions, "automatic_selection": automatic, "candidate_resistances_ohm": candidates,
-            "derived": {"resistance_ohm": resistance, "inductance_h": inductance, "capacitance_f": capacitance, "target_frequency_hz": target, "input_amplitude_v": amplitude},
+            "derived": {"resistance_ohm": resistance, "inductance_h": inductance, "capacitance_f": capacitance, "target_frequency_hz": target, "input_amplitude_v": amplitude,
+                        "natural_frequency_hz": natural_frequency, "damping_resistance_ohm": damping_resistance},
             "plan": build_engineering_plan(request)}
 
 

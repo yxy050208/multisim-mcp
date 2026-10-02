@@ -3161,14 +3161,26 @@ def _bind_component_native_model(
     ET.SubElement(
         holder, "CiaCString", {"Class": "CiaCString", "String": _asc(card)}
     )
-    ET.SubElement(attributes, "Item")
-    ET.SubElement(attributes, "Item")
+    # These empty containers are part of Multisim's native CiModel record,
+    # even for a simple diode card.  Omitting them still lets the model appear
+    # in the saved XML and pass identity checks, but Multisim's DC operating
+    # point can then wait forever with no output rows.  Keep the same shape as
+    # the extracted local ``*_model.xml`` templates.
+    param_item = ET.SubElement(attributes, "Item")
+    param_list = ET.SubElement(param_item, "CiaParamList", {"Class": "CiaParamList"})
+    for tag in ("doubles", "strings", "parameters", "paramindicators"):
+        ET.SubElement(param_list, tag)
     refcount = ET.SubElement(attributes, "Item")
     ET.SubElement(
         refcount,
         "CiaModelDataRefCount",
-        {"Class": "CiaModelDataRefCount", "RefCnt": "1"},
+        {"Class": "CiaModelDataRefCount", "RefCnt": "0"},
     )
+    coll_item = ET.SubElement(attributes, "Item")
+    collection = ET.SubElement(coll_item, "CiaCollString", {"Class": "CiaCollString"})
+    strings = ET.SubElement(collection, "strings")
+    for index in range(14):
+        ET.SubElement(strings, "Item", {"Value": "&ASCA0" if index == 13 else ""})
     elements.append(item)
     model_refs.add(item.get("CiID"))
     cache[reference] = item

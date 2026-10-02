@@ -653,6 +653,16 @@ Z1 zd zg 0 ZMOD
         self.assertIsNotNone(model_ref)
         models = next(root.iter("Models"))
         self.assertIn(model_ref, {item.get("CiID") for item in models})
+        model = next(
+            item.find("./CiModel")
+            for item in root.iter("Item")
+            if item.get("Class") == "CiModel" and item.get("CiID") == model_ref
+        )
+        self.assertIsNotNone(model.find("./Attributes/Item[3]/CiaParamList"))
+        self.assertEqual(
+            len(model.findall("./Attributes/Item[5]/CiaCollString/strings/Item")),
+            14,
+        )
 
     def test_builder_folds_continuations_and_supports_current_controlled_switch(self) -> None:
         import tempfile

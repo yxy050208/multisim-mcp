@@ -29,6 +29,40 @@ def _ac_file(directory: Path) -> Path:
     raise ValueError("native RLC result has no AC frequency matrix")
 
 
+def _peak_frequency(frequencies: list[float], gains: list[float], index: int) -> tuple[float, str]:
+    """Estimate a native AC peak between adjacent logarithmic samples.
+
+    Multisim's ``ac dec`` sweep reports a finite grid.  Ranking nearby E24
+    damping values from the grid index alone makes candidates tie whenever
+    the requested frequency is itself a sample.  Fit a quadratic to log
+    magnitude versus log frequency around the largest sample; this preserves
+    the native measurement while estimating the sub-grid vertex.  Fall back
+    to the measured grid point when the maximum is at a boundary or the local
+    fit is not a concave, in-range peak.
+    """
+    if index <= 0 or index >= len(frequencies) - 1:
+        return frequencies[index], "native-grid"
+    x = [math.log(frequencies[pos]) for pos in (index - 1, index, index + 1)]
+    y = [math.log(max(gains[pos], 1e-300)) for pos in (index - 1, index, index + 1)]
+    denominator = [
+        (x[pos] - x[(pos + 1) % 3]) * (x[pos] - x[(pos + 2) % 3])
+        for pos in range(3)
+    ]
+    if any(abs(value) < 1e-30 for value in denominator):
+        return frequencies[index], "native-grid"
+    coefficient_a = sum(y[pos] / denominator[pos] for pos in range(3))
+    coefficient_b = -sum(
+        y[pos] * (x[(pos + 1) % 3] + x[(pos + 2) % 3]) / denominator[pos]
+        for pos in range(3)
+    )
+    if not math.isfinite(coefficient_a) or not math.isfinite(coefficient_b) or coefficient_a >= 0:
+        return frequencies[index], "native-grid"
+    vertex = -coefficient_b / (2 * coefficient_a)
+    if not math.isfinite(vertex) or not x[0] <= vertex <= x[2]:
+        return frequencies[index], "native-grid"
+    return math.exp(vertex), "native-log-quadratic"
+
+
 def evaluate_rlc(directory: Path, resistance: float, inductance: float, capacitance: float,
                  *, target_hz: float) -> dict[str, Any]:
     if not all(math.isfinite(value) and value > 0 for value in (resistance, inductance, capacitance, target_hz)):
@@ -52,11 +86,13 @@ def evaluate_rlc(directory: Path, resistance: float, inductance: float, capacita
         gains.append(abs(gain))
         errors.append(abs(gain - reference))
     peak_index = max(range(len(gains)), key=gains.__getitem__)
-    peak_hz = frequencies[peak_index]
+    peak_grid_hz = frequencies[peak_index]
+    peak_hz, peak_method = _peak_frequency(frequencies, gains, peak_index)
     peak_error = abs(peak_hz / target_hz - 1)
     checks = {"ac_complex_response": max(errors) < 1e-3, "target_frequency": peak_error <= .02}
     return {"resistance_ohm": resistance, "inductance_h": inductance, "capacitance_f": capacitance,
             "peak_frequency_hz": peak_hz, "target_error_fraction": peak_error,
+            "peak_frequency_grid_hz": peak_grid_hz, "peak_frequency_method": peak_method,
             "max_ac_complex_error": max(errors), "ac_points": len(rows), "checks": checks,
             "passed": all(checks.values())}
 

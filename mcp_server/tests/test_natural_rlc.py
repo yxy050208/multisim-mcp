@@ -11,6 +11,11 @@ class NaturalRlcTest(unittest.TestCase):
         self.assertIn("L1", result["netlist"])
         self.assertIn("C1", result["netlist"])
         self.assertTrue(result["automatic_selection"])
+        # The damping-aware search must include the low-R region needed to
+        # place the measured pass-band peak near 1 kHz.  The former impedance
+        # heuristic searched only 30--36 ohm and could not meet the target.
+        self.assertIn(10.0, result["candidate_resistances_ohm"])
+        self.assertLess(result["derived"]["damping_resistance_ohm"], 12.0)
 
     def test_rejects_unsupported_load_and_execution_claims(self):
         with self.assertRaises(ValueError):
