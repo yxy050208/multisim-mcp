@@ -1,5 +1,6 @@
 import json
 import math
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from multisim_mcp.natural_common_emitter_run import (
     _candidate_proposal,
     _distortion_acceptance,
     _frequency_response_acceptance,
+    _run_amplitude_scan,
     _sine_amplitude_proposal,
     run_natural_common_emitter,
 )
@@ -45,6 +47,43 @@ class CommonEmitterTest(unittest.TestCase):
         tran_checks = [item for item in proposal["checks"] if item["analysis"] == "tran"]
         self.assertAlmostEqual(tran_checks[0]["min"], -0.055)
         self.assertAlmostEqual(tran_checks[1]["max"], 2.5)
+
+    def test_amplitude_scan_refines_first_thd_failure_with_native_midpoints(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，THD不超过1%"
+        )
+
+        def fake_native(_proposal, _output, *, execute):
+            self.assertTrue(execute)
+            return {"success": True, "verification_status": "passed"}
+
+        def fake_distortion(_directory, scan_plan):
+            source = scan_plan["proposal"]["netlist"]
+            token = re.search(r"SIN\(0\s+(\S+)\s+1k", source, re.I).group(1)
+            amplitude = float(parse_spice_scalar(token))
+            passed = amplitude <= 0.3
+            return {
+                "status": "passed-thd" if passed else "target-not-met",
+                "peak_to_peak_v": amplitude * 10,
+                "thd_percent": 0.1 if passed else 1.1,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch("multisim_mcp.natural_common_emitter_run.run_generated_analog_project",
+                      side_effect=fake_native), \
+                patch("multisim_mcp.natural_common_emitter_run._distortion_acceptance",
+                      side_effect=fake_distortion):
+            result = _run_amplitude_scan(
+                Path(tmp) / "result", plan, {"resistance_ohm": 560.0})
+
+        self.assertEqual(result["status"], "passed-amplitude-scan")
+        self.assertEqual(result["refinement_iterations"], 4)
+        self.assertEqual(len(result["points"]), 12)
+        bracket = result["refined_bracket_input_peak_v"]
+        self.assertLessEqual(bracket["passed"], 0.3)
+        self.assertGreater(bracket["exceeded"], 0.3)
+        self.assertLess(bracket["width_v"], 0.02)
+        self.assertEqual(result["max_undistorted_input_peak_v"], bracket["passed"])
 
     def test_candidate_changes_only_emitter_resistor(self):
         plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")

@@ -207,23 +207,31 @@ def _distortion_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[st
 
 
 def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
-    """Run an ascending native sine-amplitude scan for the selected candidate."""
+    """Run an ascending native sine-amplitude scan for the selected candidate.
+
+    The coarse scan finds a useful bracket cheaply.  When it finds both a
+    passing point and a first THD failure, a few native midpoint runs narrow
+    that bracket.  Every midpoint is kept as its own project so the reported
+    boundary remains reproducible and auditable.
+    """
     if plan.get("waveform") != "sine":
         return {"status": "unverified", "reason": "amplitude scan requires sine mode"}
     amplitudes = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+    refinement_iterations = 4
     base = _candidate_proposal(plan, float(selected["resistance_ohm"]))
     scan_root = root / "swing-scan"
     scan_root.mkdir(parents=True, exist_ok=False)
     points = []
-    for index, amplitude in enumerate(amplitudes, 1):
+
+    def run_point(amplitude: float, directory_name: str) -> dict[str, Any]:
         proposal = _sine_amplitude_proposal(base, amplitude)
         scan_plan = dict(plan)
         scan_plan["proposal"] = proposal
-        point_dir = scan_root / f"amplitude-{index:03d}"
+        point_dir = scan_root / directory_name
         try:
             native = run_generated_analog_project(proposal, str(point_dir), execute=True)
             distortion = _distortion_acceptance(point_dir, scan_plan)
-            point = {
+            return {
                 "directory": point_dir.relative_to(root).as_posix(),
                 "input_peak_v": amplitude,
                 "success": bool(native.get("success")),
@@ -233,30 +241,71 @@ def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, An
                 "report": native.get("report"),
             }
         except Exception as exc:
-            point = {
+            return {
                 "directory": point_dir.relative_to(root).as_posix(),
                 "input_peak_v": amplitude,
                 "success": False,
                 "verification_status": "failed",
                 "distortion": {"status": "failed", "reason": str(exc)},
             }
+
+    for index, amplitude in enumerate(amplitudes, 1):
+        point = run_point(amplitude, f"amplitude-{index:03d}")
         points.append(point)
-        if not point["success"] or distortion.get("status") == "target-not-met":
+        if not point["success"] or point["distortion"].get("status") == "target-not-met":
             break
+
+    def is_passed(point: dict[str, Any]) -> bool:
+        return point["success"] and point["distortion"].get("status") == "passed-thd"
+
+    def is_limit_exceeded(point: dict[str, Any]) -> bool:
+        return point["success"] and point["distortion"].get("status") == "target-not-met"
+
+    first_failed_index = next((index for index, point in enumerate(points) if not is_passed(point)), None)
+    refinement_points = []
+    if (first_failed_index is not None and first_failed_index > 0
+            and is_limit_exceeded(points[first_failed_index])):
+        low = points[first_failed_index - 1]
+        high = points[first_failed_index]
+        for iteration in range(1, refinement_iterations + 1):
+            midpoint = (float(low["input_peak_v"]) + float(high["input_peak_v"])) / 2.0
+            point = run_point(midpoint, f"amplitude-refine-{iteration:03d}")
+            points.append(point)
+            refinement_points.append(point)
+            if is_passed(point):
+                low = point
+            else:
+                high = point
+
     passed = [point for point in points if point["success"] and point["distortion"].get("status") == "passed-thd"]
-    failed = next((point for point in points if not point["success"] or point["distortion"].get("status") == "target-not-met"), None)
+    failed = next((point for point in points if not is_passed(point)), None)
     result: dict[str, Any] = {
         "status": "passed-amplitude-scan" if passed else "failed",
         "criterion": f"THD <= {float(plan.get('thd_limit_percent') or 1.0):g}%",
         "points": points,
-        "scan_limit_input_peak_v": amplitudes[len(points) - 1] if points else None,
+        "scan_limit_input_peak_v": max((point["input_peak_v"] for point in points), default=None),
         "max_undistorted_input_peak_v": passed[-1]["input_peak_v"] if passed else None,
         "max_undistorted_output_peak_to_peak_v": passed[-1]["distortion"].get("peak_to_peak_v") if passed else None,
+        "refinement_iterations": len(refinement_points),
     }
+    if refinement_points and passed and failed is not None:
+        refined_low = max((point for point in refinement_points if is_passed(point)),
+                          key=lambda point: point["input_peak_v"], default=None)
+        refined_high = min((point for point in refinement_points if not is_passed(point)),
+                           key=lambda point: point["input_peak_v"], default=None)
+        if refined_low is not None and refined_high is not None:
+            result["refined_bracket_input_peak_v"] = {
+                "passed": refined_low["input_peak_v"],
+                "exceeded": refined_high["input_peak_v"],
+                "width_v": refined_high["input_peak_v"] - refined_low["input_peak_v"],
+            }
+            result["max_undistorted_input_peak_v"] = refined_low["input_peak_v"]
+            result["max_undistorted_output_peak_to_peak_v"] = refined_low["distortion"].get("peak_to_peak_v")
+            result["first_limit_exceeding_input_peak_v"] = refined_high["input_peak_v"]
     if failed is None and passed:
         result["status"] = "unverified-scan-limit"
         result["reason"] = "all scanned amplitudes remained below the THD limit; extend the scan before claiming maximum swing"
-    elif failed is not None:
+    elif failed is not None and is_limit_exceeded(failed) and "first_limit_exceeding_input_peak_v" not in result:
         result["first_limit_exceeding_input_peak_v"] = failed["input_peak_v"]
     return result
 
@@ -387,6 +436,13 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
             f"{amplitude_scan.get('max_undistorted_input_peak_v', '—')} V，"
             f"首个超限点 {amplitude_scan.get('first_limit_exceeding_input_peak_v', '—')} V。"
         )
+        bracket = amplitude_scan.get('refined_bracket_input_peak_v')
+        if isinstance(bracket, dict):
+            scan_text += (
+                f" 二分细化后区间 [{bracket.get('passed', '—')}, "
+                f"{bracket.get('exceeded', '—')}] V，宽度 "
+                f"{bracket.get('width_v', '—')} V。"
+            )
     else:
         scan_text = "幅值扫描：未启用（需要正弦模式）。"
     (root / 'report.html').write_text(
