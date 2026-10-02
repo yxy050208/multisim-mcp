@@ -206,6 +206,120 @@ def _distortion_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[st
     }
 
 
+def _operating_margin_acceptance(
+    candidate_dir: Path, plan: dict[str, Any], native_result: dict[str, Any]
+) -> dict[str, Any]:
+    """Check DC operating point and collector-to-rail headroom from native data.
+
+    The output node is AC-coupled in this topology, so its voltage is not a
+    useful rail-margin signal.  The collector probe is checked instead: every
+    steady-state transient sample must leave a small margin to ground and VCC.
+    This is a derived native measurement and is deliberately reported as
+    ``unverified`` when the required probe or operating-point evidence is absent.
+    """
+    supply = float(plan.get("derived", {}).get("supply_v") or 0.0)
+    if supply <= 0:
+        return {"status": "unverified", "reason": "supply voltage is unavailable"}
+    checks = (native_result.get("measurement_acceptance") or {}).get("checks", [])
+    op_requirements = {
+        ("op", "collector", None),
+        ("op", "base", "emitter"),
+        ("op", "collector", "base"),
+    }
+    op_checks = [
+        check for check in checks
+        if (check.get("requirement", {}).get("analysis"),
+            check.get("requirement", {}).get("net"),
+            check.get("requirement", {}).get("subtract_net")) in op_requirements
+    ]
+    if len(op_checks) != len(op_requirements):
+        op_status = "unverified"
+        op_reason = "native operating-point checks are incomplete"
+    elif all(check.get("passed") is True for check in op_checks):
+        op_status = "passed-operating-point"
+        op_reason = None
+    else:
+        op_status = "target-not-met"
+        op_reason = "one or more native operating-point checks failed"
+
+    experiments = plan["proposal"].get("experiments", [])
+    tran_index = next((i for i, item in enumerate(experiments, 1) if item.get("type") == "tran"), None)
+    probe_nets = plan["proposal"].get("probe_nets", [])
+    try:
+        collector_index = probe_nets.index("collector")
+    except ValueError:
+        return {
+            "status": "unverified",
+            "operating_point_status": op_status,
+            "reason": "collector probe is not declared",
+        }
+    if tran_index is None:
+        return {
+            "status": "unverified",
+            "operating_point_status": op_status,
+            "reason": "no native transient experiment was requested",
+        }
+    csv_path = candidate_dir / "native" / f"analysis-{tran_index:03d}" / "data.csv"
+    if not csv_path.is_file():
+        return {
+            "status": "unverified",
+            "operating_point_status": op_status,
+            "reason": "native transient data.csv is missing",
+        }
+    signal = f"V(OutProbe{collector_index if collector_index else ''})"
+    values = []
+    try:
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            for row in csv.DictReader(stream):
+                time = float(row["time_s"])
+                value = float(row[f"{signal}.value"])
+                if math.isfinite(time) and math.isfinite(value) and .001 <= time <= .002:
+                    values.append(value)
+    except (KeyError, ValueError, TypeError) as exc:
+        return {
+            "status": "unverified",
+            "operating_point_status": op_status,
+            "reason": f"native collector transient data is invalid: {exc}",
+        }
+    if len(values) < 16:
+        return {
+            "status": "unverified",
+            "operating_point_status": op_status,
+            "reason": "steady-state collector window has fewer than 16 samples",
+            "samples": len(values),
+        }
+    collector_min = min(values)
+    collector_max = max(values)
+    low_headroom = collector_min
+    high_headroom = supply - collector_max
+    margin_limit = max(0.1, supply * 0.01)
+    rail_status = "passed-rail-margin" if min(low_headroom, high_headroom) >= margin_limit else "target-not-met"
+    if op_status == "passed-operating-point" and rail_status == "passed-rail-margin":
+        status = "passed-operating-margin"
+    elif op_status == "target-not-met" or rail_status == "target-not-met":
+        status = "target-not-met"
+    else:
+        status = "unverified"
+    result = {
+        "status": status,
+        "criterion": f"collector headroom >= {margin_limit:g} V and declared OP checks pass",
+        "operating_point_status": op_status,
+        "rail_status": rail_status,
+        "samples": len(values),
+        "window_start_s": .001,
+        "window_stop_s": .002,
+        "collector_min_v": collector_min,
+        "collector_max_v": collector_max,
+        "low_headroom_v": low_headroom,
+        "high_headroom_v": high_headroom,
+        "minimum_headroom_v": min(low_headroom, high_headroom),
+        "headroom_limit_v": margin_limit,
+    }
+    if op_reason:
+        result["operating_point_reason"] = op_reason
+    return result
+
+
 def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
     """Run an ascending native sine-amplitude scan for the selected candidate.
 
@@ -231,12 +345,14 @@ def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, An
         try:
             native = run_generated_analog_project(proposal, str(point_dir), execute=True)
             distortion = _distortion_acceptance(point_dir, scan_plan)
+            operating_margin = _operating_margin_acceptance(point_dir, scan_plan, native)
             return {
                 "directory": point_dir.relative_to(root).as_posix(),
                 "input_peak_v": amplitude,
                 "success": bool(native.get("success")),
                 "verification_status": native.get("verification_status"),
                 "distortion": distortion,
+                "operating_margin": operating_margin,
                 "native_project": native.get("native_project"),
                 "report": native.get("report"),
             }
@@ -247,19 +363,26 @@ def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, An
                 "success": False,
                 "verification_status": "failed",
                 "distortion": {"status": "failed", "reason": str(exc)},
+                "operating_margin": {"status": "unverified", "reason": "native run failed"},
             }
 
     for index, amplitude in enumerate(amplitudes, 1):
         point = run_point(amplitude, f"amplitude-{index:03d}")
         points.append(point)
-        if not point["success"] or point["distortion"].get("status") == "target-not-met":
+        if (not point["success"]
+                or point["distortion"].get("status") == "target-not-met"
+                or point["operating_margin"].get("status") == "target-not-met"):
             break
 
     def is_passed(point: dict[str, Any]) -> bool:
-        return point["success"] and point["distortion"].get("status") == "passed-thd"
+        return (point["success"]
+                and point["distortion"].get("status") == "passed-thd"
+                and point["operating_margin"].get("status") == "passed-operating-margin")
 
     def is_limit_exceeded(point: dict[str, Any]) -> bool:
-        return point["success"] and point["distortion"].get("status") == "target-not-met"
+        return (point["success"]
+                and (point["distortion"].get("status") == "target-not-met"
+                     or point["operating_margin"].get("status") == "target-not-met"))
 
     first_failed_index = next((index for index, point in enumerate(points) if not is_passed(point)), None)
     refinement_points = []
@@ -281,7 +404,7 @@ def _run_amplitude_scan(root: Path, plan: dict[str, Any], selected: dict[str, An
     failed = next((point for point in points if not is_passed(point)), None)
     result: dict[str, Any] = {
         "status": "passed-amplitude-scan" if passed else "failed",
-        "criterion": f"THD <= {float(plan.get('thd_limit_percent') or 1.0):g}%",
+        "criterion": f"THD <= {float(plan.get('thd_limit_percent') or 1.0):g}% plus native OP and collector rail-margin checks",
         "points": points,
         "scan_limit_input_peak_v": max((point["input_peak_v"] for point in points), default=None),
         "max_undistorted_input_peak_v": passed[-1]["input_peak_v"] if passed else None,
@@ -434,7 +557,7 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
         scan_text = (
             f"幅值扫描：{amplitude_scan.get('status')}；最大已验证输入峰值 "
             f"{amplitude_scan.get('max_undistorted_input_peak_v', '—')} V，"
-            f"首个超限点 {amplitude_scan.get('first_limit_exceeding_input_peak_v', '—')} V。"
+            f"首个综合验收超限点 {amplitude_scan.get('first_limit_exceeding_input_peak_v', '—')} V。"
         )
         bracket = amplitude_scan.get('refined_bracket_input_peak_v')
         if isinstance(bracket, dict):

@@ -11,6 +11,7 @@ from multisim_mcp.natural_common_emitter_run import (
     _candidate_proposal,
     _distortion_acceptance,
     _frequency_response_acceptance,
+    _operating_margin_acceptance,
     _run_amplitude_scan,
     _sine_amplitude_proposal,
     run_natural_common_emitter,
@@ -72,7 +73,9 @@ class CommonEmitterTest(unittest.TestCase):
                 patch("multisim_mcp.natural_common_emitter_run.run_generated_analog_project",
                       side_effect=fake_native), \
                 patch("multisim_mcp.natural_common_emitter_run._distortion_acceptance",
-                      side_effect=fake_distortion):
+                      side_effect=fake_distortion), \
+                patch("multisim_mcp.natural_common_emitter_run._operating_margin_acceptance",
+                      return_value={"status": "passed-operating-margin"}):
             result = _run_amplitude_scan(
                 Path(tmp) / "result", plan, {"resistance_ohm": 560.0})
 
@@ -84,6 +87,29 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertGreater(bracket["exceeded"], 0.3)
         self.assertLess(bracket["width_v"], 0.02)
         self.assertEqual(result["max_undistorted_input_peak_v"], bracket["passed"])
+
+    def test_operating_margin_acceptance_reports_collector_headroom(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，THD不超过1%"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            native = root / "native" / "analysis-003"
+            native.mkdir(parents=True)
+            lines = ["time_s,V(OutProbe4).value"]
+            for index in range(32):
+                time = .001 + index * (.001 / 31)
+                lines.append(f"{time},{6 + 2 * math.sin(2 * math.pi * 1000 * (time - .001))}")
+            (native / "data.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            result = _operating_margin_acceptance(root, plan, {
+                "measurement_acceptance": {"checks": [
+                    {"requirement": {"analysis": "op", "net": "collector"}, "passed": True},
+                    {"requirement": {"analysis": "op", "net": "base", "subtract_net": "emitter"}, "passed": True},
+                    {"requirement": {"analysis": "op", "net": "collector", "subtract_net": "base"}, "passed": True},
+                ]}
+            })
+        self.assertEqual(result["status"], "passed-operating-margin")
+        self.assertGreater(result["minimum_headroom_v"], 3.9)
 
     def test_candidate_changes_only_emitter_resistor(self):
         plan = parse_natural_common_emitter("设计一个12V单电源、增益10倍的NPN共射放大器")
