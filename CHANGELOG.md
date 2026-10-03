@@ -78,6 +78,9 @@
 - 在当前主线重新生成本机授权模板包并完整执行五类数字回归；组合逻辑、DFF、四位计数器、
   四位移位寄存器和计数器解码负载全部通过原生重开、拓扑、引脚、布局和瞬态输出检查，
   带负载计数器路径不再复现历史 PR17 的负载丢失现象。
+- 新增版本范围兼容性矩阵工具 `tools/run_compatibility_matrix.py`：按已安装 Multisim
+  版本保存 Automation API 探测、能力档案和 SHA-256 清单；相邻或未知版本保持
+  `unverified`/`unsupported`，不会从 14.3 结果推断兼容。
 - 布局验证新增 `crossings_per_wire` 与可配置上限，超过上限会产生
   `excessive-wire-crossings` 错误；数字逻辑新增按低扇出信号链排序的布局 profile，
   负载元件会跟随其驱动器放置。`create_schematic_from_netlist` 新增可选的

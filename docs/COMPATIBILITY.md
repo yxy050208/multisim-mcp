@@ -41,3 +41,26 @@ database parts. Missing Bode phase data remains explicitly unavailable.
 Digital mappings are versioned in the component manifest. A Multisim version without
 an exact verified manifest is rejected by the automatic mapping resolver; it is not
 silently treated as compatible with 14.3.
+
+## Version-scoped native evidence
+
+Use the 32-bit Python worker to capture the installed Automation API and compare it
+with the versions that need support:
+
+```powershell
+py -3.12-32 tools/run_compatibility_matrix.py `
+  --target-version "Multisim 14.3" `
+  --target-version "Multisim 14.2" `
+  --output C:\Temp\multisim-compatibility
+```
+
+The tool creates an unsaved blank circuit, writes `native-api.json`, and records
+`matrix.json` plus a SHA-256 `manifest.json`. `api-verified` means that the requested
+version matches the installed version and its type library was inspected. It does
+not certify every component family or complete circuit flow. A known version without
+its own probe remains `unverified`; an unrecognized version is `unsupported`.
+
+The 2026-10-03 local probe detected Multisim 14.3. The 14.3 entry is
+`api-verified`; 14.2 remains `unverified` until that version is installed and probed.
+The evidence is retained locally and does not include NI templates or installation
+files.
