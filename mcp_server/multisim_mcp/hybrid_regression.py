@@ -66,6 +66,25 @@ RLOAD filt 0 100k
             ("dout", "filt"),
             ("VDD", "VIN", "A1", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "logic_chain_rc_load",
+            "Three-stage digital logic chain driving a first-order RC network and load.",
+            """VDD high 0 DC 5
+VIN din 0 PULSE(0 5 0 1n 1n 10u 20u)
+VEN enable 0 PULSE(0 5 0 1n 1n 20u 40u)
+VBP bypass 0 PULSE(0 5 0 1n 1n 30u 60u)
+A1 din n1 high 0 NOT
+A2 n1 enable n2 high 0 AND2
+A3 n2 bypass dout high 0 OR2
+R1 dout filt 1k
+C1 filt 0 1u
+RLOAD filt 0 100k
+.end
+""",
+            "tran 1u 100u",
+            ("dout", "filt"),
+            ("VDD", "VIN", "VEN", "VBP", "A1", "A2", "A3", "R1", "C1", "RLOAD"),
+        ),
     )
     for case in cases:
         case.validate()

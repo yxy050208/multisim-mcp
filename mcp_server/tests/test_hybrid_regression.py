@@ -12,7 +12,9 @@ from tools.run_hybrid_regression import _observed_outputs
 class HybridRegressionTest(unittest.TestCase):
     def test_matrix_contains_digital_to_analog_bridge(self) -> None:
         cases = hybrid_regression_matrix()
-        self.assertEqual([case.case_id for case in cases], ["not_rc_load"])
+        self.assertEqual(
+            [case.case_id for case in cases], ["not_rc_load", "logic_chain_rc_load"]
+        )
         self.assertEqual(cases[0].manifest()["output_nets"], ["dout", "filt"])
 
     def test_selection_rejects_unknown_case(self) -> None:
