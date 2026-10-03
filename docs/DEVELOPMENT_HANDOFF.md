@@ -81,8 +81,12 @@
   Multisim 为只有单个实体引脚的依赖网建立可保存的节点；命令引擎可运行但原生重开后
   输出通道缺失。ADC/DAC 适配器现在为表达式依赖网加入 1 GΩ 高值锚点。`dac_rc_bridge`
   在 Multisim 14.3 完成重开、拓扑、引脚、布局和 COM 瞬态验收，输出 `raw` 为 0–5 V，
-  `filt` 具有 0–0.3768 V 的 RC 响应；正式混合矩阵为 9/9。证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261004-v9`。
+  `filt` 具有 0–0.3768 V 的 RC 响应；正式混合矩阵随后扩展为 10/10。证据保存在本机
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261004-v10`。
+- 已完成对称的 `adc_rc_bridge` 原生闭环。ADC 端的模拟输入和电源依赖同样通过 1 GΩ
+  高值锚点物化；Multisim 14.3 重开、拓扑、引脚、布局和 COM 瞬态均通过，输出 `digital`
+  为 0–5 V，`filt` 具有 0–0.3768 V 的 RC 响应。ADC/DAC 的单比特桥接现均有独立原生
+  证据；后续仍需更高位宽 ADC/DAC 和真实器件模型验证。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的

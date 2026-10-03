@@ -100,6 +100,8 @@
 - 修复 `@ADC1`/`@DAC1` 行为表达式的原生节点物化：为表达式读取的输入和电源轨加入
   1 GΩ 高值锚点，避免 Multisim 重开后丢失只有单个实体引脚的依赖网。Multisim 14.3
   原生混合矩阵现为 9/9；DAC 案例完成拓扑、引脚、重开和 COM 瞬态输出验收。
+- 新增 `adc_rc_bridge` 原生回归案例；ADC 与 DAC 均完成 Multisim 14.3 的重开、拓扑、
+  引脚和 COM 瞬态输出验收，混合信号矩阵扩展为 10/10。
 - 新增版本范围兼容性矩阵工具 `tools/run_compatibility_matrix.py`：按已安装 Multisim
   版本保存 Automation API 探测、能力档案和 SHA-256 清单；相邻或未知版本保持
   `unverified`/`unsupported`，不会从 14.3 结果推断兼容。

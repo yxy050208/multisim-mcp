@@ -194,6 +194,21 @@ RLOAD filt 0 100k
             ("raw", "filt"),
             ("VDD", "VDIN", "XDAC", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "adc_rc_bridge",
+            "One-bit ADC behavioral bridge driving a first-order RC load.",
+            """VDD high 0 DC 5
+VAN analog 0 PULSE(0 5 0 1n 1n 40u 80u)
+XADC analog digital high 0 @ADC1 THRESHOLD=.5
+R1 digital filt 1k
+C1 filt 0 1u
+RLOAD filt 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("digital", "filt"),
+            ("VDD", "VAN", "XADC", "R1", "C1", "RLOAD"),
+        ),
     )
     for case in cases:
         case.validate()
