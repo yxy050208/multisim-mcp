@@ -277,8 +277,15 @@ def _analyze_saved_values(client: Any, action: Mapping[str, Any], output: Path, 
 
 def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, execute: bool=False,
                                 native_source: str | None = None,
-                                native_parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                                native_parameters: Mapping[str, Any] | None = None,
+                                native_model_parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
     plan,parts = validate_proposal(proposal)
+    normalized_model_parameters: dict[str, float] | None = None
+    if native_model_parameters is not None:
+        if not any(part.kind == "QNPN" for part in parts):
+            raise ValueError("native model parameters currently require a QNPN component")
+        from .native_model_override import normalize_qnpn_model_parameters
+        normalized_model_parameters = normalize_qnpn_model_parameters(native_model_parameters)
     if native_parameters:
         from .linear_reference import scalar
         by_ref = {p.refdes:p for p in parts}
@@ -294,6 +301,11 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         raise FileExistsError("output must be a new directory")
     result = {"success":True,"mode":"preview","output_dir":str(root),"proposal":plan,
               "verification_status":"unverified","simulation_started":False}
+    if normalized_model_parameters is not None:
+        result["native_model_parameters"] = {
+            "model": "2N3904", "parameters": normalized_model_parameters,
+            "status": "planned-native-roundtrip",
+        }
     if not execute:
         return normalize_task_result(result)
     root.mkdir(parents=True,exist_ok=False)
@@ -315,6 +327,11 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         if not re.match(r"^14\.3(?:\.|$)", version):
             raise RuntimeError("this workflow's native pin/model acceptance is currently verified only on Multisim 14.3")
         if source is None:
+            if normalized_model_parameters is not None:
+                from .native_model_override import apply_qnpn_model_parameters
+                model_override = apply_qnpn_model_parameters(root / "source.xml", normalized_model_parameters)
+                result["native_model_parameters"] = model_override
+                _write(root / "model-override.json", model_override)
             Ms14Codec().encode(str(root/"source.xml"),str(root/"source.ms14"))
         else:
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -323,6 +340,12 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
                 raise RuntimeError('native source changed while copying')
             Ms14Codec().decode(str(root/'source.ms14'),str(root/'source.xml'))
             result['reopened_source'] = {'path':str(source),'sha256':digest,'parameter_changes':dict(native_parameters or {})}
+            if normalized_model_parameters is not None:
+                from .native_model_override import apply_qnpn_model_parameters
+                model_override = apply_qnpn_model_parameters(root / "source.xml", normalized_model_parameters)
+                result["native_model_parameters"] = model_override
+                _write(root / "model-override.json", model_override)
+                Ms14Codec().encode(str(root/"source.xml"),str(root/"source.ms14"))
         request = {"schema_version":1,"title":plan["title"],"application":plan["application"],
                    "boards":[{"id":"main","role":"primary"}],"experiments":plan["experiments"]}
         result["stage"] = "native-analysis"
@@ -345,6 +368,13 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
             _write(root/"model-identity.json",result["model_acceptance"])
             if before != after:
                 raise RuntimeError("native save changed vendor model identity or definition")
+            if normalized_model_parameters is not None:
+                from .native_model_override import verify_qnpn_model_parameters
+                model_check = verify_qnpn_model_parameters(root / "native-model.xml", normalized_model_parameters)
+                result["native_model_parameters"]["native_roundtrip"] = model_check
+                if not model_check["ok"]:
+                    raise RuntimeError("native save changed requested 2N3904 model parameters")
+                result["native_model_parameters"]["status"] = "passed-native-model-roundtrip"
         result["stage"] = "acceptance"
         acceptance = evaluate_evidence(root/"native",plan,parts)
         topology = [json.loads((root/"native"/f"analysis-{i:03d}"/"topology.json").read_text(encoding="utf-8")) for i in range(1,len(plan["experiments"])+1)]

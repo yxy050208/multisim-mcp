@@ -64,9 +64,21 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     thd_limit_percent = float(thd_matches[0]) if thd_matches else 1.0
     if not 0 < thd_limit_percent <= 100:
         raise ValueError("THD 限值需为0–100%")
+    model_tolerance_pattern = (
+        r"(?:晶体管参数|模型参数|model\s+parameters?)\s*"
+        r"(?:容差|tolerance)\s*(?:不超过|小于|<=|≤|约为|为|=)?\s*"
+        r"([0-9]+(?:\.[0-9]+)?)\s*%?"
+    )
+    model_tolerance_matches = re.findall(model_tolerance_pattern, text, re.I)
+    model_tolerance_percent = float(model_tolerance_matches[0]) if model_tolerance_matches else None
+    if model_tolerance_percent is not None and not 0 < model_tolerance_percent <= 20:
+        raise ValueError("晶体管模型参数容差需为0–20%")
+    # Remove the model-parameter phrase before parsing the generic resistor
+    # tolerance, otherwise “晶体管参数容差 5%” would trigger both scans.
+    tolerance_text = re.sub(model_tolerance_pattern, "", text, flags=re.I)
     tolerance_matches = re.findall(
         r"(?:容差|tolerance)\s*(?:不超过|小于|<=|≤|约为|为|=)?\s*([0-9]+(?:\.[0-9]+)?)\s*%?",
-        text, re.I,
+        tolerance_text, re.I,
     )
     tolerance_percent = float(tolerance_matches[0]) if tolerance_matches else None
     if tolerance_percent is not None and not 0 < tolerance_percent <= 20:
@@ -136,12 +148,13 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         "sine_amplitude_v": sine_amplitude_v if sine_requested else None,
         "thd_limit_percent":thd_limit_percent if sine_requested else None,
         "tolerance_percent": tolerance_percent,
+        "model_tolerance_percent": model_tolerance_percent,
         "proposal":{"title":"2N3904共射放大器", "application":text.strip(), "netlist":net,
                     "probe_nets":["in","out","base","emitter","collector","vcc"],
                     "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 3m" if sine_requested else "tran 10u 2m"}], "checks":checks},
         "assumptions":[f"固定本地2N3904模型、100kΩ负载、{resistor(sine_amplitude_v)}正弦输入、{resistor(sine_frequency_hz)}；增益在请求频率邻域验收。" if sine_requested else "固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
                        "候选搜索仅比较估算值附近最多5个E24发射极电阻，最终以原生实测增益选择。",
                        "偏置公式只是初始估算；实际工作点、增益和波形响应以原生仿真为准。",
-                       "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。" if sine_requested else "容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。"],
+                       "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；容差扫描仅覆盖声明的电阻角落，模型参数扫描仅覆盖受控2N3904参数，未进行温度、功率级、噪声和实物板验证。" if sine_requested else "容差扫描仅覆盖声明的电阻角落，模型参数扫描仅覆盖受控2N3904参数，未进行温度、功率级、噪声和实物板验证。"],
         "status":"unverified-native-proposal",
     }

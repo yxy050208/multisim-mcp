@@ -137,3 +137,13 @@ OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过�
 回归 36 项全部通过，本地 Harness 发布预检通过。日志保留在
 `sample_validation/ce_full_regression_final.log` 与 `sample_validation/ce_mcp_regression.log`。
 不把含历史失败的全量日志描述为一次全绿运行。
+
+## 2N3904 模型参数角落实测
+
+自然语言请求“12V NPN 共射、增益 10、2kHz 正弦输入峰值 10mV、晶体管参数容差 5%”
+现在会生成标称、`Is`、`Vaf`、`Bf` 各自 ±5% 以及全体 ±5% 共 9 个角落。每个角落都
+通过受控 XML 模型覆盖，再由 Multisim 打开、保存并回读模型正文。证据目录为
+`C:\Users\18331\Documents\multisim-evidence\ce_model_corners_sine_20261003`。
+Multisim 14.3 实测 9/9 个角落完成 OP/AC/TRAN、增益、THD 和轨裕量验收；选中
+`RE=560Ω`，最坏增益误差 `4.6619%`，最高 THD `0.02001%`，最小集电极轨裕量
+`5.6118V`。这仍是 2N3904 本地模型的离散参数角落证据，不代表温度、统计分布或实物测量。

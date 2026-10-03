@@ -15,6 +15,9 @@ from .preferred_values import parse_spice_scalar
 from .schematic_builder import parse_netlist, voltage_source_stem
 
 
+_DEFAULT_QNPN_MODEL_PARAMETERS = {"Is": 6.734e-15, "Vaf": 74.03, "Bf": 416.4}
+
+
 def _candidate_proposal(plan: dict[str, Any], resistance: float) -> dict[str, Any]:
     """Copy the bounded proposal and change only the declared RE value."""
     proposal = dict(plan['proposal'])
@@ -65,6 +68,25 @@ def _tolerance_corners(proposal: dict[str, Any], tolerance_percent: float) -> li
     corners.extend([
         {"id": "all-minus", "values": {ref: value * (1.0 - fraction) for ref, value in nominal.items()}},
         {"id": "all-plus", "values": {ref: value * (1.0 + fraction) for ref, value in nominal.items()}},
+    ])
+    return corners
+
+
+def _model_parameter_corners(tolerance_percent: float) -> list[dict[str, Any]]:
+    """Return deterministic corners for the certified 2N3904 model fields."""
+    if not isinstance(tolerance_percent, (int, float)) or not math.isfinite(tolerance_percent) or not 0 < tolerance_percent <= 20:
+        raise ValueError("model parameter tolerance must be between 0 and 20 percent")
+    fraction = float(tolerance_percent) / 100.0
+    nominal = dict(_DEFAULT_QNPN_MODEL_PARAMETERS)
+    corners: list[dict[str, Any]] = [{"id": "nominal", "values": nominal}]
+    for name, value in nominal.items():
+        for suffix, scale in (("minus", 1.0 - fraction), ("plus", 1.0 + fraction)):
+            values = dict(nominal)
+            values[name] = value * scale
+            corners.append({"id": f"{name.lower()}-{suffix}", "values": values})
+    corners.extend([
+        {"id": "all-minus", "values": {name: value * (1.0 - fraction) for name, value in nominal.items()}},
+        {"id": "all-plus", "values": {name: value * (1.0 + fraction) for name, value in nominal.items()}},
     ])
     return corners
 
@@ -543,6 +565,76 @@ def _run_tolerance_scan(root: Path, plan: dict[str, Any], selected: dict[str, An
     return result
 
 
+def _run_model_parameter_scan(root: Path, plan: dict[str, Any], selected: dict[str, Any]) -> dict[str, Any]:
+    """Run native 2N3904 model-parameter corners for the selected candidate."""
+    tolerance = plan.get("model_tolerance_percent")
+    if tolerance is None:
+        return {"status": "unverified", "reason": "transistor model parameter tolerance was not requested"}
+    base = _candidate_proposal(plan, float(selected["resistance_ohm"]))
+    scan_root = root / "model-parameter-scan"
+    scan_root.mkdir(parents=True, exist_ok=False)
+    points = []
+    target_gain = float(plan["derived"]["target_gain"])
+    for index, corner in enumerate(_model_parameter_corners(float(tolerance)), 1):
+        point_dir = scan_root / f"corner-{index:03d}-{corner['id']}"
+        try:
+            native = run_generated_analog_project(
+                base, str(point_dir), execute=True,
+                native_model_parameters=corner["values"],
+            )
+            measured_gain, target_error = _measured_gain(native, target_gain)
+            distortion = _distortion_acceptance(point_dir, plan)
+            operating_margin = _operating_margin_acceptance(point_dir, plan, native)
+            simulation_complete = bool((native.get("native_execution") or {}).get("simulation_completed"))
+            gain_passed = target_error is not None and target_error <= 0.10
+            distortion_passed = plan.get("waveform") != "sine" or distortion.get("status") == "passed-thd"
+            margin_passed = operating_margin.get("status") == "passed-operating-margin"
+            passed = simulation_complete and gain_passed and distortion_passed and margin_passed and native.get("success") is True
+            point = {
+                "id": corner["id"],
+                "values": corner["values"],
+                "directory": point_dir.relative_to(root).as_posix(),
+                "success": passed,
+                "simulation_completed": simulation_complete,
+                "measured_gain": measured_gain,
+                "target_error_fraction": target_error,
+                "gain_passed": gain_passed,
+                "distortion": distortion,
+                "operating_margin": operating_margin,
+                "native_model_parameters": native.get("native_model_parameters"),
+                "native_verification_status": native.get("verification_status"),
+                "report": native.get("report"),
+            }
+        except Exception as exc:
+            point = {
+                "id": corner["id"],
+                "values": corner["values"],
+                "directory": point_dir.relative_to(root).as_posix(),
+                "success": False,
+                "simulation_completed": False,
+                "gain_passed": False,
+                "distortion": {"status": "unverified", "reason": "native model-parameter run failed"},
+                "operating_margin": {"status": "unverified", "reason": "native model-parameter run failed"},
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+            }
+        points.append(point)
+    passed = [point for point in points if point["success"]]
+    errors = [point["target_error_fraction"] for point in points if point.get("target_error_fraction") is not None]
+    result: dict[str, Any] = {
+        "status": "passed-model-parameter-scan" if len(passed) == len(points) else "target-not-met",
+        "criterion": f"2N3904 Is/Vaf/Bf corners ±{float(tolerance):g}% with native model readback, gain, THD, OP and rail-margin checks",
+        "tolerance_percent": float(tolerance),
+        "parameters": ["Is", "Vaf", "Bf"],
+        "points": points,
+        "point_count": len(points),
+        "passed_count": len(passed),
+        "worst_target_error_fraction": max(errors) if errors else None,
+    }
+    if result["status"] != "passed-model-parameter-scan":
+        result["failed_points"] = [point["id"] for point in points if not point["success"]]
+    return result
+
+
 def verify_ce_presentation(path: Path, plan: dict) -> dict:
     """Inspect the file Multisim actually opened/saved, not a label-only patch."""
     root = parse_native_xml(path).getroot()
@@ -656,6 +748,14 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
                     result['delivery_status'] = 'not-ready'
                 else:
                     result['verification_status'] = 'passed-common-emitter-candidate-search-with-tolerance'
+            if plan.get("model_tolerance_percent") is not None:
+                result['model_parameter_scan'] = _run_model_parameter_scan(root, plan, selected)
+                if result['model_parameter_scan'].get('status') != 'passed-model-parameter-scan':
+                    result['success'] = False
+                    result['verification_status'] = 'target-not-met-model-parameters'
+                    result['delivery_status'] = 'not-ready'
+                else:
+                    result['verification_status'] = 'passed-common-emitter-candidate-search-with-model-parameters'
         else:
             result['error'] = {'type': 'RuntimeError', 'message': 'no common-emitter candidate passed native acceptance'}
             result['delivery_status'] = 'not-ready'
@@ -693,6 +793,12 @@ def run_natural_common_emitter(text: str, output: str, *, execute: bool = False)
         scan_text += (
             f" 元件容差扫描：{tolerance_scan.get('status')}，通过 "
             f"{tolerance_scan.get('passed_count', 0)}/{tolerance_scan.get('point_count', 0)} 个角落。"
+        )
+    model_scan = result.get('model_parameter_scan')
+    if isinstance(model_scan, dict):
+        scan_text += (
+            f" 晶体管模型参数扫描：{model_scan.get('status')}，通过 "
+            f"{model_scan.get('passed_count', 0)}/{model_scan.get('point_count', 0)} 个角落。"
         )
     (root / 'report.html').write_text(
         '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>共射放大器候选搜索</title>'
