@@ -134,7 +134,17 @@ class MultisimBackend:
             supports_batch=True,
             metadata={
                 "adapter_schema_version": 1,
+                # Keep the execution surface explicit. A future NI adapter
+                # can advertise a different API family without changing the
+                # transport-neutral EDA contract.
+                "api_family": "ni-multisim-automation-com",
+                "api_prog_id": "MultisimInterface.MultisimApp",
+                "api_runtime": "isolated-32-bit-com-worker",
+                "api_version_scope": "installed-version-capability-probe",
                 "authoritative_simulation_path": "command-engine",
+                "schematic_generation_path": "template-xml-ms14-codec",
+                "native_component_placement": False,
+                "native_wire_drawing": False,
                 "schematic_maturity": "experimental",
             },
         )

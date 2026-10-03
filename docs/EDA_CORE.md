@@ -75,6 +75,13 @@ ngspice，验证低层仿真及完整双语实验事务。
 `unverified`，不宣称求解器、方言或厂商模型等价。完整说明见
 [`OPEN_EDA_BACKENDS.md`](OPEN_EDA_BACKENDS.md)。
 
+Multisim 后端的能力元数据会明确记录 `ni-multisim-automation-com`、
+`MultisimInterface.MultisimApp`、独立 32 位 COM worker、版本范围探测方式，以及
+`native_component_placement=false`/`native_wire_drawing=false`。官方 Automation API
+负责打开、保存、枚举、报告和仿真；可编辑原理图的元件放置与导线几何仍由模板/XML
+生成器和布局验证器负责。后续若 NI 提供新的官方后端，可以在不改变 `CircuitDesign`、
+验证门禁和报告格式的情况下增加新的 `api_family`。
+
 Multisim Automation 与 `.ms14` 编解码现在全部通过版本化 JSON-RPC 进入独立 32 位
 worker。该进程保留当前连接/电路状态，主进程通过锁串行调用，并转发长仿真的心跳和
 取消；协议错误、RPC 超时或崩溃只终止 worker，下一次调用可重新启动。64 位 Python

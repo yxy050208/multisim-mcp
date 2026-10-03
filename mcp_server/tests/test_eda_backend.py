@@ -32,6 +32,17 @@ class EdaBackendTest(unittest.TestCase):
         self.assertEqual(capabilities.backend_id, "multisim")
         self.assertEqual(capabilities.analyses, ("op", "dc", "ac", "tran"))
         self.assertTrue(capabilities.supports_editable_schematic)
+        self.assertEqual(
+            capabilities.metadata["api_family"], "ni-multisim-automation-com"
+        )
+        self.assertEqual(
+            capabilities.metadata["api_prog_id"], "MultisimInterface.MultisimApp"
+        )
+        self.assertEqual(
+            capabilities.metadata["api_runtime"], "isolated-32-bit-com-worker"
+        )
+        self.assertFalse(capabilities.metadata["native_component_placement"])
+        self.assertFalse(capabilities.metadata["native_wire_drawing"])
         encoded = capabilities.to_dict()
         self.assertEqual(BackendCapabilities.from_dict(encoded).to_dict(), encoded)
 

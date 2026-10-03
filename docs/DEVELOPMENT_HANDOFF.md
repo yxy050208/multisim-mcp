@@ -87,6 +87,14 @@
   高值锚点物化；Multisim 14.3 重开、拓扑、引脚、布局和 COM 瞬态均通过，输出 `digital`
   为 0–5 V，`filt` 具有 0–0.3768 V 的 RC 响应。ADC/DAC 的单比特桥接现均有独立原生
   证据；后续仍需更高位宽 ADC/DAC 和真实器件模型验证。
+- H 源（CCVS）已用闭合控制支路重新验证，排除了此前“理想源控制回路未闭合”造成的
+  假阴性：命令引擎能得到 `raw` 的 0–5 V 和 `filt` 的 RC 响应，但 Multisim 14.3
+  原生工程重开后的 COM 输出仍为全零。其连接表和引脚拓扑正确，但原生行为未通过，
+  因此 H 源继续标记为 `native unsupported/unverified`，不计入 10/10 正式矩阵。有效
+  失败证据保存在本机 `C:\Users\18331\Documents\multisim-evidence\hybrid-ccvs-rc-20261004-v4`。
+- Multisim 后端能力现在显式记录官方 Automation API 的来源、`MultisimInterface.MultisimApp`
+  ProgID、独立 32 位 COM worker、版本探测范围，以及官方接口没有元件放置和导线绘制方法。
+  未来接入新的 NI API 时沿用同一 EDA 后端契约，不改变源网表、拓扑门禁和实验报告格式。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的
