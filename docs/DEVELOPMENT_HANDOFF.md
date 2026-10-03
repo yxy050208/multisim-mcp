@@ -62,11 +62,13 @@
   `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-gated`。
 - 已完成混合信号阶段第一组原生基线：新增 `hybrid_regression` 与
   `tools/run_hybrid_regression.py`，`not_rc_load`、`logic_chain_rc_load`、
-  `counter_q0_rc_load` 和 `shift_s0_rc_load` 四个案例均在 Multisim 14.3 实机通过。
+  `counter_q0_rc_load` 和 `shift_s0_rc_load` 四个案例均在 Multisim 14.3 实机通过，
+  `diode_rc_shaper`（本地授权 `1N4001GP` 模型）也已通过。
   工具先生成带探针的 `.ms14`，再由 Multisim 重开保存副本并直接执行 COM 瞬态；四个工程
-  的原生拓扑、器件完整性、命名引脚连接、数字 0/5 V 摆幅和模拟 RC 动态响应均通过。
+  的原生拓扑、器件完整性、命名引脚连接、数字 0/5 V 摆幅和模拟 RC 动态响应均通过；
+  回归器把完整引脚证据纳入最终通过条件，并为二极管增加 A/K 到源网络的显式契约。
   正式矩阵证据保存在
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v4`；
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v5`；
   这只是数字到模拟边界基线，尚不代表 ADC/DAC、二极管整形、受控源或任意混合信号拓扑
   已覆盖。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、

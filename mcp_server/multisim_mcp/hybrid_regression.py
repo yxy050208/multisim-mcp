@@ -118,6 +118,20 @@ RLOAD filt 0 100k
             ("s0", "filt"),
             ("VDD", "VDATA", "VCLK", "VRESET", "XSR", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "diode_rc_shaper",
+            "1N4001GP diode pulse shaper driving a first-order RC load.",
+            """VDD high 0 DC 5
+VIN raw 0 PULSE(0 5 0 1n 1n 40u 80u)
+D1 raw filt 1N4001GP
+C1 filt 0 1u
+RLOAD filt 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("raw", "filt"),
+            ("VDD", "VIN", "D1", "C1", "RLOAD"),
+        ),
     )
     for case in cases:
         case.validate()

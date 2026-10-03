@@ -6,6 +6,7 @@ from multisim_mcp.topology_validation import (
     compare_pin_connections,
     compare_roundtrip_topology,
     digital_port_net_map,
+    source_port_net_map,
 )
 
 
@@ -150,6 +151,26 @@ dout circuit A1A O1
 
     def test_digital_port_contract_rejects_wrong_arity(self) -> None:
         self.assertEqual(digital_port_net_map("DNOT4", ["in", "out"]), {})
+
+    def test_diode_named_ports_are_checked_against_source_nodes(self) -> None:
+        report = """title
+-----
+header
+-----
+raw circuit D1 A
+filt circuit D1 K
+-----
+"""
+        result = compare_pin_connections(
+            {"D1": ["raw", "filt"]},
+            report,
+            declared_ports={"D1": ["A", "K"]},
+            expected_named_ports={
+                "D1": source_port_net_map("D", ["raw", "filt"])
+            },
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["named_pin_counts"], {"pass": 2, "fail": 0, "unverified": 0})
 
 
 if __name__ == "__main__":

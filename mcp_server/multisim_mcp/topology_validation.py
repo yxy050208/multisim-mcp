@@ -29,14 +29,27 @@ _DIGITAL_PORT_ORDER = {
     "DJK7": ("J", "K", "CLK", "SET", "RESET", "Q", "~Q"),
 }
 
+_SOURCE_PORT_ORDER = {
+    **_DIGITAL_PORT_ORDER,
+    # The native diode model exposes named anode/cathode ports as A/K.
+    "D": ("A", "K"),
+}
 
-def digital_port_net_map(kind: str, nodes: Iterable[str]) -> dict[str, str]:
-    """Return known native digital terminal semantics, never guessed names."""
-    ports = _DIGITAL_PORT_ORDER.get(kind, ())
+
+def source_port_net_map(kind: str, nodes: Iterable[str]) -> dict[str, str]:
+    """Return a verified source-terminal to net mapping for native models."""
+    ports = _SOURCE_PORT_ORDER.get(kind, ())
     values = list(nodes)
     if not ports or len(values) != len(ports):
         return {}
     return dict(zip(ports, values))
+
+
+def digital_port_net_map(kind: str, nodes: Iterable[str]) -> dict[str, str]:
+    """Return known native digital terminal semantics, never guessed names."""
+    if kind not in _DIGITAL_PORT_ORDER:
+        return {}
+    return source_port_net_map(kind, nodes)
 
 
 def _net_key(value: str) -> str:
@@ -292,4 +305,9 @@ def compare_pin_connections(
     }
 
 
-__all__ = ["compare_pin_connections", "compare_roundtrip_topology", "digital_port_net_map"]
+__all__ = [
+    "compare_pin_connections",
+    "compare_roundtrip_topology",
+    "digital_port_net_map",
+    "source_port_net_map",
+]

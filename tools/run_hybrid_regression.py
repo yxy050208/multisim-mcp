@@ -138,6 +138,7 @@ def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
         "topology_pass": topology.get("status") == "pass",
         "native_components_complete": schematic.get("verification", {}).get("native_netlist_complete") is True
         and native.get("simulation_completed") is True,
+        "pin_evidence_complete": pin_evidence.get("fully_verified") is True,
         "native_simulation_success": native.get("success") is True,
         "required_outputs_observed": not observed["missing_outputs"],
         "digital_swing": observed["checks"]["digital_swing"],

@@ -181,7 +181,11 @@ from multisim_mcp.schematic_builder import (
     template_status,
     template_search_paths,
 )
-from multisim_mcp.topology_validation import compare_pin_connections, compare_roundtrip_topology, digital_port_net_map
+from multisim_mcp.topology_validation import (
+    compare_pin_connections,
+    compare_roundtrip_topology,
+    source_port_net_map,
+)
 from multisim_mcp.spice_raw import parse_raw, summarize_columns, write_csv
 from multisim_mcp.spice_adapter import circuit_design_from_spice
 from multisim_mcp.spice_provenance import (
@@ -2321,9 +2325,9 @@ def _create_schematic_impl(
             exported,
             declared_ports=declared_ports,
             expected_named_ports={
-                spec.refdes: digital_port_net_map(spec.kind, spec.nodes)
+                spec.refdes: source_port_net_map(spec.kind, spec.nodes)
                 for spec in expected_specs
-                if digital_port_net_map(spec.kind, spec.nodes)
+                if source_port_net_map(spec.kind, spec.nodes)
             },
             native_port_nets=native_port_nets,
         )
