@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 import sys
@@ -16,7 +17,11 @@ from multisim_mcp.hybrid_regression import (  # noqa: E402
     HybridRegressionCase,
     select_hybrid_regression_cases,
 )
-from multisim_mcp.server import client, run_circuit_experiment  # noqa: E402
+from multisim_mcp.native_project_run import run_native_project  # noqa: E402
+from multisim_mcp.server import (  # noqa: E402
+    _create_schematic_impl,
+    client,
+)
 from tools.run_digital_regression import (  # noqa: E402
     _build_compatibility_evidence,
     _pin_evidence_summary,
@@ -40,33 +45,103 @@ def _observed_outputs(case: HybridRegressionCase, result: dict[str, Any]) -> dic
     }
 
 
+def _native_observation(
+    case: HybridRegressionCase,
+    native_root: Path,
+    probe_outputs: list[str],
+) -> dict[str, Any]:
+    """Read voltages produced by the saved/reopened native .ms14 project."""
+    data_path = native_root / "analysis-001" / "data.csv"
+    if not data_path.is_file():
+        return {
+            "required_outputs": list(case.output_nets),
+            "observed_outputs": [],
+            "missing_outputs": list(case.output_nets),
+            "evidence": "native project CSV missing",
+            "checks": {"digital_swing": False, "analog_response": False},
+        }
+    with data_path.open(encoding="utf-8", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    observed: list[str] = []
+    series: dict[str, list[float]] = {}
+    for net, signal in zip(case.output_nets, probe_outputs):
+        column = f"{signal}.value"
+        try:
+            values = [float(row[column]) for row in rows]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if values:
+            observed.append(net)
+            series[net] = values
+    digital = series.get(case.output_nets[0], [])
+    analog = series.get(case.output_nets[1], []) if len(case.output_nets) > 1 else []
+    digital_swing = bool(digital) and min(digital) <= 0.1 and max(digital) >= 4.9
+    analog_response = bool(analog) and max(analog) - min(analog) >= 0.1
+    return {
+        "required_outputs": list(case.output_nets),
+        "observed_outputs": sorted(observed),
+        "missing_outputs": sorted(set(case.output_nets) - set(observed)),
+        "evidence": "saved native .ms14 reopened by Multisim; native COM transient CSV",
+        "sample_count": len(rows),
+        "signal_columns": {net: f"{signal}.value" for net, signal in zip(case.output_nets, probe_outputs)},
+        "ranges": {
+            net: {"min": min(values), "max": max(values)}
+            for net, values in series.items()
+        },
+        "checks": {"digital_swing": digital_swing, "analog_response": analog_response},
+    }
 def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
     output_dir = root / case.case_id
     output_dir.mkdir(parents=True, exist_ok=False)
-    result = run_circuit_experiment(
+    schematic = _create_schematic_impl(
         case.netlist,
-        case.commands,
-        str(output_dir),
-        title=f"Hybrid regression: {case.case_id}",
-        max_points=case.max_points,
-        overwrite=True,
+        str(output_dir / "circuit.ms14"),
+        probe_nets=list(case.output_nets),
+        include_experimental_probes=True,
+        open_after_build=True,
+        image_path=str(output_dir / "schematic.png"),
+        overwrite=False,
+        require_layout_pass=True,
     )
-    schematic = result.get("schematic", {})
-    simulation = result.get("simulation", {})
-    layout = schematic.get("layout_validation", {}) if isinstance(schematic, dict) else {}
-    topology = schematic.get("topology_diff", {}) if isinstance(schematic, dict) else {}
-    observed = _observed_outputs(case, result)
+    layout = schematic.get("layout_validation", {})
+    topology = schematic.get("topology_diff", {})
+    probes = schematic.get("build", {}).get("probes", [])
+    probe_outputs = [str(item.get("voltage_output")) for item in probes if item.get("voltage_output")]
+    request = {
+        "schema_version": 1,
+        "title": f"Hybrid regression: {case.case_id}",
+        "application": "native mixed-signal regression",
+        "boards": [{"id": "main", "role": "primary"}],
+        "components": [],
+        "constraints": [],
+        "objectives": [],
+        "experiments": [{
+            "type": "tran",
+            "commands": case.commands,
+            "outputs": probe_outputs,
+            "max_points": case.max_points,
+        }],
+    }
+    native = run_native_project(
+        request,
+        str(output_dir / "circuit.ms14"),
+        str(output_dir / "native"),
+        execute=True,
+        client=client,
+    )
+    observed = _native_observation(case, output_dir / "native", probe_outputs)
     pin_evidence = _pin_evidence_summary(topology)
     checks = {
-        "pipeline_success": result.get("success") is True,
+        "pipeline_success": schematic.get("success") is True and native.get("success") is True,
         "layout_pass": layout.get("status") == "pass"
         and float(layout.get("crossings_per_wire", 0)) <= case.max_crossings_per_wire,
         "topology_pass": topology.get("status") == "pass",
         "native_components_complete": schematic.get("verification", {}).get("native_netlist_complete") is True
-        if isinstance(schematic, dict)
-        else False,
-        "simulation_success": simulation.get("success") is True if isinstance(simulation, dict) else False,
+        and native.get("simulation_completed") is True,
+        "native_simulation_success": native.get("success") is True,
         "required_outputs_observed": not observed["missing_outputs"],
+        "digital_swing": observed["checks"]["digital_swing"],
+        "analog_response": observed["checks"]["analog_response"],
     }
     return {
         "case_id": case.case_id,
@@ -75,10 +150,11 @@ def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
         "layout": layout,
         "topology": topology,
         "hybrid_observation": observed,
+        "native_execution": native,
         "pin_evidence": pin_evidence,
         "output_dir": str(output_dir),
-        "report": result.get("report"),
-        "experiment_id": result.get("experiment_id"),
+        "report": native.get("report"),
+        "experiment_id": native.get("experiment_id"),
     }
 
 
