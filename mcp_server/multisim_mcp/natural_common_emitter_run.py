@@ -75,10 +75,11 @@ def _sine_amplitude_proposal(proposal: dict[str, Any], amplitude: float) -> dict
         raise ValueError("sine amplitude must be a positive finite number")
     updated = dict(proposal)
     source = proposal.get("netlist", "")
-    replacement = f"SIN(0 {format_resistance(amplitude)} 1k)"
-    pattern = r"(?i)SIN\s*\(\s*0\s+\S+\s+1k\s*\)"
-    if re.search(pattern, source) is None:
-        raise ValueError("sine proposal has no 1 kHz SIN source")
+    pattern = r"(?i)SIN\s*\(\s*0\s+\S+\s+(\S+)\s*\)"
+    match = re.search(pattern, source)
+    if match is None:
+        raise ValueError("sine proposal has no SIN source")
+    replacement = f"SIN(0 {format_resistance(amplitude)} {match.group(1)})"
     netlist = re.sub(pattern, replacement, source, count=1)
     updated["netlist"] = netlist
     checks = []
@@ -218,7 +219,7 @@ def _distortion_acceptance(candidate_dir: Path, plan: dict[str, Any]) -> dict[st
     if len(rows) < 16:
         return {"status": "unverified", "reason": "steady-state sine window has fewer than 16 samples", "samples": len(rows)}
     rows.sort()
-    frequency = 1000.0
+    frequency = float(plan.get("sine_frequency_hz") or 1000.0)
     mean = sum(value for _, value in rows) / len(rows)
     amplitudes = []
     start = rows[0][0]
@@ -548,10 +549,12 @@ def verify_ce_presentation(path: Path, plan: dict) -> dict:
     components = {c.get('LocalName', '').removeprefix('&ASC'): c for c in root.iter('CiComponent')}
     checks = {}
     vin_sine = plan.get("waveform") == "sine"
+    sine_amplitude = float(plan.get("sine_amplitude_v") or .001)
+    sine_frequency = float(plan.get("sine_frequency_hz") or 1000.0)
     for ref, identity, parameters in (
         ('VCC', 'DC_POWER', {1: plan['derived']['supply_v']}),
         ('VIN', 'AC_VOLTAGE' if vin_sine else 'PULSE_VOLTAGE',
-         ({1: .001, 3: 0., 5: 1000., 13: 1., 15: 0.} if vin_sine else
+         ({1: sine_amplitude, 3: 0., 5: sine_frequency, 13: 1., 15: 0.} if vin_sine else
           {1: 0., 3: .001, 5: .001, 7: .000001, 9: .000001, 11: .001, 13: .002})),
     ):
         component = components.get(ref)

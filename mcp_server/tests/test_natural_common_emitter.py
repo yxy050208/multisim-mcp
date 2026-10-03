@@ -41,6 +41,18 @@ class CommonEmitterTest(unittest.TestCase):
         self.assertIn("SIN(0 1m 1k)", plan["proposal"]["netlist"])
         self.assertEqual(plan["proposal"]["experiments"][-1]["commands"], "tran 10u 3m")
 
+    def test_sine_frequency_and_amplitude_are_carried_into_native_source(self):
+        plan = parse_natural_common_emitter(
+            "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入频率2kHz，输入峰值10mV"
+        )
+        self.assertEqual(plan["sine_frequency_hz"], 2000.0)
+        self.assertEqual(plan["sine_amplitude_v"], 0.01)
+        self.assertIn("SIN(0 10m 2k)", plan["proposal"]["netlist"])
+        proposal = _sine_amplitude_proposal(plan["proposal"], 0.02)
+        self.assertIn("SIN(0 20m 2k)", proposal["netlist"])
+        ac_checks = [item for item in plan["proposal"]["checks"] if item["analysis"] == "ac"]
+        self.assertTrue(all(item["frequency_min_hz"] < 2000.0 < item["frequency_max_hz"] for item in ac_checks))
+
     def test_tolerance_request_is_bounded_and_generates_resistor_corners(self):
         plan = parse_natural_common_emitter(
             "设计一个12V单电源、增益10倍的NPN共射放大器，正弦输入，元件容差5%"

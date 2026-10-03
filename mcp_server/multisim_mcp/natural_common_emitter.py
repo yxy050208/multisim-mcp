@@ -20,6 +20,14 @@ def _candidate_resistors(value: float, *, limit: int = 5) -> list[float]:
     return sorted(preferred[:limit])
 
 
+def _engineering_number(value: str, suffix: str | None) -> float:
+    scales = {"": 1.0, "k": 1e3, "m": 1e-3, "u": 1e-6, "n": 1e-9}
+    normalized = (suffix or "").lower()
+    if normalized not in scales:
+        raise ValueError(f"不支持的工程单位: {suffix}")
+    return float(value) * scales[normalized]
+
+
 def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip() or len(text) > 3000:
         raise ValueError("请输入有效的共射放大器需求")
@@ -61,7 +69,32 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     tolerance_percent = float(tolerance_matches[0]) if tolerance_matches else None
     if tolerance_percent is not None and not 0 < tolerance_percent <= 20:
         raise ValueError("元件容差需为0–20%")
-    input_source = "VIN in 0 DC 0 AC 1 SIN(0 1m 1k)" if sine_requested else "VIN in 0 DC 0 AC 1 PULSE(0 1m 1m 1u 1u 1m 2m)"
+    frequency_matches = re.findall(
+        r"(?:频率|frequency)\s*(?:为|=|约为|约)?\s*([0-9]+(?:\.[0-9]+)?)\s*([kmun]?)\s*Hz",
+        text, re.I,
+    )
+    sine_frequency_hz = _engineering_number(*frequency_matches[0]) if frequency_matches else 1000.0
+    if not 1 <= sine_frequency_hz <= 1e6:
+        raise ValueError("正弦频率需在1Hz–1MHz范围内")
+    amplitude_matches = re.findall(
+        r"(?:输入(?:峰值|幅值)?|振幅|amplitude)\s*(?:为|=|约为|约)?\s*([0-9]+(?:\.[0-9]+)?)\s*([munk]?)\s*V"
+        r"|([0-9]+(?:\.[0-9]+)?)\s*([munk]?)\s*V\s*(?:输入(?:峰值|幅值)?|振幅)",
+        text, re.I,
+    )
+    if amplitude_matches:
+        match = amplitude_matches[0]
+        amplitude_value, amplitude_suffix = (match[0], match[1]) if match[0] else (match[2], match[3])
+        sine_amplitude_v = _engineering_number(amplitude_value, amplitude_suffix)
+    else:
+        sine_amplitude_v = 1e-3
+    if not 1e-6 <= sine_amplitude_v <= 1:
+        raise ValueError("正弦输入峰值需在1uV–1V范围内")
+    gain_frequency_min = sine_frequency_hz / 1.1 if sine_requested else 1000.0
+    gain_frequency_max = sine_frequency_hz * 1.1 if sine_requested else 1000.0
+    input_source = (
+        f"VIN in 0 DC 0 AC 1 SIN(0 {resistor(sine_amplitude_v)} {resistor(sine_frequency_hz)})"
+        if sine_requested else "VIN in 0 DC 0 AC 1 PULSE(0 1m 1m 1u 1u 1m 2m)"
+    )
     net = (
         f"VCC vcc 0 DC {voltage:g}\n"
         f"{input_source}\n"
@@ -75,16 +108,16 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         {"analysis":"op", "net":"collector", "quantity":"value", "min":voltage*.35, "max":voltage*.7},
         {"analysis":"op", "net":"base", "subtract_net":"emitter", "quantity":"value", "min":.5, "max":.85},
         {"analysis":"op", "net":"collector", "subtract_net":"base", "quantity":"value", "min":.3, "max":voltage},
-        {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"magnitude", "min":gain*.9, "max":gain*1.1, "frequency_min_hz":1000, "frequency_max_hz":1000},
-        {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"phase_deg", "min":-180, "max":-150, "frequency_min_hz":1000, "frequency_max_hz":1000},
+        {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"magnitude", "min":gain*.9, "max":gain*1.1, "frequency_min_hz":gain_frequency_min, "frequency_max_hz":gain_frequency_max},
+        {"analysis":"ac", "net":"out", "reference_net":"in", "quantity":"phase_deg", "min":-180, "max":-150, "frequency_min_hz":gain_frequency_min, "frequency_max_hz":gain_frequency_max},
         {"analysis":"tran", "net":"in", "quantity":"value",
-         "min":-.0011 if sine_requested else .00099,
-         "max":.0011 if sine_requested else .00101,
+         "min":-sine_amplitude_v*1.1 if sine_requested else .00099,
+         "max":sine_amplitude_v*1.1 if sine_requested else .00101,
          "time_min_s":.001 if sine_requested else .0011,
          "time_max_s":.002 if sine_requested else .0012},
         {"analysis":"tran", "net":"out", "quantity":"value",
-         "min":-.002*gain if sine_requested else -.001*gain*1.2,
-         "max":.002*gain if sine_requested else -.001*gain*.8,
+         "min":-2*sine_amplitude_v*gain if sine_requested else -.001*gain*1.2,
+         "max":2*sine_amplitude_v*gain if sine_requested else -.001*gain*.8,
          "time_min_s":.001 if sine_requested else .0011,
          "time_max_s":.002 if sine_requested else .0012},
     ]
@@ -97,12 +130,14 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         "structural_acceptance":validate_common_emitter_netlist(net),
         "bias_estimate":estimate_common_emitter_bias(net, voltage),
         "waveform":"sine" if sine_requested else "pulse",
+        "sine_frequency_hz": sine_frequency_hz if sine_requested else None,
+        "sine_amplitude_v": sine_amplitude_v if sine_requested else None,
         "thd_limit_percent":thd_limit_percent if sine_requested else None,
         "tolerance_percent": tolerance_percent,
         "proposal":{"title":"2N3904共射放大器", "application":text.strip(), "netlist":net,
                     "probe_nets":["in","out","base","emitter","collector","vcc"],
                     "experiments":[{"type":"op"},{"type":"ac","commands":"ac dec 40 10 100k"},{"type":"tran","commands":"tran 10u 3m" if sine_requested else "tran 10u 2m"}], "checks":checks},
-        "assumptions":["固定本地2N3904模型、100kΩ负载、1mV正弦输入；增益在1kHz验收。" if sine_requested else "固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
+        "assumptions":[f"固定本地2N3904模型、100kΩ负载、{resistor(sine_amplitude_v)}正弦输入、{resistor(sine_frequency_hz)}；增益在请求频率邻域验收。" if sine_requested else "固定本地2N3904模型、100kΩ负载、1mV脉冲输入；增益在1kHz验收。",
                        "候选搜索仅比较估算值附近最多5个E24发射极电阻，最终以原生实测增益选择。",
                        "偏置公式只是初始估算；实际工作点、增益和波形响应以原生仿真为准。",
                        "正弦模式的THD仅在原生稳态窗口和声明谐波数内验收；容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。" if sine_requested else "容差扫描仅覆盖声明的电阻角落，未进行温度、功率级、噪声和实物板验证。"],
