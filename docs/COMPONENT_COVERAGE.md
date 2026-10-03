@@ -16,7 +16,7 @@ instruments. The project therefore defines coverage by capability tier.
 | DC current source | `I...` | Verified | DC value mapped |
 | Waveform sources | `V... SIN/PULSE/...`, `I...` | Verified | Source specification retained |
 | VCVS/VCCS | `E...` / `G...` | Verified experimental carrier | Linear gain mapped |
-| CCCS/CCVS | `F...` / `H...` | Verified experimental carrier | Control source and linear gain mapped |
+| CCCS/CCVS | `F...` / `H...` | Open/export carrier verified; native behavior pending | Control source and linear gain mapped; H output is unverified after reopen |
 | Diode | `D...` | Verified | Native 1N4001 family |
 | NPN/PNP BJT | `Q...` | Verified | Native 2N3904/2N3906 families |
 | Four-terminal NMOS/PMOS | `M...` | Verified | Explicit `.model` and instance parameters embedded; native-alias parameters pending |
@@ -64,9 +64,12 @@ subcircuit fallback, followed by high-value Multisim database families. Mirrorin
 every database SKU in the repository would be brittle and may violate NI/vendor
 redistribution terms; templates must remain provenance-tracked.
 
-The four controlled-source types pass native open/export regression. Their
-electrical behavior is standard E/F/G/H SPICE, but the generated editor symbols
-are temporary carrier shapes rather than the final controlled-source diamonds.
+The four controlled-source types pass native open/export regression. E/G also pass
+the current native behavior gate. F/H retain standard E/F/G/H SPICE semantics in
+the command engine, but H currently produces an all-zero native COM output after
+the saved schematic is reopened, even with a closed control branch; it therefore
+remains outside the passing mixed-signal matrix. The generated editor symbols are
+temporary carrier shapes rather than the final controlled-source diamonds.
 
 ## Next families
 
