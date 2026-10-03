@@ -25,6 +25,8 @@ class HybridRegressionTest(unittest.TestCase):
                 "vccs_rc_bridge",
                 "dac_rc_bridge",
                 "adc_rc_bridge",
+                "adc4_rc_bridge",
+                "dac4_rc_bridge",
             ],
         )
         self.assertEqual(cases[0].manifest()["output_nets"], ["dout", "filt"])

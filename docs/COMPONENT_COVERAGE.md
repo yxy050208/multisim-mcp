@@ -39,7 +39,7 @@ instruments. The project therefore defines coverage by capability tier.
 | Power diode / NMOS / PMOS | `X... @POWER_*` | Portable derived topology, 14.3 open/export verified | Diode/NMOS OP regression; select parameters for the real part |
 | D/T flip-flop, four-bit counter/register | `X... @DFF/@TFF/@COUNTER4/@SHIFT_REGISTER4` | Portable digital topology, 14.3 open/export verified | Synthesized from NOT/JK; DFF transient regression; 5 V bridge |
 | One-bit ADC/DAC bridge | `X... @ADC1/@DAC1` | Portable mixed-signal topology | Thresholded behavioral model |
-| Four-bit ADC/DAC bridge | `X... @ADC4/@DAC4` | Portable model, native verification pending | Four-bit thresholded/binary-weighted behavioral model |
+| Four-bit ADC/DAC bridge | `X... @ADC4/@DAC4` | Portable model, Multisim 14.3 bridge verified | Four-bit thresholded/binary-weighted behavioral model; higher-resolution device fidelity pending |
 | Multimeter / Bode / logic analyzer | completed experiment data | Data-backed instrument | Structured values/edges; missing Bode phase stays unavailable |
 | Ground/named nets | `0`, node names | Verified | Complete |
 

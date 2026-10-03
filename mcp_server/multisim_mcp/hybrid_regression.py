@@ -209,6 +209,69 @@ RLOAD filt 0 100k
             ("digital", "filt"),
             ("VDD", "VAN", "XADC", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "adc4_rc_bridge",
+            "Four-bit ADC behavioral bridge with independent RC loads on all output bits.",
+            """VDD high 0 DC 5
+VAN analog 0 PULSE(0 5 0 1n 1n 40u 80u)
+XADC analog d0 d1 d2 d3 high 0 @ADC4
+R3 d3 f3 1k
+C3 f3 0 1u
+RL3 f3 0 100k
+R2 d2 f2 1k
+C2 f2 0 1u
+RL2 f2 0 100k
+R1 d1 f1 1k
+C1 f1 0 1u
+RL1 f1 0 100k
+R0 d0 f0 1k
+C0 f0 0 1u
+RL0 f0 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("d3", "f3", "d2", "f2", "d1", "f1", "d0", "f0"),
+            (
+                "VDD", "VAN", "XADC", "R3", "C3", "RL3", "R2", "C2",
+                "RL2", "R1", "C1", "RL1", "R0", "C0", "RL0",
+            ),
+        ),
+        HybridRegressionCase(
+            "dac4_rc_bridge",
+            "Four-bit DAC behavioral bridge with binary-weighted native output.",
+            """VDD high 0 DC 5
+V3 d3 0 PULSE(0 5 0 1n 1n 80u 160u)
+V2 d2 0 PULSE(0 5 0 1n 1n 40u 80u)
+V1 d1 0 PULSE(0 5 0 1n 1n 20u 40u)
+V0 d0 0 PULSE(0 5 0 1n 1n 10u 20u)
+XDAC d0 d1 d2 d3 analog_out high 0 @DAC4
+R3 d3 f3 1k
+C3 f3 0 1u
+RL3 f3 0 100k
+R2 d2 f2 1k
+C2 f2 0 1u
+RL2 f2 0 100k
+R1 d1 f1 1k
+C1 f1 0 1u
+RL1 f1 0 100k
+R0 d0 f0 1k
+C0 f0 0 1u
+RL0 f0 0 100k
+RO analog_out filt 1k
+CO filt 0 1u
+RLO filt 0 100k
+.end
+""",
+            "tran 1u 160u",
+            # Repeating analog_out pairs let the generic hybrid gate check
+            # every bit's 0/5-V transition against the same DAC output.
+            ("d3", "analog_out", "d2", "analog_out", "d1", "analog_out", "d0", "analog_out"),
+            (
+                "VDD", "V3", "V2", "V1", "V0", "XDAC", "R3", "C3", "RL3",
+                "R2", "C2", "RL2", "R1", "C1", "RL1", "R0", "C0", "RL0",
+                "RO", "CO", "RLO",
+            ),
+        ),
     )
     for case in cases:
         case.validate()
