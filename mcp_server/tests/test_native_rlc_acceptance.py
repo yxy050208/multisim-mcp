@@ -31,6 +31,27 @@ class NativeRlcAcceptanceTest(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(result["stale_template_labels"], [])
 
+    def test_requires_requested_roundtrip_frequency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.xml"
+            path.write_text(
+                '<root><CIITSymTextCompValue Output="&amp;ASCDC 0 AC 1 SIN(0 2 1000)V " /></root>',
+                encoding="utf-8",
+            )
+            self.assertTrue(validate_rlc_presentation(path, expected_frequency_hz=1000)["ok"])
+            self.assertFalse(validate_rlc_presentation(path, expected_frequency_hz=5000)["ok"])
+
+    def test_accepts_multisim_rendered_sine_label_after_reopen(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reopened.xml"
+            path.write_text(
+                '<root><CIITSymTextCompValue Output="&amp;UNI2Vpk  1000Hz  0_uc100b0 " /></root>',
+                encoding="utf-8",
+            )
+            result = validate_rlc_presentation(path, expected_frequency_hz=1000)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["sin_frequencies_hz"], [1000.0])
+
     def test_evaluates_aligned_native_frequency_matrix(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / "analysis-002"

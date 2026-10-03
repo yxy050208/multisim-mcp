@@ -10,6 +10,7 @@ class NaturalRlcTest(unittest.TestCase):
         self.assertEqual(result["derived"]["input_amplitude_v"], 2.0)
         self.assertIn("L1", result["netlist"])
         self.assertIn("C1", result["netlist"])
+        self.assertIn("DC 0 AC 1 SIN(0 2 1000)", result["netlist"])
         self.assertTrue(result["automatic_selection"])
         # The damping-aware search must include the low-R region needed to
         # place the measured pass-band peak near 1 kHz.  The former impedance

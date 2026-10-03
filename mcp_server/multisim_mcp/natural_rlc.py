@@ -102,7 +102,11 @@ def parse_natural_rlc_request(text: str) -> dict[str, Any]:
     candidates = sorted(set([resistance] + (nearby if automatic else [])))
     explicit = {k: v for k, v in {"resistance_ohm": _quantity(text, r"(?:resistance|电阻|(?<![A-Za-z])R1?)", "ohm"), "inductance_h": _quantity(text, r"(?:inductance|电感|(?<![A-Za-z])L1?)", "h"), "capacitance_f": _quantity(text, r"(?:capacitance|电容|(?<![A-Za-z])C1?)", "f"), "target_frequency_hz": target}.items() if v is not None}
     assumptions = ["采用理想无负载 RLC 二阶低通；输出取电容节点，不覆盖容差、负载和 PCB 规则。", "该阶段只生成合同和网表；原生 RLC 验收尚未启用。"]
-    netlist = (f"* RLC second-order low-pass\nV1 in 0 DC {amplitude:g} AC 1\n"
+    # Keep a concrete sine frequency in the native source carrier.  The AC
+    # sweep still supplies the authoritative small-signal response, but an
+    # explicit SIN clause prevents Multisim from restoring the carrier's
+    # unrelated 5 kHz example value when the .ms14 is reopened.
+    netlist = (f"* RLC second-order low-pass\nV1 in 0 DC 0 AC 1 SIN(0 {amplitude:g} {target:g})\n"
                f"R1 in n1 {_fmt(resistance)}\nL1 n1 out {_fmt(inductance)}\nC1 out 0 {_fmt(capacitance)}\n.end\n")
     request = {"schema_version": 1, "title": "自然语言生成 RLC 二阶低通工程", "application": text.strip(),
                "constraints": [{"text": item} for item in assumptions], "boards": [{"id": "main", "role": "primary"}],

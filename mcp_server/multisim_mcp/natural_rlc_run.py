@@ -47,10 +47,13 @@ def run_natural_rlc_engineering(text: str, output: str, *, execute: bool = False
         _write(root / "build.json", build)
         if build["unsupported"] or build["layout_validation"]["status"] != "pass" or len(build["probes"]) != 2:
             raise RuntimeError("generated RLC schematic failed layout/probe preflight")
-        presentation = validate_rlc_presentation(root / "source.xml")
-        result["presentation_acceptance"] = presentation
-        _write(root / "presentation-acceptance.json", presentation)
-        if not presentation["ok"]:
+        target_frequency = proposal["derived"]["target_frequency_hz"]
+        source_presentation = validate_rlc_presentation(
+            root / "source.xml", expected_frequency_hz=target_frequency
+        )
+        result["presentation_acceptance"] = {"source_xml": source_presentation}
+        _write(root / "presentation-acceptance.json", result["presentation_acceptance"])
+        if not source_presentation["ok"]:
             raise RuntimeError("generated RLC schematic retained a stale source example label")
         Ms14Codec().encode(str(root / "source.xml"), str(root / "source.ms14"))
         d = proposal["derived"]
@@ -63,6 +66,22 @@ def run_natural_rlc_engineering(text: str, output: str, *, execute: bool = False
                                            parameters={"R1": resistance}, execute=True)
             if not execution["success"] or not execution["simulation_completed"]:
                 raise RuntimeError(f"{name}: native execution failed: {execution.get('error')}")
+            # Multisim can rebuild a carrier's visible labels while encoding or
+            # reopening the .ms14. Validate the actual round-trip artifact,
+            # rather than trusting the pre-encode XML alone.
+            from .multisim_client import Ms14Codec
+            roundtrip_xml = root / name / "analysis-002.ms14.xml"
+            Ms14Codec().decode(
+                str(root / name / "analysis-002.ms14"), str(roundtrip_xml)
+            )
+            roundtrip_presentation = validate_rlc_presentation(
+                roundtrip_xml, expected_frequency_hz=target_frequency
+            )
+            result["presentation_acceptance"][name] = roundtrip_presentation
+            _write(root / name / "presentation-acceptance.json", roundtrip_presentation)
+            _write(root / "presentation-acceptance.json", result["presentation_acceptance"])
+            if not roundtrip_presentation["ok"]:
+                raise RuntimeError(f"{name}: native round-trip retained a stale source example label")
             topology = validate_native_project_netlist(
                 str(root / name), "analysis-002.ms14",
                 {"R1": {1: "in", 2: "n1"}, "L1": {1: "n1", 2: "out"}})

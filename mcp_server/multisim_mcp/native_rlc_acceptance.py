@@ -13,7 +13,9 @@ VIN = "V(OutProbe)"
 VOUT = "V(OutProbe1)"
 
 
-def validate_rlc_presentation(xml_path: Path) -> dict[str, Any]:
+def validate_rlc_presentation(
+    xml_path: Path, *, expected_frequency_hz: float | None = None
+) -> dict[str, Any]:
     """Reject the generic voltage-source example label in an RLC drawing.
 
     The extracted Multisim voltage carrier contains a harmless but misleading
@@ -26,11 +28,34 @@ def validate_rlc_presentation(xml_path: Path) -> dict[str, Any]:
     root = ET.parse(xml_path).getroot()
     values = [str(item.get("Output", "")) for item in root.iter("CIITSymTextCompValue")]
     stale = [value for value in values if re.search(r"10\s*Vpk|5\s*kHz", value, re.I)]
-    source_labels = [value for value in values if re.search(r"\b(?:DC|AC)\b", value, re.I)]
+    source_labels = [
+        value
+        for value in values
+        if re.search(r"\b(?:DC|AC)\b|Vpk|Hz", value, re.I)
+    ]
+    sin_frequencies: list[float] = []
+    for value in source_labels:
+        match = re.search(r"SIN\(\s*[^()\s]+\s+[^()\s]+\s+([^()\s]+)", value, re.I)
+        if match is None:
+            match = re.search(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*Hz", value, re.I)
+        if match:
+            try:
+                frequency = float(match.group(1))
+            except ValueError:
+                continue
+            if math.isfinite(frequency):
+                sin_frequencies.append(frequency)
+    frequency_matches = expected_frequency_hz is None or any(
+        math.isclose(frequency, expected_frequency_hz, rel_tol=1e-9, abs_tol=1e-9)
+        for frequency in sin_frequencies
+    )
     return {
-        "ok": bool(source_labels) and not stale,
+        "ok": bool(source_labels) and not stale and frequency_matches,
         "source_labels": source_labels,
         "stale_template_labels": stale,
+        "expected_frequency_hz": expected_frequency_hz,
+        "sin_frequencies_hz": sin_frequencies,
+        "frequency_matches": frequency_matches,
         "checked_values": len(values),
     }
 

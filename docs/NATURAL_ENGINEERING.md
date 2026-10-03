@@ -44,7 +44,9 @@ RLC 的 `native_rlc_acceptance.evaluate_rlc` 已加入原生 AC 矩阵验收层�
 
 RLC 执行还会在编解码前检查生成 XML 的电压源标签，拒绝模板自带的 `10Vpk/5kHz`
 示例文字；这样可以避免数值仿真正确但交付原理图仍显示错误激励参数。检查结果保存在
-`presentation-acceptance.json`，并随总验收记录进入 manifest。
+`presentation-acceptance.json`，并随总验收记录进入 manifest。验收还会重新解码每个候选的
+`analysis-002.ms14`，检查 Multisim 保存后的实际标签；当前 14.3 证据中最终图面显示
+`2Vpk / 1000Hz / 0`。
 
 当前回归将候选搜索改为阻尼模型中心，并把原生 AC 扫频加密到每十倍频程 400 点；在
 Multisim 14.3 上对 `L=10mH、C=2.5uF、目标1kHz` 的 5 个 E24 候选全部实测通过，
