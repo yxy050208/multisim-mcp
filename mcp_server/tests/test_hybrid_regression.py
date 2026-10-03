@@ -13,7 +13,8 @@ class HybridRegressionTest(unittest.TestCase):
     def test_matrix_contains_digital_to_analog_bridge(self) -> None:
         cases = hybrid_regression_matrix()
         self.assertEqual(
-            [case.case_id for case in cases], ["not_rc_load", "logic_chain_rc_load"]
+            [case.case_id for case in cases],
+            ["not_rc_load", "logic_chain_rc_load", "counter_q0_rc_load"],
         )
         self.assertEqual(cases[0].manifest()["output_nets"], ["dout", "filt"])
 
