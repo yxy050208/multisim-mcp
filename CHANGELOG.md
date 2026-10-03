@@ -71,6 +71,10 @@
 
 ## [Unreleased]
 
+- 新增原生温度能力探测：`tools/probe_native_temperature.py` 对工程副本执行
+  `.TEMP` 命令、检查 XSPICE 日志、保存并重新打开副本后回读 OP；完成状态不再被误判为
+  温度验证。新增 `native_temperature.py` 的 `unsupported`/`unverified` 结构化结果，
+  并在原生能力探测中公开 `temperature_capability`。
 - 布局验证新增 `crossings_per_wire` 与可配置上限，超过上限会产生
   `excessive-wire-crossings` 错误；数字逻辑新增按低扇出信号链排序的布局 profile，
   负载元件会跟随其驱动器放置。`create_schematic_from_netlist` 新增可选的

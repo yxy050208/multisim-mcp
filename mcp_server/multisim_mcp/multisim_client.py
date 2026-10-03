@@ -28,6 +28,7 @@ pythoncom: Any = _pythoncom
 win32_client: Any = _win32_client
 
 from multisim_mcp import __version__
+from multisim_mcp.native_temperature import temperature_capability
 from multisim_mcp.safety import NPX_DOWNLOAD_ENV, env_flag
 
 
@@ -377,6 +378,9 @@ class MultisimClient:
             "replacement_api": "ReplaceComponent" in circuit_members,
             "analysis_api": all(name in circuit_members for name in ("DoACSweep", "DoDCOperatingPoint")),
             "capabilities": capabilities,
+            "temperature_capability": temperature_capability(
+                native_writer=capabilities["native_temperature_control"],
+            ),
             "blank_circuit_created": bool(create_blank),
         }
 

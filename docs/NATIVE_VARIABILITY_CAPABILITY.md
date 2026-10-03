@@ -30,6 +30,44 @@ Automation API。结果同时保存在终端输出中；探测只读取类型库
 14.3。实现正式角落扫描前，必须继续限制参数白名单、核对组件模型身份、保存前后哈希，
 并为每个角落保留独立工程、CSV、报告和 manifest。
 
+## 温度命令引擎探测（2026-10-03）
+
+对已通过共射验收的 `candidate-001/native/circuit.ms14` 副本执行了以下三组命令：
+
+```text
+.temp 0
+op
+
+.temp 25
+op
+
+.temp 85
+op
+```
+
+Multisim 14.3 的 `DoCommandLine` 均返回空闲状态，但日志明确给出：
+
+```text
+.temp: no such command available in XSPICE
+```
+
+随后每个温度点都用原生 `DoDCOperatingPoint` 重新采样，并把副本保存、重新打开后再采样。
+三个点的 `V(OutProbe2)`、`V(OutProbe3)`、`V(OutProbe4)` 和 `V(OutProbe5)` 分别保持
+`1.1926032038 V`、`0.5230772097 V`、`4.7524019178 V` 和 `12 V`；保存并重开后也没有
+温度状态或读数变化。该结果说明“命令执行完成”不能作为 `.TEMP` 支持证据。
+
+可重复运行：
+
+```powershell
+py -3.12-32 tools/probe_native_temperature.py `
+  --source C:\path\to\circuit.ms14 `
+  --output C:\path\to\new-temperature-probe
+```
+
+工具会保留每个命令文件、日志、保存后的工程副本、重开前后 OP 数据和 `probe.json`。
+同时生成带 SHA-256 的 `manifest.json`。当日志出现上述诊断时，结果明确为
+`unsupported`；没有明确诊断时也只会是 `unverified`，不会自动升级为通过。
+
 ## 2N3904 模型参数角落实测
 
 随后使用自然语言需求“12V NPN 共射、增益 10、2kHz 正弦输入峰值 10mV、晶体管参数容差
@@ -52,6 +90,8 @@ C:\Users\18331\Documents\multisim-evidence\ce_model_corners_sine_20261003
   而误报支持。
 - 共射自然语言入口遇到温度请求时明确返回 `unverified` 原因，而不是生成普通原生结果
   后冒充完成温度验证。
+- `native_temperature.py` 统一解析命令引擎温度探测结果；`.temp` 被 XSPICE 拒绝时，
+  结果为 `unsupported`，空日志或未知版本仍为 `unverified`。
 
-模型参数白名单已经接入角落扫描；下一步仍需找到 Multisim 原生可回读的温度控制方式，
-否则温度角落继续作为明确未认证能力保留。
+模型参数白名单已经接入角落扫描。Multisim 14.3 的温度命令探测已证明当前没有可回读的
+温度控制闭环；除非后续版本暴露可写且可回读的接口，温度角落继续作为明确未认证能力保留。

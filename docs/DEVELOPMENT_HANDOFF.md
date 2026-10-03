@@ -37,6 +37,10 @@
   9 个独立原生工程，逐个进行模型正文回读、OP/AC/TRAN、增益、THD 和集电极轨裕量
   验收。`ce_model_corners_sine_20261003` 实测 9/9 通过，最坏增益误差 `4.6619%`，
   最高 THD `0.02001%`，最小轨裕量 `5.6118V`。
+- 已完成：温度能力探测。对共射工程副本在 Multisim 14.3 的 `DoCommandLine` 执行
+  `.temp 0/25/85`，日志均返回 `no such command available in XSPICE`；三点 OP 读数和
+  保存重开后的读数不变。`tools/probe_native_temperature.py` 固化了复制、执行、回读和
+  证据留存流程，结果只能是 `unsupported`/`unverified`，不会伪造温度角落通过。
   温度角落、多版本实机认证、完整 CIR 迁移尚未完成。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。

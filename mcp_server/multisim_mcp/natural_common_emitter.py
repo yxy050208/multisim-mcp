@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any
 from .transistor_acceptance import validate_common_emitter_netlist, estimate_common_emitter_bias
 from .preferred_values import format_spice_scalar, generate_preferred_values, parse_spice_scalar
+from .native_temperature import NATIVE_TEMPERATURE_UNVERIFIED_REASON
 
 
 def _candidate_resistors(value: float, *, limit: int = 5) -> list[float]:
@@ -34,7 +35,10 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
     if not re.search(r"共射|common[ -]?emitter|npn", text, re.I):
         raise ValueError("当前入口需要明确单管共射放大器")
     if re.search(r"温度|temperature", text, re.I):
-        raise ValueError("温度角落当前为 unverified：Multisim 14.3 的已探测 COM 接口没有温度写入方法；请先使用受控网表温度扫描，不能把普通原生 OP/AC/TRAN 结果当作温度验证")
+        raise ValueError(
+            "温度角落当前为 unverified：" + NATIVE_TEMPERATURE_UNVERIFIED_REASON
+            + "；请先使用受控网表温度扫描"
+        )
     if re.search(r"mos|功率|多管|差分|振荡|power|multi|BC547|2N2222", text, re.I):
         raise ValueError("需求超出单NPN共射放大器合同范围")
     supplies = re.findall(r"([0-9]+(?:\.[0-9]+)?)\s*V(?![a-z])", text, re.I)
