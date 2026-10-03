@@ -75,6 +75,9 @@
   `.TEMP` 命令、检查 XSPICE 日志、保存并重新打开副本后回读 OP；完成状态不再被误判为
   温度验证。新增 `native_temperature.py` 的 `unsupported`/`unverified` 结构化结果，
   并在原生能力探测中公开 `temperature_capability`。
+- 在当前主线重新生成本机授权模板包并完整执行五类数字回归；组合逻辑、DFF、四位计数器、
+  四位移位寄存器和计数器解码负载全部通过原生重开、拓扑、引脚、布局和瞬态输出检查，
+  带负载计数器路径不再复现历史 PR17 的负载丢失现象。
 - 布局验证新增 `crossings_per_wire` 与可配置上限，超过上限会产生
   `excessive-wire-crossings` 错误；数字逻辑新增按低扇出信号链排序的布局 profile，
   负载元件会跟随其驱动器放置。`create_schematic_from_netlist` 新增可选的

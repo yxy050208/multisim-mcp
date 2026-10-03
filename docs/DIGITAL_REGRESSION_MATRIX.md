@@ -50,6 +50,14 @@ python tools/run_digital_regression.py --case counter4_load `
 `1.324`（45 / 34），数字 profile 降低约 `11.2%`；两次均通过原生重开、拓扑、引脚
 证据和瞬态输出检查。该数字是单个案例的实测，不外推为所有复杂电路的固定收益。
 
+2026-10-03 在当前主线 `c1396fc` 上重新从 Multisim 14.3 授权样例生成本地模板包，
+然后完整执行五案例矩阵。`logic_chain_load`、`dff_load`、`counter4_load`、
+`shift4_load` 和 `counter4_decode_load` 全部通过；每个案例的布局、拓扑、原生器件
+完整性、瞬态仿真和声明输出均通过，5/5 案例的引脚证据完整，拓扑不匹配为 0。证据
+保存在本机 `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-main`，
+不提交到仓库。该结果也重新验证了带输出电阻负载的计数器路径，当前主线未复现历史
+PR17 中“门输出负载被 Multisim 静默丢弃”的阻塞现象。
+
 运行器会为每个案例保存原理图、仿真数据和报告，并在根目录写入 `matrix.json`。矩阵通过条件包括：
 
 - 生成流程成功；
