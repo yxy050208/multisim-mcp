@@ -34,6 +34,22 @@ def _write_json(path: Path, value: Any) -> None:
     )
 
 
+def _write_manifest(output: Path) -> None:
+    artifacts = []
+    for path in sorted(output.iterdir()):
+        if path.is_file() and path.name != "manifest.json":
+            artifacts.append({
+                "path": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            })
+    _write_json(output / "manifest.json", {
+        "schema_version": 1,
+        "kind": "multisim-compatibility-matrix",
+        "artifacts": artifacts,
+    })
+
+
 def run(target_versions: list[str], output: Path) -> dict[str, Any]:
     output = output.expanduser().resolve()
     if output.exists():
@@ -42,9 +58,12 @@ def run(target_versions: list[str], output: Path) -> dict[str, Any]:
     runtime = runtime_diagnostics()
     _write_json(output / "runtime.json", runtime)
     if not runtime.get("runtime_compatible"):
-        matrix = build_compatibility_matrix(target_versions, detected_version="")
+        matrix = build_compatibility_matrix(
+            target_versions or ["unknown-runtime"], detected_version=""
+        )
         matrix["runtime_error"] = runtime
         _write_json(output / "matrix.json", matrix)
+        _write_manifest(output)
         return matrix
 
     client = MultisimClient()
@@ -66,19 +85,7 @@ def run(target_versions: list[str], output: Path) -> dict[str, Any]:
         "multisim_version": detected,
     }
     _write_json(output / "matrix.json", matrix)
-    artifacts = []
-    for path in sorted(output.iterdir()):
-        if path.is_file() and path.name != "manifest.json":
-            artifacts.append({
-                "path": path.name,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "size": path.stat().st_size,
-            })
-    _write_json(output / "manifest.json", {
-        "schema_version": 1,
-        "kind": "multisim-compatibility-matrix",
-        "artifacts": artifacts,
-    })
+    _write_manifest(output)
     return matrix
 
 
