@@ -172,6 +172,28 @@ filt circuit D1 K
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["named_pin_counts"], {"pass": 2, "fail": 0, "unverified": 0})
 
+    def test_vcvs_carrier_ports_are_checked_against_source_nodes(self) -> None:
+        report = """title
+-----
+header
+-----
+raw circuit E1 D
+0 circuit E1 G
+ctrl circuit E1 S
+0 circuit E1 SUB
+-----
+"""
+        result = compare_pin_connections(
+            {"E1": ["raw", "0", "ctrl", "0"]},
+            report,
+            declared_ports={"E1": ["D", "G", "S", "SUB"]},
+            expected_named_ports={
+                "E1": source_port_net_map("E", ["raw", "0", "ctrl", "0"])
+            },
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["named_pin_counts"], {"pass": 4, "fail": 0, "unverified": 0})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,11 @@ _SOURCE_PORT_ORDER = {
     **_DIGITAL_PORT_ORDER,
     # The native diode model exposes named anode/cathode ports as A/K.
     "D": ("A", "K"),
+    # E/G carriers use the four MOS-shaped names for out+, out-, control+,
+    # control-; schematic_builder writes the corresponding source nodes in
+    # exactly this order.
+    "E": ("D", "G", "S", "SUB"),
+    "G": ("D", "G", "S", "SUB"),
 }
 
 
