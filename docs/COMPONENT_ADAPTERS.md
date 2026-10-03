@@ -66,5 +66,6 @@ included in the generated topology and bill of materials.
 `ADC4` and `DAC4` are portable four-bit behavioral models. They use nested
 threshold expressions and binary-weighted reconstruction so they do not depend on
 `floor` or modulo functions. They are available for netlist and non-native
-simulation workflows, but remain outside the Multisim 14.3 native pass matrix
-until a dedicated reopen, pin, and transient regression is completed.
+simulation workflows. Their bridge behavior has been verified on Multisim 14.3
+through a dedicated reopen, pin, and transient regression; this does not claim
+coverage of arbitrary vendor ADC/DAC models or higher-resolution device fidelity.
