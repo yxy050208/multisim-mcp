@@ -132,6 +132,25 @@ RLOAD filt 0 100k
             ("raw", "filt"),
             ("VDD", "VIN", "D1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "counter_q0_q1_rc_load",
+            "Four-bit counter with independent RC loads on two output bits.",
+            """VDD high 0 DC 5
+VCLK clk 0 PULSE(0 5 0 1n 1n 20u 40u)
+VRESET reset 0 DC 0
+XCNT clk reset q0 q1 q2 q3 high 0 @COUNTER4
+R0 q0 filt0 1k
+C0 filt0 0 1u
+RLOAD0 filt0 0 100k
+R1 q1 filt1 1k
+C1 filt1 0 1u
+RLOAD1 filt1 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("q0", "filt0", "q1", "filt1"),
+            ("VDD", "VCLK", "VRESET", "XCNT", "R0", "C0", "RLOAD0", "R1", "C1", "RLOAD1"),
+        ),
     )
     for case in cases:
         case.validate()

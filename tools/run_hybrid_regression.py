@@ -73,10 +73,17 @@ def _native_observation(
         if values:
             observed.append(net)
             series[net] = values
-    digital = series.get(case.output_nets[0], [])
-    analog = series.get(case.output_nets[1], []) if len(case.output_nets) > 1 else []
-    digital_swing = bool(digital) and min(digital) <= 0.1 and max(digital) >= 4.9
-    analog_response = bool(analog) and max(analog) - min(analog) >= 0.1
+    pairs = list(zip(case.output_nets[0::2], case.output_nets[1::2]))
+    pair_checks: dict[str, dict[str, bool]] = {}
+    for digital_net, analog_net in pairs:
+        digital = series.get(digital_net, [])
+        analog = series.get(analog_net, [])
+        pair_checks[f"{digital_net}->{analog_net}"] = {
+            "digital_swing": bool(digital) and min(digital) <= 0.1 and max(digital) >= 4.9,
+            "analog_response": bool(analog) and max(analog) - min(analog) >= 0.1,
+        }
+    digital_swing = bool(pair_checks) and all(item["digital_swing"] for item in pair_checks.values())
+    analog_response = bool(pair_checks) and all(item["analog_response"] for item in pair_checks.values())
     return {
         "required_outputs": list(case.output_nets),
         "observed_outputs": sorted(observed),
@@ -89,6 +96,7 @@ def _native_observation(
             for net, values in series.items()
         },
         "checks": {"digital_swing": digital_swing, "analog_response": analog_response},
+        "pair_checks": pair_checks,
     }
 def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
     output_dir = root / case.case_id

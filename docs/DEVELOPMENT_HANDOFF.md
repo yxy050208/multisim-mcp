@@ -68,7 +68,7 @@
   的原生拓扑、器件完整性、命名引脚连接、数字 0/5 V 摆幅和模拟 RC 动态响应均通过；
   回归器把完整引脚证据纳入最终通过条件，并为二极管增加 A/K 到源网络的显式契约。
   正式矩阵证据保存在
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v5`；
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v6`；
   这只是数字到模拟边界基线，尚不代表 ADC/DAC、二极管整形、受控源或任意混合信号拓扑
   已覆盖。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、

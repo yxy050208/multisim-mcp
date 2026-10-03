@@ -20,6 +20,7 @@ class HybridRegressionTest(unittest.TestCase):
                 "counter_q0_rc_load",
                 "shift_s0_rc_load",
                 "diode_rc_shaper",
+                "counter_q0_q1_rc_load",
             ],
         )
         self.assertEqual(cases[0].manifest()["output_nets"], ["dout", "filt"])

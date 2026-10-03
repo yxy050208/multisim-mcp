@@ -86,6 +86,9 @@
   RC 整形边界；该案例随后取得完整的 Multisim 原生证据。
 - 修复混合回归门禁：完整引脚证据现在是通过条件；新增原生二极管 `D` 的 A/K 端子契约，
   并完成 5/5 混合信号矩阵实机复验，证据保存在本机 `hybrid-native-matrix-20261003-v5`。
+- 混合回归支持多个数字/模拟输出对，新增计数器 `q0/q1` 双路独立 RC 负载案例；
+  Multisim 14.3 矩阵扩展为 6/6 通过，证据保存在本机
+  `hybrid-native-matrix-20261003-v6`。
 - 新增版本范围兼容性矩阵工具 `tools/run_compatibility_matrix.py`：按已安装 Multisim
   版本保存 Automation API 探测、能力档案和 SHA-256 清单；相邻或未知版本保持
   `unverified`/`unsupported`，不会从 14.3 结果推断兼容。
