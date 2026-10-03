@@ -5,10 +5,32 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from multisim_mcp.native_rlc_acceptance import evaluate_rlc
+from multisim_mcp.native_rlc_acceptance import evaluate_rlc, validate_rlc_presentation
 
 
 class NativeRlcAcceptanceTest(unittest.TestCase):
+    def test_rejects_stale_voltage_source_example_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.xml"
+            path.write_text(
+                '<root><CIITSymTextCompValue Output="&amp;UNI10Vpk 5kHz 0" /></root>',
+                encoding="utf-8",
+            )
+            result = validate_rlc_presentation(path)
+            self.assertFalse(result["ok"])
+            self.assertEqual(len(result["stale_template_labels"]), 1)
+
+    def test_accepts_explicit_ac_source_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.xml"
+            path.write_text(
+                '<root><CIITSymTextCompValue Output="&amp;ASCDC 2 AC 1V " /></root>',
+                encoding="utf-8",
+            )
+            result = validate_rlc_presentation(path)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["stale_template_labels"], [])
+
     def test_evaluates_aligned_native_frequency_matrix(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp) / "analysis-002"

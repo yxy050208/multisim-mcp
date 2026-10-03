@@ -11,7 +11,7 @@ from .engineering_task_contract import normalize_task_result, finalize_task_resu
 from .natural_rlc import parse_natural_rlc_request
 from .native_project_run import run_native_project
 from .native_netlist_validation import validate_native_project_netlist
-from .native_rlc_acceptance import evaluate_rlc
+from .native_rlc_acceptance import evaluate_rlc, validate_rlc_presentation
 from .schematic_builder import build_schematic
 from .component_compat import detect_multisim_version, load_manifest_for_version, require_verified_mappings
 
@@ -47,6 +47,11 @@ def run_natural_rlc_engineering(text: str, output: str, *, execute: bool = False
         _write(root / "build.json", build)
         if build["unsupported"] or build["layout_validation"]["status"] != "pass" or len(build["probes"]) != 2:
             raise RuntimeError("generated RLC schematic failed layout/probe preflight")
+        presentation = validate_rlc_presentation(root / "source.xml")
+        result["presentation_acceptance"] = presentation
+        _write(root / "presentation-acceptance.json", presentation)
+        if not presentation["ok"]:
+            raise RuntimeError("generated RLC schematic retained a stale source example label")
         Ms14Codec().encode(str(root / "source.xml"), str(root / "source.ms14"))
         d = proposal["derived"]
         request = proposal["request"]

@@ -4,11 +4,35 @@ from __future__ import annotations
 import csv
 import cmath
 import math
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
 VIN = "V(OutProbe)"
 VOUT = "V(OutProbe1)"
+
+
+def validate_rlc_presentation(xml_path: Path) -> dict[str, Any]:
+    """Reject the generic voltage-source example label in an RLC drawing.
+
+    The extracted Multisim voltage carrier contains a harmless but misleading
+    ``10Vpk/5kHz`` example label.  It must never survive into a generated RLC
+    deliverable because the RLC request uses an AC small-signal source and the
+    visible label is part of the engineering artifact.  This check is kept
+    separate from the native solver checks: a numerically correct netlist can
+    still be an ambiguous drawing.
+    """
+    root = ET.parse(xml_path).getroot()
+    values = [str(item.get("Output", "")) for item in root.iter("CIITSymTextCompValue")]
+    stale = [value for value in values if re.search(r"10\s*Vpk|5\s*kHz", value, re.I)]
+    source_labels = [value for value in values if re.search(r"\b(?:DC|AC)\b", value, re.I)]
+    return {
+        "ok": bool(source_labels) and not stale,
+        "source_labels": source_labels,
+        "stale_template_labels": stale,
+        "checked_values": len(values),
+    }
 
 
 def _csv(path: Path) -> list[dict[str, float]]:
@@ -97,4 +121,4 @@ def evaluate_rlc(directory: Path, resistance: float, inductance: float, capacita
             "passed": all(checks.values())}
 
 
-__all__ = ["evaluate_rlc"]
+__all__ = ["evaluate_rlc", "validate_rlc_presentation"]
