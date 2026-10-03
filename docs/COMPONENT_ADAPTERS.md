@@ -53,3 +53,10 @@ $env:MULTISIM_MCP_ADAPTER_DIR = 'C:\MultisimMcp\adapters'
 portable SPICE/XSPICE primitives. They do not redistribute NI assets. A local
 community pack can add bounded numeric macros through schema-v1 JSON; it cannot
 execute code, include files, or replace built-ins.
+
+`ADC1` and `DAC1` also emit 1 GΩ helper resistors from each expression-only
+input/rail net to the low rail. Multisim's native behavioral-source evaluator
+does not preserve a node that appears only inside `V(net)` when that net has a
+single physical pin. The high-value helpers materialise those nets after a
+save/reopen round trip while keeping their circuit loading negligible; they are
+included in the generated topology and bill of materials.

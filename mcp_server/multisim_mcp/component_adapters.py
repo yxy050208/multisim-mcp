@@ -122,12 +122,28 @@ BUILTIN_ADAPTERS: Final[dict[str, ComponentAdapter]] = {
     ),
     "ADC1": ComponentAdapter(
         "ADC1", ("analog", "digital", "high", "low"), (_p("THRESHOLD", 0.5, 0, 1),),
-        ("B{stem}ADC {digital} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*{THRESHOLD}),V({high}),V({low}))}",),
+        (
+            "B{stem}ADC {digital} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*{THRESHOLD}),V({high}),V({low}))}",
+            # Multisim does not materialise a node used only inside a
+            # behavioral expression.  Keep the expression's source nets in
+            # the native connectivity table with negligible load so a saved
+            # and reopened schematic can evaluate the model reliably.
+            "R{stem}ANALOG {analog} {low} 1G",
+            "R{stem}HIGH {high} {low} 1G",
+        ),
         "单比特模数桥", "One-bit analog-to-digital bridge",
     ),
     "DAC1": ComponentAdapter(
         "DAC1", ("digital", "analog", "high", "low"), (),
-        ("B{stem}DAC {analog} {low} V={if(V({digital})>((V({high})+V({low}))/2),V({high}),V({low}))}",),
+        (
+            "B{stem}DAC {analog} {low} V={if(V({digital})>((V({high})+V({low}))/2),V({high}),V({low}))}",
+            # See ADC1 above.  The anchors are part of the portable SPICE
+            # expansion and are intentionally 1 Gohm, so they only establish
+            # the node identity required by Multisim's native expression
+            # evaluator without changing the useful circuit behavior.
+            "R{stem}DIGITAL {digital} {low} 1G",
+            "R{stem}HIGH {high} {low} 1G",
+        ),
         "单比特数模桥", "One-bit digital-to-analog bridge",
     ),
 }

@@ -50,6 +50,7 @@ XDAC digital analog2 high 0 @DAC1
         executable = prepare_simulation_netlist(text)
         self.assertIn("d_jkff", executable)
         self.assertIn("B1 digital 0", executable)
+        self.assertIn("1G", executable)
         self.assertNotIn("@DFF", executable)
 
     def test_ngspice_uses_ternary_conditionals_without_changing_multisim_default(self) -> None:
@@ -59,6 +60,22 @@ XDAC digital analog2 high 0 @DAC1
         self.assertIn("if(", multisim)
         self.assertNotIn("if(", ngspice.casefold())
         self.assertIn(" ? ", ngspice)
+
+    def test_mixed_signal_bridges_anchor_expression_dependency_nets(self) -> None:
+        source = (
+            "VDD high 0 5\n"
+            "VIN analog 0 PULSE(0 5 0 1n 1n 10u 20u)\n"
+            "XADC analog digital high 0 @ADC1\n"
+            "XDAC digital analog_out high 0 @DAC1\n"
+            ".end\n"
+        )
+        expanded = expand_component_adapters(source)
+        # The high-value anchors keep expression-only input and rail nets
+        # materialised when Multisim saves and reopens the schematic.
+        self.assertIn("R1 analog 0 1G", expanded)
+        self.assertIn("R2 high 0 1G", expanded)
+        self.assertIn("R3 digital 0 1G", expanded)
+        self.assertIn("R4 high 0 1G", expanded)
 
     def test_execution_deck_canonicalizes_ground_aliases_without_rewriting_subckt_ports(self) -> None:
         text = (

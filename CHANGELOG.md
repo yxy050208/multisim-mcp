@@ -95,6 +95,11 @@
 - 将活动受控源案例调整为 `vccs_rc_bridge`，验证 G 源受控电流与 RC 瞬态；Multisim 14.3
   矩阵扩展为 8/8 通过。H 源实验出现拓扑通过但输出全零，暂不计入矩阵并保留本机
   失败证据。
+- 加入待验收的 `dac_rc_bridge`，验证 `@DAC1` 行为桥接在原生工程重开后的数字到模拟
+  响应；未取得 Multisim 原生证据前不计入通过矩阵。
+- 修复 `@ADC1`/`@DAC1` 行为表达式的原生节点物化：为表达式读取的输入和电源轨加入
+  1 GΩ 高值锚点，避免 Multisim 重开后丢失只有单个实体引脚的依赖网。Multisim 14.3
+  原生混合矩阵现为 9/9；DAC 案例完成拓扑、引脚、重开和 COM 瞬态输出验收。
 - 新增版本范围兼容性矩阵工具 `tools/run_compatibility_matrix.py`：按已安装 Multisim
   版本保存 Automation API 探测、能力档案和 SHA-256 清单；相邻或未知版本保持
   `unverified`/`unsupported`，不会从 14.3 结果推断兼容。
