@@ -60,6 +60,12 @@
   `counter4_load`、`shift4_load`、`counter4_decode_load` 全部通过，5/5 案例引脚证据
   完整，141 个命名引脚连接通过，0 个失败、0 个拓扑不匹配。证据保存在本机
   `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-gated`。
+- 已开始混合信号阶段：新增 `hybrid_regression` 与 `tools/run_hybrid_regression.py`，第一条
+  `not_rc_load` 基线已在 Multisim 14.3 实机通过。数字 NOT 输出驱动 1 kΩ/1 µF RC 网络
+  和 100 kΩ 负载，原生重开器件完整，瞬态得到 `V(dout)`/`V(filt)` 两类证据。证据保存在
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-not-rc-20261003`，正式矩阵证据保存在
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-matrix-20261003-gated`；这只是数字到
+  模拟边界基线，尚不代表 ADC/DAC 或任意混合信号拓扑已覆盖。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的
