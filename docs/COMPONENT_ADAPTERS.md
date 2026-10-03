@@ -23,6 +23,8 @@ XCNT clk reset q0 q1 q2 q3 vdd 0 @COUNTER4
 XSR data clk reset s0 s1 s2 s3 vdd 0 @SHIFT_REGISTER4
 XADC analog digital vdd 0 @ADC1 THRESHOLD=.5
 XDAC digital analog_out vdd 0 @DAC1
+XADC4 analog d0 d1 d2 d3 vdd 0 @ADC4
+XDAC4 d0 d1 d2 d3 analog_out vdd 0 @DAC4
 ```
 
 调用 MCP 工具 `component_adapter_catalog` 可取得当前版本、端子顺序、参数边界和完整
@@ -60,3 +62,9 @@ does not preserve a node that appears only inside `V(net)` when that net has a
 single physical pin. The high-value helpers materialise those nets after a
 save/reopen round trip while keeping their circuit loading negligible; they are
 included in the generated topology and bill of materials.
+
+`ADC4` and `DAC4` are portable four-bit behavioral models. They use nested
+threshold expressions and binary-weighted reconstruction so they do not depend on
+`floor` or modulo functions. They are available for netlist and non-native
+simulation workflows, but remain outside the Multisim 14.3 native pass matrix
+until a dedicated reopen, pin, and transient regression is completed.

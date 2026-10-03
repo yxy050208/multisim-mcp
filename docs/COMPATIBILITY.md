@@ -17,6 +17,7 @@
 | 功率二极管/NMOS/PMOS 宏 | derived | derived | 仅展开 | 14.3 打开/回导；二极管/NMOS 工作点回归；需按实物校准 |
 | D/T、COUNTER4、SHIFT_REGISTER4 | derived | derived | 仅展开 | 14.3 打开/回导；DFF 瞬态回归；5 V XSPICE 桥 |
 | ADC1/DAC1 | derived | derived | 仅展开 | 14.3 打开/回导；单比特行为模型 |
+| ADC4/DAC4 | derived | derived | 仅展开 | 便携四位行为模型；待 14.3 原生重开、引脚和瞬态验收 |
 | 数据万用表/Bode/逻辑分析仪 | 支持 | 支持 | 支持已有 raw 文件 | 无 COM 数值回归 |
 | 中英 HTML/PDF 与 `manifest.json` | 支持 | 支持 | 支持已有实验目录 | 无 COM 产物回归 |
 

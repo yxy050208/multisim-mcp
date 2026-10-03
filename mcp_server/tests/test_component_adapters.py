@@ -53,6 +53,25 @@ XDAC digital analog2 high 0 @DAC1
         self.assertIn("1G", executable)
         self.assertNotIn("@DFF", executable)
 
+    def test_expands_four_bit_adc_and_dac_as_explicit_portable_models(self) -> None:
+        text = """\
+VDD high 0 5
+VAN analog 0 PULSE(0 5 0 1n 1n 10u 20u)
+XADC analog d0 d1 d2 d3 high 0 @ADC4
+XDAC d0 d1 d2 d3 analog_out high 0 @DAC4
+.end
+"""
+        expanded = expand_component_adapters(text)
+        parsed = parse_netlist(text)
+        self.assertEqual(parsed.unsupported, [])
+        self.assertEqual(expanded.count("B"), 5)
+        self.assertIn("B1 d3 0 V=", expanded)
+        self.assertIn("B4 d0 0 V=", expanded)
+        self.assertIn("B5 analog_out 0 V=", expanded)
+        self.assertEqual(expanded.count("1G"), 7)
+        self.assertIn("0.9375", expanded)
+        self.assertIn("/15", expanded)
+
     def test_ngspice_uses_ternary_conditionals_without_changing_multisim_default(self) -> None:
         text = "VDD high 0 5\nXADC analog digital high 0 @ADC1 THRESHOLD=.6\n.end\n"
         multisim = prepare_simulation_netlist(text)
@@ -102,7 +121,7 @@ XDAC digital analog2 high 0 @DAC1
 
     def test_catalog_is_bilingual(self) -> None:
         catalog = component_adapter_catalog()
-        self.assertGreaterEqual(len(catalog["adapters"]), 13)
+        self.assertGreaterEqual(len(catalog["adapters"]), 15)
         self.assertTrue(all(item["description_zh"] and item["description_en"] for item in catalog["adapters"]))
 
 

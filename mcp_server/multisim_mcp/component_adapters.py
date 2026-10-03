@@ -146,6 +146,36 @@ BUILTIN_ADAPTERS: Final[dict[str, ComponentAdapter]] = {
         ),
         "单比特数模桥", "One-bit digital-to-analog bridge",
     ),
+    "ADC4": ComponentAdapter(
+        "ADC4", ("analog", "d0", "d1", "d2", "d3", "high", "low"), (),
+        (
+            # Four-bit binary quantizer. d3 is the MSB and d0 is the LSB.
+            # Nested conditionals keep the adapter within the portable B
+            # source subset and avoid relying on floor/modulo functions that
+            # are not consistently available in Multisim XSPICE.
+            "B{stem}D3 {d3} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*0.5),V({high}),V({low}))}",
+            "B{stem}D2 {d2} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*0.75),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.5),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.25),V({high}),V({low}))))}",
+            "B{stem}D1 {d1} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*0.875),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.75),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.625),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.5),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.375),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.25),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.125),V({high}),V({low}))))))))}",
+            "B{stem}D0 {d0} {low} V={if(V({analog})>(V({low})+(V({high})-V({low}))*0.9375),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.875),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.8125),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.75),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.6875),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.625),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.5625),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.5),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.4375),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.375),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.3125),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.25),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.1875),V({high}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.125),V({low}),if(V({analog})>(V({low})+(V({high})-V({low}))*0.0625),V({high}),V({low}))))))))))))))))}",
+            "R{stem}ANALOG {analog} {low} 1G",
+            "R{stem}HIGH {high} {low} 1G",
+        ),
+        "四位模数桥（便携行为模型）", "Four-bit analog-to-digital bridge (portable behavioral model)",
+    ),
+    "DAC4": ComponentAdapter(
+        "DAC4", ("d0", "d1", "d2", "d3", "analog", "high", "low"), (),
+        (
+            # Binary-weighted reconstruction. The input threshold is the
+            # midpoint of the declared rails; d3 is the MSB and d0 is LSB.
+            "B{stem}DAC {analog} {low} V=V({low})+(V({high})-V({low}))*(8*if(V({d3})>((V({high})+V({low}))/2),1,0)+4*if(V({d2})>((V({high})+V({low}))/2),1,0)+2*if(V({d1})>((V({high})+V({low}))/2),1,0)+if(V({d0})>((V({high})+V({low}))/2),1,0))/15",
+            "R{stem}D0 {d0} {low} 1G",
+            "R{stem}D1 {d1} {low} 1G",
+            "R{stem}D2 {d2} {low} 1G",
+            "R{stem}D3 {d3} {low} 1G",
+            "R{stem}HIGH {high} {low} 1G",
+        ),
+        "四位数模桥（便携行为模型）", "Four-bit digital-to-analog bridge (portable behavioral model)",
+    ),
 }
 
 
