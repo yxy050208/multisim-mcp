@@ -31,18 +31,18 @@ MCP 的 `experiment` / `full` 工具集提供：
 
 - `plan_natural_engineering_request(text)`：需求、假设、候选和工程计划。
 - `plan_natural_rlc_engineering_request(text)`：生成受限 RLC 二阶低通合同和 SPICE 预览；
-  当前只开放规划，不启动原生 RLC 验收。
+  只负责规划，不启动原生 RLC 验收。
 
 RLC 的 `native_rlc_acceptance.evaluate_rlc` 已加入原生 AC 矩阵验收层：它会复核复数频响
 与二阶模型的一致性，并检查实测峰值频率误差。2026-09-08 已在本机 Multisim 14.3
 完成生成 `.ms14`、原生 OP/AC 和 81 点频响回归；10 Ω、10 mH、2.5 µF 的目标约 1 kHz
-工程实测峰值为 1 kHz，理论频响最大误差约 2.6e-9。证据目录为
-`sample_multisim/rlc_native_acceptance_20260908_fixed2`。当前仍只开放 RLC 规划入口，
-已接通 `run_natural_rlc_engineering_request`：它会对候选 R1 逐个执行原生 OP/AC，
-保留未达目标但模型一致的候选，并按实测峰值频率选择最佳值。实机多候选证据目录为
-`sample_multisim/natural_rlc_auto_20260908_fixed`，共 4 个候选，选中 10 Ω，峰值 1 kHz。
+工程实测峰值为 1 kHz，理论频响最大误差约 2.6e-9。历史证据目录为
+`sample_multisim/rlc_native_acceptance_20260908_fixed2`。`run_natural_rlc_engineering_request`
+已开放原生执行：它会对候选 R1 逐个执行原生 OP/AC，保留未达目标但模型一致的候选，
+并按实测峰值频率选择最佳值。当前回归在 Multisim 14.3 上选中 10 Ω，峰值
+`1000.2397 Hz`，目标误差 `0.02397%`。
 
-后续回归将候选搜索改为阻尼模型中心，并把原生 AC 扫频加密到每十倍频程 400 点；在
+当前回归将候选搜索改为阻尼模型中心，并把原生 AC 扫频加密到每十倍频程 400 点；在
 Multisim 14.3 上对 `L=10mH、C=2.5uF、目标1kHz` 的 5 个 E24 候选全部实测通过，
 证据目录为本机 `multisim-evidence/rlc_auto_20261003`。选中的 `10Ω` 峰值为
 `1000.2397Hz`，误差 `0.02397%`，1601 点复数频响最大误差 `2.56×10⁻9`。
