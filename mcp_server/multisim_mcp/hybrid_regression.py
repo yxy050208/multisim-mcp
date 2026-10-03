@@ -165,6 +165,20 @@ RLOAD filt 0 100k
             ("raw", "filt"),
             ("VCTRL", "E1", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "vccs_rc_bridge",
+            "Voltage-controlled current source driving a first-order RC load.",
+            """VCTRL ctrl 0 PULSE(0 5 0 1n 1n 40u 80u)
+G1 0 raw ctrl 0 1m
+R1 raw filt 1k
+C1 filt 0 1u
+RLOAD filt 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("raw", "filt"),
+            ("VCTRL", "G1", "R1", "C1", "RLOAD"),
+        ),
     )
     for case in cases:
         case.validate()

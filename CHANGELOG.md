@@ -92,6 +92,9 @@
 - 加入 `vcvs_rc_bridge` 案例，将实验性 VCVS 原生载体纳入混合信号重开、引脚和瞬态门禁；
   新增 E/G 载体 D/G/S/SUB 端子契约，Multisim 14.3 矩阵扩展为 7/7 通过，证据保存在
   本机 `hybrid-native-matrix-20261003-v7`。
+- 将活动受控源案例调整为 `vccs_rc_bridge`，验证 G 源受控电流与 RC 瞬态；Multisim 14.3
+  矩阵扩展为 8/8 通过。H 源实验出现拓扑通过但输出全零，暂不计入矩阵并保留本机
+  失败证据。
 - 新增版本范围兼容性矩阵工具 `tools/run_compatibility_matrix.py`：按已安装 Multisim
   版本保存 Automation API 探测、能力档案和 SHA-256 清单；相邻或未知版本保持
   `unverified`/`unsupported`，不会从 14.3 结果推断兼容。
