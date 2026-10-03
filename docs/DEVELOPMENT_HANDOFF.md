@@ -51,6 +51,11 @@
   实机探测检测到 Multisim 14.3，矩阵将 14.3 标记为 `api-verified`，将未安装的 14.2
   标记为 `unverified`；工具会保留 `native-api.json`、`matrix.json` 和 SHA-256 清单，
   不会把相邻版本的能力复制成通过。完整元件族和电路流程仍需在各版本分别实机回归。
+- 已完成：数字回归器现在在执行案例前读取实际 Multisim 版本，并要求精确匹配的已验证
+  `components-<version>.json`。指定 14.2 而实际运行 14.3 时，实机验证在 0 个案例执行
+  前返回 `version-mismatch`；指定 14.3 的 `counter4_load` 通过布局、重开拓扑、原生
+  器件完整性、瞬态和四路输出观察，证据保存在本机
+  `C:\Users\18331\Documents\multisim-evidence\digital-counter4-gated-20261003`。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的

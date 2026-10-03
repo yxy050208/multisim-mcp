@@ -27,6 +27,20 @@ $env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\AppData\Local\multisim-mcp\comp
 python tools/run_digital_regression.py --output C:\Temp\multisim-digital-regression
 ```
 
+回归器会先读取正在运行的 Multisim 版本，并要求仓库中存在同版本、已验证的元件清单。
+可以用 `--target-version` 再加一道版本护栏；实际版本与目标版本不一致时，工具会在
+执行任何案例前失败关闭，并在 `matrix.json` 中记录 `version-mismatch`：
+
+```powershell
+python tools/run_digital_regression.py `
+  --target-version "Multisim 14.3" `
+  --output C:\Temp\multisim-digital-regression-14.3
+```
+
+`matrix.json` 的 `compatibility` 字段会保存检测到的版本、清单文件名和 SHA-256。
+没有精确清单的版本会保持为 `manifest-unverified`，不能借用 14.3 的元件映射继续
+生成“通过”结果。
+
 只运行单个案例：
 
 ```powershell

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from tools.run_digital_regression import _pin_evidence_summary
+from pathlib import Path
+
+from tools.run_digital_regression import (
+    _build_compatibility_evidence,
+    _pin_evidence_summary,
+)
 from multisim_mcp.digital_regression import (
     digital_regression_matrix,
     select_digital_regression_cases,
@@ -55,6 +60,18 @@ class DigitalRegressionMatrixTest(unittest.TestCase):
         self.assertEqual(summary["mismatch_count"], 0)
         self.assertEqual(summary["model_port_states"], {"present": 1, "not_observed": 1})
         self.assertEqual(summary["named_pin_counts"], {"pass": 0, "fail": 0, "unverified": 0})
+
+    def test_native_matrix_requires_exact_verified_manifest(self) -> None:
+        root = Path(__file__).resolve().parents[2] / "mcp_server" / "multisim_mcp" / "compatibility"
+        evidence = _build_compatibility_evidence("Multisim 14.3", None, root)
+        self.assertEqual(evidence["status"], "manifest-verified")
+        self.assertEqual(len(evidence["manifest_sha256"]), 64)
+
+        mismatch = _build_compatibility_evidence("Multisim 14.3", "Multisim 14.2", root)
+        self.assertEqual(mismatch["status"], "version-mismatch")
+
+        missing = _build_compatibility_evidence("Multisim 14.2", None, root)
+        self.assertEqual(missing["status"], "manifest-unverified")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ Multisim model data.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -19,6 +20,10 @@ sys.path.insert(0, str(ROOT / "mcp_server"))
 from multisim_mcp.digital_regression import (  # noqa: E402
     DigitalRegressionCase,
     select_digital_regression_cases,
+)
+from multisim_mcp.component_compat import (  # noqa: E402
+    load_manifest_for_version,
+    parse_multisim_version,
 )
 from multisim_mcp.server import client, run_circuit_experiment  # noqa: E402
 
@@ -82,6 +87,68 @@ def _pin_evidence_summary(topology: dict[str, Any]) -> dict[str, Any]:
             "unverified": int(named_counts.get("unverified", 0) or 0),
         },
     }
+
+
+def _versioned_manifest_path(root: Path, version: str) -> Path | None:
+    """Return the exact component manifest used for a native regression."""
+    target = parse_multisim_version(version)
+    if target == (0, 0, 0):
+        return None
+    for path in sorted(root.glob("components-*.json")):
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if parse_multisim_version(str(manifest.get("multisim_version", ""))) == target:
+            return path
+    return None
+
+
+def _build_compatibility_evidence(
+    detected_version: str,
+    requested_version: str | None,
+    manifest_root: Path,
+) -> dict[str, Any]:
+    """Build a fail-closed version gate for the native digital matrix."""
+    detected = str(detected_version or "").strip()
+    requested = str(requested_version or detected).strip()
+    detected_tuple = parse_multisim_version(detected)
+    requested_tuple = parse_multisim_version(requested)
+    evidence: dict[str, Any] = {
+        "schema_version": 1,
+        "requested_version": requested or None,
+        "detected_version": detected or None,
+        "version_match": bool(
+            detected_tuple != (0, 0, 0)
+            and requested_tuple != (0, 0, 0)
+            and detected_tuple == requested_tuple
+        ),
+        "manifest_path": None,
+        "manifest_sha256": None,
+        "status": "unsupported",
+    }
+    if not evidence["version_match"]:
+        evidence["status"] = "version-mismatch" if detected_tuple != (0, 0, 0) else "unsupported"
+        return evidence
+    manifest_path = _versioned_manifest_path(manifest_root, requested)
+    if manifest_path is None:
+        evidence["status"] = "manifest-unverified"
+        return evidence
+    try:
+        load_manifest_for_version(manifest_root, requested)
+        digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    except (OSError, ValueError) as exc:
+        evidence["status"] = "manifest-invalid"
+        evidence["error"] = str(exc)
+        return evidence
+    evidence.update(
+        {
+            "status": "manifest-verified",
+            "manifest_path": manifest_path.name,
+            "manifest_sha256": digest,
+        }
+    )
+    return evidence
 
 
 def run_case(case: DigitalRegressionCase, root: Path) -> dict[str, Any]:
@@ -149,32 +216,63 @@ def main() -> int:
         default="digital",
         help="digital signal-chain profile (default) or the generic grid ablation",
     )
+    parser.add_argument(
+        "--target-version",
+        help="expected installed Multisim version; a mismatch fails before any case runs",
+    )
     args = parser.parse_args()
     cases = select_digital_regression_cases(args.case)
     args.output.mkdir(parents=True, exist_ok=False)
     if args.layout_profile == "generic":
         _disable_digital_layout_profile()
     results: list[dict[str, Any]] = []
+    compatibility: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "unverified",
+        "requested_version": args.target_version,
+        "detected_version": None,
+    }
+    run_error: str | None = None
     try:
-        for case in cases:
-            print(f"Running {case.case_id}...", file=sys.stderr, flush=True)
-            try:
-                results.append(run_case(case, args.output))
-            except Exception as exc:
-                results.append({
-                    "case_id": case.case_id,
-                    "passed": False,
-                    "checks": {"exception_free": False},
-                    "error": str(exc)[:1000],
-                })
+        connection = client.connect()
+        detected_version = str(connection.get("version", "")).strip()
+        compatibility = _build_compatibility_evidence(
+            detected_version,
+            args.target_version,
+            Path(__file__).resolve().parents[1] / "mcp_server" / "multisim_mcp" / "compatibility",
+        )
+        if compatibility["status"] != "manifest-verified":
+            run_error = (
+                "native digital regression refused: exact verified component manifest "
+                f"required ({compatibility['status']})"
+            )
+        else:
+            for case in cases:
+                print(f"Running {case.case_id}...", file=sys.stderr, flush=True)
+                try:
+                    results.append(run_case(case, args.output))
+                except Exception as exc:
+                    results.append({
+                        "case_id": case.case_id,
+                        "passed": False,
+                        "checks": {"exception_free": False},
+                        "error": str(exc)[:1000],
+                    })
+    except Exception as exc:
+        run_error = str(exc)[:1000]
     finally:
         client.disconnect()
     summary = {
         "schema_version": 1,
         "layout_profile_mode": args.layout_profile,
+        "compatibility": compatibility,
         "matrix": [case.manifest() for case in cases],
         "results": results,
-        "passed": bool(results) and all(item.get("passed") is True for item in results),
+        "passed": (
+            compatibility.get("status") == "manifest-verified"
+            and bool(results)
+            and all(item.get("passed") is True for item in results)
+        ),
         "pin_evidence": {
             "fully_verified_cases": sum(
                 item.get("pin_evidence", {}).get("fully_verified") is True
@@ -201,6 +299,8 @@ def main() -> int:
             ),
         },
     }
+    if run_error:
+        summary["error"] = run_error
     (args.output / "matrix.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
