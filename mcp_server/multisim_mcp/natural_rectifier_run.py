@@ -37,7 +37,14 @@ def verify_rectifier_presentation(path: Path, plan: dict, native_values: dict | 
     names = source.findall('./Attributes/Item/CiaCollString/strings/Item') if source is not None else []
     checks['source_identity'] = len(names)>1 and names[1].get('Value') == '&ASCAC_VOLTAGE'
     expression = source.find('.//CiaSpiceTmpltExprt') if source is not None else None
-    checks['source_expression'] = expression is not None and expression.get('String') == '&ASCv%p %t1 %t2 dc #3 sin(#3 #1 #5 #7 #9 #11)'
+    # Multisim 14.3 accepts both the legacy carrier and the current carrier
+    # with explicit AC magnitude/phase metadata.  The latter is what the
+    # builder emits now; retaining the legacy form keeps readback of older
+    # validated projects compatible.
+    checks['source_expression'] = expression is not None and expression.get('String') in {
+        '&ASCv%p %t1 %t2 dc #3 sin(#3 #1 #5 #7 #9 #11)',
+        '&ASCv%p %t1 %t2 dc #3 ac #13 #15 sin(#3 #1 #5 #7 #9 #11)',
+    }
     probes = list(root.iter('CIITProbeExtComponent'))
     checks['probe_panels_hidden'] = len(probes)==len(plan['proposal']['probe_nets']) and all(p.get('Hidden')=='1' and p.get('ShowInfo')=='0' for p in probes)
     return {'ok':all(checks.values()),'checks':checks,'cached_double_differences':cache_differences,
