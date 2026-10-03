@@ -35,6 +35,52 @@ PROG_ID = "MultisimInterface.MultisimApp"
 CODEC_PACKAGE = "electronics-workbench-decoder@0.2.0"
 
 
+def native_capability_flags(circuit_members: Iterable[str]) -> dict[str, Any]:
+    """Summarize the version-specific COM surface without invoking it.
+
+    The type library exposes a small amount of circuit-parameter *read*
+    functionality, but that must not be confused with a setter. In
+    particular, Multisim 14.3 has no documented COM method for changing the
+    global simulation temperature or an individual vendor-model parameter.
+    Keeping those flags separate lets callers fail closed instead of treating
+    an enumerator or ``ReplaceComponent`` as a write API.
+    """
+    names = {str(member).casefold() for member in circuit_members}
+
+    def has(*candidates: str) -> bool:
+        return any(candidate.casefold() in names for candidate in candidates)
+
+    temperature_writers = tuple(
+        member for member in circuit_members
+        if any(token in str(member).casefold() for token in (
+            "settemperature", "temperature", "ambienttemperature",
+            "circuittemperature",
+        ))
+        and any(token in str(member).casefold() for token in (
+            "set", "put", "write", "update",
+        ))
+    )
+    model_writers = tuple(
+        member for member in circuit_members
+        if any(token in str(member).casefold() for token in (
+            "modelparameter", "modelvalue", "modeldefinition", "modelproperty",
+        ))
+        and any(token in str(member).casefold() for token in (
+            "set", "put", "write", "update", "replace",
+        ))
+    )
+    return {
+        "circuit_parameter_enumeration": has("EnumCircuitParameters"),
+        "circuit_parameter_readback": has("CircuitParameterValue"),
+        "native_temperature_control": bool(temperature_writers),
+        "temperature_write_members": list(temperature_writers),
+        "native_model_parameter_write": bool(model_writers),
+        "model_parameter_write_members": list(model_writers),
+        "model_replacement": has("ReplaceComponent"),
+        "analysis_api": has("DoACSweep") and has("DoDCOperatingPoint"),
+    }
+
+
 def _com_cache_root() -> Optional[Path]:
     """Where pywin32 keeps its generated makepy wrappers for this user."""
     try:
@@ -310,6 +356,7 @@ class MultisimClient:
             self._circuit = circuit
         app_members = self._typeinfo_members(app)
         circuit_members = self._typeinfo_members(circuit) if circuit is not None else []
+        capabilities = native_capability_flags(circuit_members)
         placement = {
             name: any(name.lower() == member.lower() for member in circuit_members)
             for name in ("addcomponent", "createcomponent", "placecomponent", "newcomponent")
@@ -329,6 +376,7 @@ class MultisimClient:
             "supports_native_wiring": any(wiring.values()),
             "replacement_api": "ReplaceComponent" in circuit_members,
             "analysis_api": all(name in circuit_members for name in ("DoACSweep", "DoDCOperatingPoint")),
+            "capabilities": capabilities,
             "blank_circuit_created": bool(create_blank),
         }
 

@@ -33,7 +33,9 @@ def parse_natural_common_emitter(text: str) -> dict[str, Any]:
         raise ValueError("请输入有效的共射放大器需求")
     if not re.search(r"共射|common[ -]?emitter|npn", text, re.I):
         raise ValueError("当前入口需要明确单管共射放大器")
-    if re.search(r"mos|功率|多管|差分|振荡|power|multi|温度|BC547|2N2222", text, re.I):
+    if re.search(r"温度|temperature", text, re.I):
+        raise ValueError("温度角落当前为 unverified：Multisim 14.3 的已探测 COM 接口没有温度写入方法；请先使用受控网表温度扫描，不能把普通原生 OP/AC/TRAN 结果当作温度验证")
+    if re.search(r"mos|功率|多管|差分|振荡|power|multi|BC547|2N2222", text, re.I):
         raise ValueError("需求超出单NPN共射放大器合同范围")
     supplies = re.findall(r"([0-9]+(?:\.[0-9]+)?)\s*V(?![a-z])", text, re.I)
     gains = re.findall(r"(?:增益|gain)\s*(?:约|为|=)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.I)

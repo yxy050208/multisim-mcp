@@ -24,6 +24,7 @@ LIMITATIONS = [
     "Checks apply to the requested sampled frequencies, not all frequencies, tolerances or operating conditions.",
     "Multisim 14.3 native execution is verified locally; other versions are not certified by this workflow.",
     "Geometry preflight checks pins and symbol bodies; wire crossings and label placement still need visual review.",
+    "Temperature corners and transistor-model parameter corners are unverified unless a native model override is explicitly requested and its saved-file value is read back.",
 ]
 VENDOR_LIMITATIONS = [
     "Diodes require the licensed local 1N4001GP model; no replacement with another diode identity is permitted.",

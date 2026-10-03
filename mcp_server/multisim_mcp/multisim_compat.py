@@ -30,6 +30,11 @@ def capability_profile(version: str) -> dict[str, Any]:
             "open_save_ms14": known,
             "native_component_enumeration": known,
             "native_parameter_write": known,
+            # These stay conservative until a version-specific native setter
+            # is observed by the COM capability probe.
+            "native_temperature_control": False,
+            "native_model_parameter_write": False,
+            "circuit_parameter_readback": known and parsed >= (14, 3, 0),
             "direct_output_requests": known and parsed >= (14, 3, 0),
             "command_engine": known,
             "roundtrip_netlist": known,
