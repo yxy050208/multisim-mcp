@@ -60,13 +60,15 @@
   `counter4_load`、`shift4_load`、`counter4_decode_load` 全部通过，5/5 案例引脚证据
   完整，141 个命名引脚连接通过，0 个失败、0 个拓扑不匹配。证据保存在本机
   `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-gated`。
-- 已开始混合信号阶段：新增 `hybrid_regression` 与 `tools/run_hybrid_regression.py`，当前
-  `not_rc_load` 和 `logic_chain_rc_load` 两条基线均在 Multisim 14.3 实机通过。工具先
-  生成带探针的 `.ms14`，再由 Multisim 重开保存副本并直接执行 COM 瞬态；两个工程的原生
-  拓扑、引脚、数字 0/5 V 摆幅和模拟 RC 动态响应均通过，组合链 10 个命名引脚连接全数
-  通过。正式矩阵证据保存在
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v2`；
-  这只是数字到模拟边界基线，尚不代表 ADC/DAC 或任意混合信号拓扑已覆盖。
+- 已完成混合信号阶段第一组原生基线：新增 `hybrid_regression` 与
+  `tools/run_hybrid_regression.py`，`not_rc_load`、`logic_chain_rc_load`、
+  `counter_q0_rc_load` 和 `shift_s0_rc_load` 四个案例均在 Multisim 14.3 实机通过。
+  工具先生成带探针的 `.ms14`，再由 Multisim 重开保存副本并直接执行 COM 瞬态；四个工程
+  的原生拓扑、器件完整性、命名引脚连接、数字 0/5 V 摆幅和模拟 RC 动态响应均通过。
+  正式矩阵证据保存在
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v4`；
+  这只是数字到模拟边界基线，尚不代表 ADC/DAC、二极管整形、受控源或任意混合信号拓扑
+  已覆盖。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的

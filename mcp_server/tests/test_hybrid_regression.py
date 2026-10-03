@@ -14,7 +14,12 @@ class HybridRegressionTest(unittest.TestCase):
         cases = hybrid_regression_matrix()
         self.assertEqual(
             [case.case_id for case in cases],
-            ["not_rc_load", "logic_chain_rc_load", "counter_q0_rc_load"],
+            [
+                "not_rc_load",
+                "logic_chain_rc_load",
+                "counter_q0_rc_load",
+                "shift_s0_rc_load",
+            ],
         )
         self.assertEqual(cases[0].manifest()["output_nets"], ["dout", "filt"])
 

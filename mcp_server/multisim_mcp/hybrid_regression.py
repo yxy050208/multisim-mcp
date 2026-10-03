@@ -101,6 +101,23 @@ RLOAD filt 0 100k
             ("q0", "filt"),
             ("VDD", "VCLK", "VRESET", "XCNT", "R1", "C1", "RLOAD"),
         ),
+        HybridRegressionCase(
+            "shift_s0_rc_load",
+            "Four-bit serial-in parallel-out shift-register output driving a first-order RC load.",
+            """VDD high 0 DC 5
+VDATA data 0 PULSE(0 5 0 1n 1n 40u 80u)
+VCLK clk 0 PULSE(0 5 0 1n 1n 10u 20u)
+VRESET reset 0 DC 0
+XSR data clk reset s0 s1 s2 s3 high 0 @SHIFT_REGISTER4
+R1 s0 filt 1k
+C1 filt 0 1u
+RLOAD filt 0 100k
+.end
+""",
+            "tran 1u 160u",
+            ("s0", "filt"),
+            ("VDD", "VDATA", "VCLK", "VRESET", "XSR", "R1", "C1", "RLOAD"),
+        ),
     )
     for case in cases:
         case.validate()
