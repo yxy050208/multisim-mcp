@@ -26,6 +26,8 @@
   不替代 Multisim 原生重开和仿真验收。
 - 增加逐板接口结构门禁：检查跨板连接器对称性、网络存在性、对端板引用和空板；
   `interface_validation` 失败时阻止后续逐板原生生成，且不改变 `native_status=unverified`。
+- 新增只读 MCP 工具 `plan_multiboard_engineering_request`，让 Agent 可以直接提交版本化
+  多板请求并读取候选分区与逐板逻辑工件；该工具不启动 COM、不写入工程文件。
 
 ## [1.3.0rc3] - 2026-09-25
 

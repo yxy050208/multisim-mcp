@@ -113,6 +113,8 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 
 ## 多板规划 / Multi-board planning
 
+MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求，执行只读校验和候选
+分板规划，不启动 COM、不写入工程文件。
 工程计划可以提供 `boards` 和 `components`，返回候选分板、跨板网络、连接器引脚和成本评分。
 板可以声明 `max_components` 和 `max_connector_pins` 约束；结果会返回每块板的
 `connector_pin_count`、`board_interfaces`、`violations` 和 `feasible`。候选排序会优先保留
