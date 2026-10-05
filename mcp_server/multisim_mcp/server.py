@@ -2603,9 +2603,10 @@ def run_native_multiboard_acceptance(
     any schematic or COM work.  Preview mode is side-effect free.  Execution opens,
     saves, reopens, reads back and simulates each board in the installed Multisim
     version, then compares explicit fixture observations and a full-design reference.
-    ``analysis`` accepts ``dc`` (default), ``tran`` or ``ac``. The latter two
-    use bounded values from ``analysis_options`` and compare final transient or
-    last-frequency magnitude observations.
+    ``analysis`` accepts ``dc`` (default), ``tran`` or ``ac``. Native results
+    retain complete sampled axes; TRAN and AC compare every aligned sample
+    (AC compares real and imaginary parts) without interpolation. Scalar
+    endpoint values remain a report summary only.
     """
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
