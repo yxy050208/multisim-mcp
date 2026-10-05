@@ -57,3 +57,17 @@ class EngineeringRequestTest(unittest.TestCase):
                 "boards": [{"id": "main"}],
                 "components": [{"refdes": "R1", "board": "aux", "nodes": ["a", "b"]}],
             })
+
+    def test_preserves_explicit_multiboard_fixtures(self) -> None:
+        result = validate_engineering_request({
+            "schema_version": 1, "title": "divider", "application": "boundary test",
+            "boards": [{"id": "power"}, {"id": "signal"}],
+            "fixtures": [{"id": "drive", "board_id": "signal", "kind": "voltage_source", "net": "bus", "reference_net": "0", "refdes": "VFIX1", "value": "5"}],
+        })
+        self.assertEqual(result["fixtures"][0]["id"], "drive")
+
+    def test_rejects_non_object_fixture(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_engineering_request({
+                "schema_version": 1, "title": "x", "application": "y", "fixtures": ["drive"]
+            })

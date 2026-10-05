@@ -414,6 +414,7 @@ def materialize_circuit_design_partition(
         "parent_design_id": design.design_id,
         "boards": board_results,
         "native_projects": "pending-per-board-generation-and-acceptance",
+        "interface_validation": logical["interface_validation"],
     }
     payload["artifact_digest"] = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

@@ -21,7 +21,8 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
     boards = request.get("boards", [{"id": "main", "role": "primary"}])
     experiments = request.get("experiments", [])
     components = request.get("components", [])
-    for name, value in (("constraints", constraints), ("objectives", objectives), ("boards", boards), ("experiments", experiments), ("components", components)):
+    fixtures = request.get("fixtures", [])
+    for name, value in (("constraints", constraints), ("objectives", objectives), ("boards", boards), ("experiments", experiments), ("components", components), ("fixtures", fixtures)):
         if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
             raise ValueError(f"{name} must be a list")
     normalized_boards = []
@@ -74,6 +75,11 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
             nodes=normalized_nodes,
             **({"board": component_board.strip()} if component_board is not None else {}),
         ))
+    normalized_fixtures = []
+    for item in fixtures:
+        if not isinstance(item, Mapping):
+            raise ValueError("each fixture must be an object")
+        normalized_fixtures.append(dict(item))
     return {
         "schema_version": 1,
         "title": title.strip(),
@@ -83,6 +89,7 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "boards": normalized_boards,
         "experiments": [dict(item) if isinstance(item, Mapping) else {"description": str(item)} for item in experiments],
         "components": normalized_components,
+        "fixtures": normalized_fixtures,
     }
 
 

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .engineering_request import validate_engineering_request
+from .multiboard_fixtures import validate_multiboard_fixture_contract
 from .multiboard_plan import materialize_multiboard_partition, rank_partition_candidates
 
 
@@ -48,6 +49,16 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
                 candidate["logical_artifacts"] = materialize_multiboard_partition(
                     normalized["components"], candidate)
                 structural_status = candidate["logical_artifacts"]["interface_validation"]["status"]
+                fixtures = normalized.get("fixtures", [])
+                if fixtures:
+                    fixture_contract = validate_multiboard_fixture_contract(
+                        candidate["logical_artifacts"], fixtures
+                    )
+                    candidate["fixture_contract"] = fixture_contract
+                    if fixture_contract["status"] != "valid":
+                        structural_status = "invalid-fixture-contract"
+                    elif fixture_contract["coverage_status"] != "complete":
+                        structural_status = "incomplete-fixture-coverage"
                 candidate["structural_status"] = structural_status
                 candidate["structurally_ready"] = structural_status == "valid"
             else:

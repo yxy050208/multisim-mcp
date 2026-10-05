@@ -3389,8 +3389,26 @@ def _set_probe_comphandle(item: ET.Element, symbol_id: str) -> None:
 def _pick_probe_point(
     wire_paths: list[list[tuple[float, float]]],
     pin_points: list[tuple[float, float]] | None = None,
+    *,
+    prefer_interior: bool = False,
 ) -> tuple[float, float] | None:
     """Pick a native-stable terminal point on an existing wire for a probe."""
+    if prefer_interior:
+        # A probe rendered exactly on a resistor/source pin is electrically
+        # valid but obscures the symbol and makes a generated sheet look as if
+        # the probe were attached to the body.  Primitive R/V and digital
+        # nets tolerate a wire-midpoint probe; L/C nets keep the historical
+        # terminal preference below because Multisim 14.x may omit their
+        # middle-of-wire probes on reopen.
+        interior_candidates: list[tuple[float, float, float]] = []
+        for path in wire_paths:
+            for start, end in zip(path, path[1:]):
+                length = abs(end[0] - start[0]) + abs(end[1] - start[1])
+                if length >= 24.0:
+                    interior_candidates.append((length, (start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
+        if interior_candidates:
+            _, x, y = max(interior_candidates, key=lambda item: item[0])
+            return x, y
     if pin_points:
         terminals = {point for path in wire_paths for point in (path[0], path[-1])}
         candidates = [point for point in pin_points if point in terminals]
@@ -3436,6 +3454,7 @@ def _add_probes(
     probe_nets: list[str],
     output_ms14: str,
     net_pin_points: dict[str, list[tuple[float, float]]] | None = None,
+    prefer_interior_nets: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Insert voltage probes on named nets and register them with Multisim."""
     probes: list[dict[str, Any]] = []
@@ -3482,7 +3501,11 @@ def _add_probes(
 
     for index, net in enumerate(probe_nets, start=1):
         refdes = f"PR{index}"
-        point = _pick_probe_point(net_wires.get(net, []), (net_pin_points or {}).get(net))
+        point = _pick_probe_point(
+            net_wires.get(net, []),
+            (net_pin_points or {}).get(net),
+            prefer_interior=net in (prefer_interior_nets or set()),
+        )
         if point is None:
             continue
 
@@ -4186,6 +4209,15 @@ def build_schematic(
             for name in probe_nets
             if _normalize_net(name)[0] != "0"
         ]
+    spec_kind_by_refdes = {spec.refdes.casefold(): spec.kind for spec in specs}
+    prefer_interior_probe_nets = {
+        net_name
+        for net_name, net_connections in connections.items()
+        if any(net_name == requested for requested in probe_nets)
+        and len(net_connections) >= 2
+        and all(spec_kind_by_refdes.get(str(item.get("refdes", "")).casefold()) not in {"L", "C"}
+                for item in net_connections)
+    }
     probes = _add_probes(
         root,
         composite,
@@ -4197,6 +4229,7 @@ def build_schematic(
         probe_nets,
         str(Path(output_path).with_suffix(".ms14")),
         net_pin_points,
+        prefer_interior_probe_nets,
     )
 
     model_warnings: list[str] = [
