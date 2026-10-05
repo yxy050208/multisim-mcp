@@ -38,6 +38,7 @@ class EngineeringRequestTest(unittest.TestCase):
     def test_normalizes_fixed_component_board(self) -> None:
         result = validate_engineering_request({
             "schema_version": 1, "title": "x", "application": "y",
+            "boards": [{"id": "power"}],
             "components": [{"refdes": "R1", "board": " power ", "nodes": ["a", "b"]}],
         })
         self.assertEqual(result["components"][0]["board"], "power")
@@ -47,4 +48,12 @@ class EngineeringRequestTest(unittest.TestCase):
             validate_engineering_request({
                 "schema_version": 1, "title": "x", "application": "y",
                 "components": [{"refdes": "R1", "board": " ", "nodes": ["a", "b"]}],
+            })
+
+    def test_rejects_fixed_component_board_not_declared_by_request(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_engineering_request({
+                "schema_version": 1, "title": "x", "application": "y",
+                "boards": [{"id": "main"}],
+                "components": [{"refdes": "R1", "board": "aux", "nodes": ["a", "b"]}],
             })

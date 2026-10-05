@@ -38,6 +38,7 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"board {board_id!r} {field} must be a positive integer")
         seen.add(board_id)
         normalized_boards.append(dict(board, id=board_id))
+    board_ids = {board["id"] for board in normalized_boards}
     normalized_objectives = []
     for item in objectives:
         if not isinstance(item, Mapping) or not isinstance(item.get("metric"), str):
@@ -63,6 +64,10 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
             not isinstance(component_board, str) or not component_board.strip()
         ):
             raise ValueError(f"component {item['refdes'].strip()!r} board must be a non-empty id")
+        if component_board is not None and component_board.strip() not in board_ids:
+            raise ValueError(
+                f"component {item['refdes'].strip()!r} has invalid fixed board {component_board.strip()!r}"
+            )
         normalized_components.append(dict(
             item,
             refdes=item["refdes"].strip(),
