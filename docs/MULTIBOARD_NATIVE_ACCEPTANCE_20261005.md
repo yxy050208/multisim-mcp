@@ -3,7 +3,7 @@
 本次验证使用本机授权 **Multisim 14.3**、32 位 Python COM worker 和本地模板包。
 证据目录在源码仓库之外：
 
-`C:\Users\18331\Documents\multisim-evidence\multiboard-fixture-divider-20261005-v7`
+`C:\Users\18331\Documents\multisim-evidence\multiboard-fixture-divider-20261005-v8`
 
 ## 验证流程
 
@@ -31,6 +31,8 @@
 `Multisim 14.3` 和带补丁号的等价版本字符串，不会因 COM 返回前缀而误报版本不匹配。
 验收还单独检查 `all_reopened_topology_pass`，它来自保存后重新打开工程的
 `ReportNetlist`，不是生成阶段的临时网表。
+根目录同时生成 `acceptance-report.md`；每块板的 `native-op.json` 保留原始 COM 响应，
+`native-op.csv` 便于表格分析和后续实验报告引用。
 
 ## 证据边界
 

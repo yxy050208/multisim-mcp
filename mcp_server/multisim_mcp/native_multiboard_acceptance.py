@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import csv
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
@@ -32,6 +33,61 @@ def _write_json(path: Path, value: Any) -> None:
         json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )
+
+
+def _write_native_op_csv(path: Path, values: Mapping[str, Any]) -> None:
+    """Persist scalar native operating-point values in a portable CSV."""
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("output", "value"))
+        for output in sorted(values):
+            value = values[output]
+            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                writer.writerow((str(output), format(float(value), ".17g")))
+
+
+def _write_acceptance_report(path: Path, result: Mapping[str, Any]) -> None:
+    """Write a concise human-readable report next to the machine evidence."""
+    lines = [
+        "# Multisim 多板原生验收报告",
+        "",
+        f"- 状态：`{result.get('status', 'unknown')}`",
+        f"- 验证状态：`{result.get('verification_status', 'unknown')}`",
+        f"- 目标版本：`{result.get('target_multisim_version', '')}`",
+        f"- 检测版本：`{result.get('multisim_version', '未执行')}`",
+        "",
+        "## 验收门禁",
+        "",
+        "| 门禁 | 结果 |",
+        "| --- | --- |",
+    ]
+    acceptance = result.get("native_acceptance", {})
+    if isinstance(acceptance, Mapping):
+        for name, passed in acceptance.items():
+            lines.append(f"| `{name}` | {'PASS' if passed is True else 'FAIL'} |")
+    lines.extend(["", "## 板级读数", "", "| 板 | 观测网络 | 电压（V） |", "| --- | --- | ---: |"])
+    observations = result.get("observations", {})
+    if isinstance(observations, Mapping):
+        for board_id in sorted(observations):
+            values = observations[board_id]
+            if isinstance(values, Mapping):
+                for net in sorted(values):
+                    lines.append(f"| `{board_id}` | `{net}` | {float(values[net]):.12g} |")
+    comparison = result.get("interface_comparison", {})
+    if isinstance(comparison, Mapping):
+        lines.extend(["", "## 跨板接口比较", ""])
+        lines.append(f"接口比较状态：`{comparison.get('status', 'unknown')}`。")
+    reference = result.get("full_reference")
+    if isinstance(reference, Mapping):
+        lines.extend(["", "## 完整电路参考比较", ""])
+        lines.append(f"完整参考状态：`{reference.get('status', 'unknown')}`。")
+    lines.extend([
+        "",
+        "本报告只覆盖当前首版 DC operating point 原生验收；它不替代 PCB、器件容差、"
+        "热设计或安全认证。",
+        "",
+    ])
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
 def _sha256(path: Path) -> str:
@@ -241,11 +297,17 @@ def run_native_multiboard_acceptance(
                 "reopened_outputs": outputs,
                 "native_op_values": values,
                 "native_op_ready": True,
+                "native_op_artifacts": {
+                    "json": "native-op.json",
+                    "csv": "native-op.csv",
+                },
                 "post_save_netlist_sha256": _sha256(report_path),
                 "reopened_topology": reopened_topology,
                 "topology": build.get("topology_diff", {}),
                 "layout": build.get("layout_validation", {}),
             }
+            _write_json(board_root / "native-op.json", native_op)
+            _write_native_op_csv(board_root / "native-op.csv", values)
             _write_json(board_root / "native-reopen-op.json", record)
             records.append(record)
 
@@ -293,10 +355,13 @@ def run_native_multiboard_acceptance(
                 net: reference_values_by_output.get(output)
                 for net, output in reference_probe_map.items()
             }
+            _write_json(reference_root / "native-op.json", reference_op)
+            _write_native_op_csv(reference_root / "native-op.csv", reference_values)
             _write_json(reference_root / "native-reopen-op.json", {
                 "outputs": reference_outputs,
                 "analysis": reference_op,
                 "values": reference_values,
+                "artifacts": {"json": "native-op.json", "csv": "native-op.csv"},
             })
             reference_board = next(
                 (
@@ -355,9 +420,11 @@ def run_native_multiboard_acceptance(
             "interface_comparison": interface_comparison,
             "full_reference": full_reference,
             "native_acceptance": native_acceptance,
+            "report": "acceptance-report.md",
         }
         result.pop("prepared_artifacts", None)
         _write_json(root / "acceptance.json", result)
+        _write_acceptance_report(root / "acceptance-report.md", result)
         return result
     finally:
         try:

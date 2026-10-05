@@ -138,6 +138,9 @@ Multisim 版本逐板生成、打开、保存、重开、ReportNetlist 回读和
 观测点与完整电路参考。只有返回 `status=accepted` 且 `verification_status=native-verified`
 时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版只覆盖
 DC operating point，AC/TRAN 多板验收仍需单独扩展。
+执行目录还会为每块板保留 `native-op.json`、`native-op.csv` 和
+`native-reopen-op.json`，根目录提供 `acceptance.json` 与 `acceptance-report.md`，便于
+人工审阅、归档和后续实验报告组装。
 
 ## 模型工程后端入口 / Model engineering handoff
 

@@ -49,6 +49,8 @@
   数为 115，experiment profile 为 92。
 - 原生验收新增保存后重开 `ReportNetlist` 的独立拓扑门禁 `all_reopened_topology_pass`，
   避免只凭生成阶段检查就把重开后被 Multisim 丢失的器件或网络判为通过。
+- 原生验收证据包新增每板 `native-op.json`、`native-op.csv`、根目录
+  `acceptance.json` 和 `acceptance-report.md`，便于人工审阅、数据分析和后续实验报告组装。
 
 ## [1.3.0rc3] - 2026-09-25
 

@@ -4,7 +4,11 @@ from pathlib import Path
 
 from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 from multisim_mcp.multiboard_plan import plan_multiboard_partition
-from multisim_mcp.native_multiboard_acceptance import run_native_multiboard_acceptance
+from multisim_mcp.native_multiboard_acceptance import (
+    _write_acceptance_report,
+    _write_native_op_csv,
+    run_native_multiboard_acceptance,
+)
 
 
 class NativeMultiboardAcceptanceTest(unittest.TestCase):
@@ -45,6 +49,30 @@ class NativeMultiboardAcceptanceTest(unittest.TestCase):
             self.assertFalse(result["execution_started"])
             self.assertFalse(output.exists())
             self.assertEqual(result["prepared_artifacts"]["fixture_contract"]["coverage_status"], "complete")
+
+    def test_evidence_helpers_export_machine_and_human_readable_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            csv_path = root / "native-op.csv"
+            report_path = root / "acceptance-report.md"
+            _write_native_op_csv(csv_path, {"V(z)": 2.5, "V(a)": 5.0})
+            _write_acceptance_report(report_path, {
+                "status": "accepted",
+                "verification_status": "native-verified",
+                "target_multisim_version": "14.3",
+                "multisim_version": "Multisim 14.3",
+                "native_acceptance": {"all_native_op_ready": True},
+                "observations": {"signal": {"z": 2.5}},
+                "interface_comparison": {"status": "pass"},
+                "full_reference": {"status": "pass"},
+            })
+            self.assertEqual(csv_path.read_text(encoding="utf-8").splitlines(), [
+                "output,value", "V(a),5", "V(z),2.5",
+            ])
+            report = report_path.read_text(encoding="utf-8")
+            self.assertIn("`accepted`", report)
+            self.assertIn("`all_native_op_ready`", report)
+            self.assertIn("`signal`", report)
 
 
 if __name__ == "__main__":
