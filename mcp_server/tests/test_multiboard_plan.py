@@ -70,3 +70,17 @@ class MultiboardPlanTest(unittest.TestCase):
         self.assertTrue(candidates[0]["score"]["feasible"])
         self.assertEqual(candidates[0]["connector_count"], 0)
         self.assertFalse(candidates[-1]["score"]["feasible"])
+
+    def test_fixed_component_board_is_preserved_during_enumeration(self):
+        candidates = rank_partition_candidates([
+            {"refdes": "V1", "board": "power", "nodes": ["out", "0"]},
+            {"refdes": "R1", "nodes": ["out", "0"]},
+        ], [{"id": "power"}, {"id": "signal"}])
+        self.assertEqual(len(candidates), 2)
+        self.assertTrue(all(item["component_assignment"]["V1"] == "power" for item in candidates))
+
+    def test_invalid_fixed_component_board_is_rejected(self):
+        with self.assertRaises(ValueError):
+            rank_partition_candidates([
+                {"refdes": "V1", "board": "missing", "nodes": ["out", "0"]},
+            ], [{"id": "power"}, {"id": "signal"}])

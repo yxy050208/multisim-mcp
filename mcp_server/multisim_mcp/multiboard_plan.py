@@ -146,9 +146,21 @@ def rank_partition_candidates(
     refs = [str(item["refdes"]) for item in components]
     if len(refs) > 10:
         raise ValueError("enumeration is limited to 10 components; use a solver for larger designs")
+    fixed_boards: dict[int, str] = {}
+    for index, component in enumerate(components):
+        if not isinstance(component, Mapping):
+            raise ValueError("each component must be an object")
+        if "board" in component:
+            board_id = str(component.get("board", "")).strip()
+            if board_id not in board_ids:
+                raise ValueError(f"component {refs[index]!r} has invalid fixed board {board_id!r}")
+            fixed_boards[index] = board_id
+    variable_indices = [index for index in range(len(refs)) if index not in fixed_boards]
     candidates: list[dict[str, Any]] = []
-    for assignment in product(board_ids, repeat=len(refs)):
-        assigned = [dict(item, board=assignment[index]) for index, item in enumerate(components)]
+    for variable_assignment in product(board_ids, repeat=len(variable_indices)):
+        selected = dict(zip(variable_indices, variable_assignment))
+        selected.update(fixed_boards)
+        assigned = [dict(item, board=selected[index]) for index, item in enumerate(components)]
         plan = plan_multiboard_partition(assigned, boards)
         plan["score"] = score_multiboard_partition(plan)
         candidates.append(plan)

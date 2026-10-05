@@ -34,3 +34,17 @@ class EngineeringRequestTest(unittest.TestCase):
                 "schema_version": 1, "title": "x", "application": "y",
                 "components": [{"refdes": "R1", "nodes": ["a", ""]}],
             })
+
+    def test_normalizes_fixed_component_board(self) -> None:
+        result = validate_engineering_request({
+            "schema_version": 1, "title": "x", "application": "y",
+            "components": [{"refdes": "R1", "board": " power ", "nodes": ["a", "b"]}],
+        })
+        self.assertEqual(result["components"][0]["board"], "power")
+
+    def test_rejects_empty_fixed_component_board(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_engineering_request({
+                "schema_version": 1, "title": "x", "application": "y",
+                "components": [{"refdes": "R1", "board": " ", "nodes": ["a", "b"]}],
+            })

@@ -58,7 +58,17 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
         normalized_nodes = [str(node).strip() for node in nodes]
         if any(not node for node in normalized_nodes):
             raise ValueError(f"component {item['refdes'].strip()!r} contains an empty node")
-        normalized_components.append(dict(item, refdes=item["refdes"].strip(), nodes=normalized_nodes))
+        component_board = item.get("board")
+        if component_board is not None and (
+            not isinstance(component_board, str) or not component_board.strip()
+        ):
+            raise ValueError(f"component {item['refdes'].strip()!r} board must be a non-empty id")
+        normalized_components.append(dict(
+            item,
+            refdes=item["refdes"].strip(),
+            nodes=normalized_nodes,
+            **({"board": component_board.strip()} if component_board is not None else {}),
+        ))
     return {
         "schema_version": 1,
         "title": title.strip(),
