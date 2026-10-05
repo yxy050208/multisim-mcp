@@ -15,7 +15,7 @@
   快速构建；正交布线器加入空间分桶，减少大图纸构建时间。
 - 恢复 LED 流水灯、呼吸灯、SWB 端子顺序、`.model/.subckt` 分行、COM `gen_py`
   缓存自愈、多节元件 `U1 -> U1A` 拓扑别名、模板包完整性检查和位号映射。
-- 统一 MCP profile 与 stdio 契约：`core=34`、`experiment=89`、
+- 统一 MCP profile 与 stdio 契约：`core=34`、`experiment=90`、
   `optimization=70`、`full=113`。
 
 ## 验证边界
