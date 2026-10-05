@@ -58,6 +58,7 @@ FEATURES: Final = (
     "design_binding",
     "design_import",
     "requirement_engineering",
+    "multiboard_planning",
     "correction_benchmarks",
     "durable_jobs",
     "experiment_resources",

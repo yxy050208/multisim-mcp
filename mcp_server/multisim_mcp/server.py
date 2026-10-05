@@ -100,6 +100,7 @@ from multisim_mcp.natural_engineering import parse_natural_request
 from multisim_mcp.natural_rlc import parse_natural_rlc_request
 from multisim_mcp.natural_opamp import parse_natural_opamp_request
 from multisim_mcp.model_engineering import model_plan_engineering_request
+from multisim_mcp.engineering_planner import build_engineering_plan
 from multisim_mcp.native_sweep_report import (
     compare_native_sweep_baseline as compare_native_sweep_records,
     export_native_sweep_report as write_native_sweep_report,
@@ -2513,6 +2514,19 @@ def _run_ngspice_netlist_impl(
     if heartbeat is not None:
         heartbeat()
     return result
+
+
+@mcp.tool()
+def plan_multiboard_engineering_request(request: dict[str, Any]) -> dict[str, Any]:
+    """Validate a structured multi-board request and return a planning-only contract.
+
+    This tool never opens Multisim, writes a project, or starts simulation.  A
+    feasible candidate may include board-local logical artifacts, but native
+    generation and acceptance remain a separate explicit step.
+    """
+    if not isinstance(request, dict):
+        raise ValueError("request must be an object")
+    return build_engineering_plan(request)
 
 
 @mcp.tool()
