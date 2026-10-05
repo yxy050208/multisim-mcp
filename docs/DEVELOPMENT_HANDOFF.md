@@ -81,8 +81,8 @@
   Multisim 为只有单个实体引脚的依赖网建立可保存的节点；命令引擎可运行但原生重开后
   输出通道缺失。ADC/DAC 适配器现在为表达式依赖网加入 1 GΩ 高值锚点。`dac_rc_bridge`
   在 Multisim 14.3 完成重开、拓扑、引脚、布局和 COM 瞬态验收，输出 `raw` 为 0–5 V，
-  `filt` 具有 0–0.3768 V 的 RC 响应；正式混合矩阵随后扩展为 10/10。证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261004-v12`。
+  `filt` 具有 0–0.3768 V 的 RC 响应；单比特 ADC/DAC 阶段的正式矩阵为 10/10。历史证据保存在本机
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261004-v10`。
 - 已完成对称的 `adc_rc_bridge` 原生闭环。ADC 端的模拟输入和电源依赖同样通过 1 GΩ
   高值锚点物化；Multisim 14.3 重开、拓扑、引脚、布局和 COM 瞬态均通过，输出 `digital`
   为 0–5 V，`filt` 具有 0–0.3768 V 的 RC 响应。ADC/DAC 的单比特桥接现均有独立原生
@@ -92,10 +92,15 @@
   组合电平（0、0.333、0.667 … 5 V）。独立证据保存在本机
   `C:\Users\18331\Documents\multisim-evidence\hybrid-multibit-probe-20261004`，
   正式混合信号回归矩阵已扩展并通过 12/12。
+- 已完成 `adc4_dac4_transfer` 原生闭环：在 Multisim 14.3 重开工程后执行 68 点三角
+  输入扫描，阈值附近排除 2 点后仍覆盖 0–15 全部 16 个编码；ADC 编码、数字电平、
+  DAC 加权重构和最终 RC 输出均通过。证据保存在本机
+  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261005-v13`，
+  当前正式混合信号矩阵为 13/13。
 - H 源（CCVS）已用闭合控制支路重新验证，排除了此前“理想源控制回路未闭合”造成的
   假阴性：命令引擎能得到 `raw` 的 0–5 V 和 `filt` 的 RC 响应，但 Multisim 14.3
   原生工程重开后的 COM 输出仍为全零。其连接表和引脚拓扑正确，但原生行为未通过，
-  因此 H 源继续标记为 `native unsupported/unverified`，不计入 12/12 正式矩阵。有效
+  因此 H 源继续标记为 `native unsupported/unverified`，不计入 13/13 正式矩阵。有效
   失败证据保存在本机 `C:\Users\18331\Documents\multisim-evidence\hybrid-ccvs-rc-20261004-v4`。
 - Multisim 后端能力现在显式记录官方 Automation API 的来源、`MultisimInterface.MultisimApp`
   ProgID、独立 32 位 COM worker、版本探测范围，以及官方接口没有元件放置和导线绘制方法。

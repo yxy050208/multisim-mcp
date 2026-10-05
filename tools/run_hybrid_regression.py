@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any
@@ -15,6 +17,7 @@ sys.path.insert(0, str(ROOT / "mcp_server"))
 
 from multisim_mcp.hybrid_regression import (  # noqa: E402
     HybridRegressionCase,
+    evaluate_converter_transfer,
     select_hybrid_regression_cases,
 )
 from multisim_mcp.native_project_run import run_native_project  # noqa: E402
@@ -70,10 +73,10 @@ def _native_observation(
             values = [float(row[column]) for row in rows]
         except (KeyError, TypeError, ValueError):
             continue
-        if values:
+        if values and all(math.isfinite(value) for value in values):
             observed.append(net)
             series[net] = values
-    pairs = list(zip(case.output_nets[0::2], case.output_nets[1::2]))
+    pairs = case.output_pairs or tuple(zip(case.output_nets[0::2], case.output_nets[1::2]))
     pair_checks: dict[str, dict[str, bool]] = {}
     for digital_net, analog_net in pairs:
         digital = series.get(digital_net, [])
@@ -84,7 +87,7 @@ def _native_observation(
         }
     digital_swing = bool(pair_checks) and all(item["digital_swing"] for item in pair_checks.values())
     analog_response = bool(pair_checks) and all(item["analog_response"] for item in pair_checks.values())
-    return {
+    observation = {
         "required_outputs": list(case.output_nets),
         "observed_outputs": sorted(observed),
         "missing_outputs": sorted(set(case.output_nets) - set(observed)),
@@ -98,6 +101,11 @@ def _native_observation(
         "checks": {"digital_swing": digital_swing, "analog_response": analog_response},
         "pair_checks": pair_checks,
     }
+    if case.converter_contract is not None:
+        observation["converter_transfer"] = evaluate_converter_transfer(case.converter_contract, series)
+    return observation
+
+
 def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
     output_dir = root / case.case_id
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -152,6 +160,8 @@ def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
         "digital_swing": observed["checks"]["digital_swing"],
         "analog_response": observed["checks"]["analog_response"],
     }
+    if case.converter_contract is not None:
+        checks["converter_transfer"] = observed.get("converter_transfer", {}).get("passed") is True
     return {
         "case_id": case.case_id,
         "checks": checks,
@@ -165,6 +175,28 @@ def run_case(case: HybridRegressionCase, root: Path) -> dict[str, Any]:
         "report": native.get("report"),
         "experiment_id": native.get("experiment_id"),
     }
+
+
+def _write_matrix_manifest(root: Path) -> Path:
+    """Write a compact hash manifest for the matrix summary itself."""
+    matrix_path = root / "matrix.json"
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "hybrid-regression-manifest",
+                "files": [{
+                    "path": "matrix.json",
+                    "sha256": hashlib.sha256(matrix_path.read_bytes()).hexdigest(),
+                }],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    return manifest_path
 
 
 def main() -> int:
@@ -244,6 +276,7 @@ def main() -> int:
     (args.output / "matrix.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    _write_matrix_manifest(args.output)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if summary["passed"] else 1
 

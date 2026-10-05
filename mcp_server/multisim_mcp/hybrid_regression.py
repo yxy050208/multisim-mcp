@@ -3,9 +3,122 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import math
 from typing import Any
 
 from .schematic_builder import parse_netlist
+
+
+@dataclass(frozen=True)
+class ConverterTransferContract:
+    """Sampled ADC-to-DAC transfer contract; bit nets are ordered LSB first."""
+
+    analog_input: str
+    digital_bits: tuple[str, ...]
+    analog_output: str
+    low_voltage: float = 0.0
+    high_voltage: float = 5.0
+    voltage_tolerance: float = 0.02
+    boundary_guard_voltage: float = 0.01
+
+    def validate(self) -> None:
+        nets = (self.analog_input, *self.digital_bits, self.analog_output)
+        if any(not isinstance(net, str) or not net for net in nets):
+            raise ValueError("converter contract requires non-empty net names")
+        if not 1 <= len(self.digital_bits) <= 8 or len(set(nets)) != len(nets):
+            raise ValueError("converter contract requires distinct input, bit and output nets")
+        values = (
+            self.low_voltage, self.high_voltage,
+            self.voltage_tolerance, self.boundary_guard_voltage,
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("converter contract voltages must be finite")
+        step = (self.high_voltage - self.low_voltage) / (1 << len(self.digital_bits))
+        if step <= 0 or not 0 < self.voltage_tolerance < step / 2:
+            raise ValueError("converter contract requires ordered rails and bounded tolerance")
+        if not 0 <= self.boundary_guard_voltage < step / 2:
+            raise ValueError("converter boundary guard must be smaller than half a step")
+
+
+def evaluate_converter_transfer(
+    contract: ConverterTransferContract,
+    series: dict[str, list[float]],
+) -> dict[str, Any]:
+    """Check all codes against independent quantizer and reconstruction equations."""
+    contract.validate()
+    nets = (contract.analog_input, *contract.digital_bits, contract.analog_output)
+    values = [series.get(net, []) for net in nets]
+    checks = {
+        "finite_samples": bool(values[0]) and all(
+            len(column) == len(values[0]) and all(math.isfinite(value) for value in column)
+            for column in values
+        ),
+        "all_codes_observed": False,
+        "digital_levels": False,
+        "adc_code_matches": False,
+        "dac_weighting_matches": False,
+    }
+    result: dict[str, Any] = {"passed": False, "checks": checks}
+    if not checks["finite_samples"]:
+        result["reason"] = "missing, non-finite or misaligned converter samples"
+        return result
+    levels = 1 << len(contract.digital_bits)
+    low, high = contract.low_voltage, contract.high_voltage
+    span = high - low
+    thresholds = [low + span * code / levels for code in range(1, levels)]
+    counts = [0] * levels
+    expected_counts = [0] * levels
+    mismatches: list[dict[str, Any]] = []
+    digital_levels = adc_matches = dac_matches = True
+    max_dac_error = 0.0
+    excluded = 0
+    for index, analog in enumerate(values[0]):
+        # Solver samples at a discontinuity do not establish static transfer
+        # accuracy. The exclusion window is explicit and narrower than a bin.
+        if any(abs(analog - threshold) <= contract.boundary_guard_voltage for threshold in thresholds):
+            excluded += 1
+            continue
+        expected_code = sum(analog > threshold for threshold in thresholds)
+        bits = [column[index] for column in values[1:-1]]
+        valid_bits = all(
+            min(abs(value - low), abs(value - high)) <= contract.voltage_tolerance
+            for value in bits
+        )
+        code = sum((value > (low + high) / 2) << bit for bit, value in enumerate(bits))
+        expected_output = low + span * code / (levels - 1)
+        error = abs(values[-1][index] - expected_output)
+        counts[code] += 1
+        expected_counts[expected_code] += 1
+        digital_levels &= valid_bits
+        adc_matches &= code == expected_code
+        dac_matches &= error <= contract.voltage_tolerance
+        max_dac_error = max(max_dac_error, error)
+        if len(mismatches) < 8 and (
+            not valid_bits or code != expected_code or error > contract.voltage_tolerance
+        ):
+            mismatches.append({
+                "sample": index, "input_voltage": analog, "expected_code": expected_code,
+                "observed_code": code, "dac_error_voltage": error,
+            })
+    checks.update({
+        "all_codes_observed": all(counts) and all(expected_counts),
+        "digital_levels": digital_levels,
+        "adc_code_matches": adc_matches,
+        "dac_weighting_matches": dac_matches,
+    })
+    result.update({
+        "passed": all(checks.values()),
+        "sample_count": len(values[0]),
+        "checked_samples": sum(counts),
+        "boundary_samples_excluded": excluded,
+        "observed_codes": [code for code, count in enumerate(counts) if count],
+        "samples_per_code": counts,
+        "expected_samples_per_code": expected_counts,
+        "max_dac_error_voltage": max_dac_error,
+        "mismatch_examples": mismatches,
+        "evidence": "sampled ADC thresholds and DAC full-scale binary reconstruction; boundary guard applied",
+    })
+    return result
 
 
 @dataclass(frozen=True)
@@ -20,6 +133,8 @@ class HybridRegressionCase:
     required_components: tuple[str, ...]
     max_crossings_per_wire: float = 2.0
     max_points: int = 2000
+    output_pairs: tuple[tuple[str, str], ...] = ()
+    converter_contract: ConverterTransferContract | None = None
 
     def validate(self) -> None:
         if not self.case_id or not self.case_id.replace("_", "").isalnum():
@@ -37,8 +152,23 @@ class HybridRegressionCase:
             raise ValueError(f"{self.case_id}: required components missing: {missing}")
         if not self.output_nets:
             raise ValueError(f"{self.case_id}: at least one output net is required")
+        if len(set(self.output_nets)) != len(self.output_nets):
+            raise ValueError(f"{self.case_id}: output nets must be unique")
+        if not self.output_pairs and len(self.output_nets) % 2:
+            raise ValueError(f"{self.case_id}: unpaired outputs require explicit output pairs")
         if self.max_crossings_per_wire <= 0 or self.max_points <= 0:
             raise ValueError(f"{self.case_id}: invalid geometry or sampling limit")
+        if any(
+            len(pair) != 2 or any(net not in self.output_nets for net in pair)
+            for pair in self.output_pairs
+        ):
+            raise ValueError(f"{self.case_id}: output pairs must refer to observed nets")
+        if self.converter_contract is not None:
+            self.converter_contract.validate()
+            contract = self.converter_contract
+            contract_nets = (contract.analog_input, *contract.digital_bits, contract.analog_output)
+            if any(net not in self.output_nets for net in contract_nets):
+                raise ValueError(f"{self.case_id}: converter contract requires observed nets")
 
     def manifest(self) -> dict[str, Any]:
         self.validate()
@@ -263,14 +393,30 @@ RLO filt 0 100k
 .end
 """,
             "tran 1u 160u",
-            # Repeating analog_out pairs let the generic hybrid gate check
-            # every bit's 0/5-V transition against the same DAC output.
-            ("d3", "analog_out", "d2", "analog_out", "d1", "analog_out", "d0", "analog_out"),
+            ("d3", "f3", "d2", "f2", "d1", "f1", "d0", "f0", "analog_out", "filt"),
             (
                 "VDD", "V3", "V2", "V1", "V0", "XDAC", "R3", "C3", "RL3",
                 "R2", "C2", "RL2", "R1", "C1", "RL1", "R0", "C0", "RL0",
                 "RO", "CO", "RLO",
             ),
+        ),
+        HybridRegressionCase(
+            "adc4_dac4_transfer",
+            "All sixteen ADC codes, DAC reconstruction and RC output under a triangular input sweep.",
+            """VDD high 0 DC 5
+VAN analog 0 PULSE(0 5 0 160u 160u 10u 340u)
+XADC analog d0 d1 d2 d3 high 0 @ADC4
+XDAC d0 d1 d2 d3 analog_out high 0 @DAC4
+RO analog_out filt 1k
+CO filt 0 10n
+RLO filt 0 100k
+.end
+""",
+            "tran 1u 340u",
+            ("d0", "d1", "d2", "d3", "analog", "analog_out", "filt"),
+            ("VDD", "VAN", "XADC", "XDAC", "RO", "CO", "RLO"),
+            output_pairs=(("d0", "filt"), ("d1", "filt"), ("d2", "filt"), ("d3", "filt")),
+            converter_contract=ConverterTransferContract("analog", ("d0", "d1", "d2", "d3"), "analog_out"),
         ),
     )
     for case in cases:
@@ -289,6 +435,8 @@ def select_hybrid_regression_cases(case_id: str | None = None) -> tuple[HybridRe
 
 
 __all__ = [
+    "ConverterTransferContract",
+    "evaluate_converter_transfer",
     "HybridRegressionCase",
     "hybrid_regression_matrix",
     "select_hybrid_regression_cases",
