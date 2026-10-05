@@ -136,11 +136,12 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 `execute=false`（默认）只返回夹具工件预览，不启动 COM；显式 `execute=true` 才会按目标
 Multisim 版本逐板生成、打开、保存、重开、ReportNetlist 回读和原生 DC OP，并比较显式
 观测点与完整电路参考。只有返回 `status=accepted` 且 `verification_status=native-verified`
-时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版只覆盖
-DC operating point，另支持显式 `analysis=tran` 或 `analysis=ac`；TRAN 比较末时刻读数，
-AC 比较末频率幅值，并要求 AC 响应不是全零，以防没有声明 AC 激励时误判为通过。
+时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版覆盖
+DC operating point，并支持显式 `analysis=tran` 或 `analysis=ac`。验收会保留并逐点比较
+原生返回的完整采样轴；TRAN 不再只看末时刻，AC 同时比较复数响应的实部和虚部，且
+不同采样轴不会插值。AC 还要求响应不是全零，以防没有声明 AC 激励时误判为通过。
 执行目录还会为每块板保留与分析类型对应的 `native-op.*`、`native-tran.*` 或
-`native-ac.*`，以及相应的重开记录；根目录提供 `acceptance.json` 与
+`native-ac.*`，以及对应的 `*-series.json`、`*-series.csv` 和重开记录；根目录提供 `acceptance.json` 与
 `acceptance-report.md`，便于人工审阅、归档和后续实验报告组装。
 
 ## 模型工程后端入口 / Model engineering handoff

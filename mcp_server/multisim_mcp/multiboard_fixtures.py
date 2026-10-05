@@ -520,11 +520,123 @@ def compare_multiboard_interface_observations(
     }
 
 
+def compare_multiboard_interface_series(
+    artifacts: Mapping[str, Any],
+    observations: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    *,
+    nets: Sequence[str] | None = None,
+    absolute_tolerance: float = 1e-9,
+) -> dict[str, Any]:
+    """Compare complete native sampled responses at every board endpoint.
+
+    ``observations`` is keyed by board id and net, with each leaf being a
+    decoded native series.  The function deliberately refuses interpolation:
+    independently simulated boards must expose the same native sample axis.
+    This keeps a scalar end-point match from hiding a transient or phase
+    mismatch.
+    """
+    if (
+        isinstance(absolute_tolerance, bool)
+        or not isinstance(absolute_tolerance, (int, float))
+        or not math.isfinite(float(absolute_tolerance))
+        or absolute_tolerance < 0
+    ):
+        raise ValueError("absolute_tolerance must be a finite non-negative number")
+    contract = validate_multiboard_fixture_contract(artifacts, [])
+    if contract["status"] != "valid":
+        raise ValueError("artifacts contain an invalid board interface contract")
+    interface_validation = artifacts.get("interface_validation")
+    if isinstance(interface_validation, Mapping) and interface_validation.get("status") != "valid":
+        raise ValueError("artifacts contain an invalid cross-board interface contract")
+    if not isinstance(observations, Mapping):
+        raise ValueError("observations must be an object keyed by board id")
+    selected = None if nets is None else {str(item).strip() for item in nets if str(item).strip()}
+    if selected is not None and not selected:
+        raise ValueError("nets must contain at least one non-empty net")
+    board_by_id = {
+        str(board.get("board_id", "")).strip(): board
+        for board in artifacts.get("boards", [])
+        if isinstance(board, Mapping)
+    }
+    interface_boards: dict[str, set[str]] = defaultdict(set)
+    for board_id, board in board_by_id.items():
+        raw_interfaces = board.get("interfaces", [])
+        if not isinstance(raw_interfaces, Sequence) or isinstance(raw_interfaces, (str, bytes)):
+            continue
+        for interface in raw_interfaces:
+            if not isinstance(interface, Mapping):
+                continue
+            net = str(interface.get("net", "")).strip()
+            if net and (selected is None or net in selected):
+                interface_boards[net].add(board_id)
+    # Imported lazily so the fixture contract remains usable by the backend
+    # without creating a module import cycle.
+    from .native_analysis_series import compare_native_series
+
+    comparisons: list[dict[str, Any]] = []
+    missing: list[dict[str, str]] = []
+    invalid_series: list[dict[str, str]] = []
+    for net, board_ids in sorted(interface_boards.items()):
+        endpoints: dict[str, Mapping[str, Any]] = {}
+        for board_id in sorted(board_ids):
+            raw_board = observations.get(board_id, {})
+            series = raw_board.get(net) if isinstance(raw_board, Mapping) else None
+            if not isinstance(series, Mapping):
+                missing.append({"board_id": board_id, "net": net})
+            elif series.get("status") != "pass":
+                invalid_series.append({
+                    "board_id": board_id,
+                    "net": net,
+                    "reason": str(series.get("reason", "native series is not verified")),
+                })
+            else:
+                endpoints[board_id] = series
+        if len(endpoints) < len(board_ids):
+            continue
+        baseline_board = sorted(endpoints)[0]
+        endpoint_comparisons = {
+            board_id: compare_native_series(
+                endpoints[baseline_board], endpoints[board_id],
+                absolute_tolerance=absolute_tolerance,
+            )
+            for board_id in sorted(endpoints)
+            if board_id != baseline_board
+        }
+        comparisons.append({
+            "net": net,
+            "boards": sorted(endpoints),
+            "baseline_board": baseline_board,
+            "sample_count": endpoints[baseline_board].get("sample_count", 0),
+            "endpoint_comparisons": endpoint_comparisons,
+            "passed": all(item.get("status") == "pass" for item in endpoint_comparisons.values()),
+        })
+    if invalid_series:
+        status = "invalid"
+    elif missing:
+        status = "unverified"
+    elif not comparisons:
+        status = "unverified"
+    else:
+        status = "pass" if all(item["passed"] for item in comparisons) else "fail"
+    return {
+        "schema_version": FIXTURE_SCHEMA_VERSION,
+        "kind": "multisim-mcp-multiboard-interface-series-comparison",
+        "status": status,
+        "verification_status": "unverified" if status in {"unverified", "invalid"} else "comparison-only",
+        "comparisons": comparisons,
+        "missing": missing,
+        "invalid_series": invalid_series,
+        "absolute_tolerance": float(absolute_tolerance),
+        "comparison_basis": "all-native-samples-real-and-imaginary; no interpolation",
+    }
+
+
 __all__ = [
     "FIXTURE_KINDS",
     "FIXTURE_SCHEMA_VERSION",
     "GROUND_NET_ALIASES",
     "compare_multiboard_interface_observations",
+    "compare_multiboard_interface_series",
     "materialize_multiboard_fixture_artifacts",
     "validate_multiboard_fixture_contract",
 ]

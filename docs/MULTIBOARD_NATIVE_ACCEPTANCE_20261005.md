@@ -37,9 +37,11 @@
 
 同一验收运行器还在仓库外完成了 TRAN 和 AC 接口验证：
 
-- `multiboard-fixture-divider-20261005-tran`：`accepted/native-verified`，末时刻读数与完整参考一致。
+- `multiboard-fixture-divider-20261005-tran`：`accepted/native-verified`，末时刻读数与完整参考一致（旧版标量门禁证据）。
 - 旧的 `multiboard-fixture-divider-20261005-ac` 运行使用纯 DC 夹具并产生全零响应；在当前门禁下该结果会被拒绝，不能当作有效 AC 证据，必须改用显式 `DC 0 AC 1` 激励。
 - `multiboard-fixture-divider-20261005-ac-excited-v2`：显式 `DC 0 AC 1` 激励，`accepted/native-verified`；末频率幅值为 `power.bus=1.0 V`、`signal.bus=1.0 V`、`signal.sense=0.49999999975 V`，`analysis_information_pass=true`。
+- `multiboard-fixture-divider-20261006-series-dc`：兼容旧 DC 调用路径，在新序列门禁下 `accepted/native-verified`。
+- `multiboard-fixture-divider-20261006-series-tran` 与 `multiboard-fixture-divider-20261006-series-ac`：在新增完整序列门禁后再次实机通过；TRAN 逐点比较 58 个原生采样点，AC 逐点比较 7 个频率点的复数响应，接口和完整参考的最大差异均为 `0`。
 
 ## 证据边界
 

@@ -50,11 +50,14 @@ This catches the common single-source-net case where the command engine can
 report a voltage but Multisim has no drawable wire segment on which to place a
 native probe.
 
-After native runs, pass measured endpoint values to
-`compare_multiboard_interface_observations` and select the exact interface
-nets with `nets=[...]`. Missing endpoints remain `unverified`; they are never
-interpreted as `0`. A comparison passes only when every selected endpoint is
-present and the absolute difference is within the declared tolerance.
+After native runs, a DC caller may pass scalar endpoint values to
+`compare_multiboard_interface_observations`. For TRAN and AC, use
+`compare_multiboard_interface_series` with the decoded `*-series.json` records:
+every native sample and the sampling axis must match, and AC compares real and
+imaginary parts. No interpolation is performed. Missing or downsampled
+endpoints remain `unverified`; they are never interpreted as `0`. A comparison
+passes only when every selected endpoint is present and within the declared
+tolerance at every sample.
 
 The returned artifact is ready for the next native stage only as an input. It
 does not prove an `.ms14` file. A native acceptance record still requires, for

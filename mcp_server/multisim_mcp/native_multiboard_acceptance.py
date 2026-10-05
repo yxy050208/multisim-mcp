@@ -1,10 +1,9 @@
 """Version-gated native acceptance for an explicit multi-board fixture plan.
 
-This is intentionally a narrow first native runner: it executes DC operating
-point on each saved/reopened board and compares voltage observations.  It is a
-reusable acceptance harness, rather than a claim that every multi-board
-experiment is already supported.  Transient/AC contracts can build on the
-same save/reopen and evidence manifest once their output semantics are fixed.
+Each board is saved/reopened in Multisim before native OP, transient or AC
+analysis. Acceptance compares complete native sampled responses and their
+axes; scalar values are report summaries only. This does not claim physical
+PCB verification or support for every multi-board fixture condition.
 """
 
 from __future__ import annotations
@@ -20,10 +19,17 @@ from typing import Any, Callable
 from .eda_core import CircuitDesign
 from .multiboard_fixtures import (
     compare_multiboard_interface_observations,
+    compare_multiboard_interface_series,
     materialize_multiboard_fixture_artifacts,
 )
 from .multiboard_plan import materialize_circuit_design_partition
 from .multisim_compat import parse_multisim_version
+from .native_analysis_series import (
+    compare_native_series,
+    extract_native_analysis_series,
+    native_series_informative,
+    write_native_series_csv,
+)
 from .spice_adapter import circuit_design_to_spice
 from .topology_validation import compare_roundtrip_topology
 
@@ -126,32 +132,16 @@ def _run_native_analysis(
 def _analysis_values(
     result: Mapping[str, Any], outputs: Sequence[str], analysis: str,
 ) -> dict[str, float | None]:
-    """Reduce native response rows to explicit scalar comparison observations."""
-    nested = result.get("results")
-    channels: Mapping[str, Any]
-    if isinstance(nested, Mapping):
-        channels = nested
-    elif len(outputs) == 1:
-        channels = {outputs[0]: result}
-    else:
-        channels = {}
+    """Reduce validated native rows to scalar report summaries, never acceptance."""
+    series = extract_native_analysis_series(result, outputs, analysis)
     values: dict[str, float | None] = {}
     for output in outputs:
-        payload = channels.get(output, {})
-        rows = payload.get("rows", []) if isinstance(payload, Mapping) else []
-        value: float | None = None
-        if isinstance(rows, list) and len(rows) >= 2 and all(isinstance(row, list) for row in rows):
-            if analysis == "dc":
-                candidate = rows[1][0] if rows[1] else None
-            elif analysis == "tran":
-                candidate = rows[1][-1] if rows[1] else None
-            else:
-                candidate = None
-                if len(rows) >= 3 and rows[1] and rows[2]:
-                    candidate = math.hypot(float(rows[1][-1]), float(rows[2][-1]))
-            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool) and math.isfinite(float(candidate)):
-                value = float(candidate)
-        values[output] = value
+        item = series[output]
+        values[output] = (
+            math.hypot(item["real"][-1], item["imaginary"][-1])
+            if item["status"] == "pass" and analysis == "ac" else
+            item["real"][-1] if item["status"] == "pass" else None
+        )
     return values
 
 
@@ -267,6 +257,65 @@ def _observation_values(
             and math.isfinite(float(native_values[output]))
         }
     return result
+
+
+def _series_observation_values(
+    board_records: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Mapping[str, Any]]]:
+    """Map board-local probe nets to their complete native sampled responses."""
+    result: dict[str, dict[str, Mapping[str, Any]]] = {}
+    for board in board_records:
+        board_id = str(board.get("board_id", "")).strip()
+        probe_map = board.get("probe_map", {})
+        series = board.get("native_analysis_series", {})
+        if not isinstance(probe_map, Mapping) or not isinstance(series, Mapping):
+            continue
+        result[board_id] = {
+            str(net): series[output]
+            for net, output in probe_map.items()
+            if output in series and isinstance(series[output], Mapping)
+        }
+    return result
+
+
+def _compare_full_reference_series(
+    board_records: Sequence[Mapping[str, Any]],
+    reference_series: Mapping[str, Mapping[str, Any]],
+    reference_nets: Sequence[str],
+) -> dict[str, Any]:
+    """Compare every declared board-local observation to the original circuit.
+
+    Nets may be distributed over several boards; no single board is required
+    to observe the entire design. Missing native probes remain unverified.
+    """
+    observations = _series_observation_values(board_records)
+    comparisons: list[dict[str, Any]] = []
+    missing_nets: list[str] = []
+    for net in reference_nets:
+        owners = [
+            board for board in board_records if net in board.get("probe_map", {})
+        ]
+        if not owners:
+            missing_nets.append(net)
+        for board in owners:
+            board_id = str(board["board_id"])
+            comparisons.append({
+                "board_id": board_id, "net": net,
+                **compare_native_series(
+                    reference_series.get(net), observations.get(board_id, {}).get(net),
+                    absolute_tolerance=1e-9,
+                ),
+            })
+    statuses = [item["status"] for item in comparisons]
+    status = (
+        "fail" if any(value in {"fail", "invalid"} for value in statuses) else
+        "unverified" if missing_nets or not statuses or "unverified" in statuses else "pass"
+    )
+    return {
+        "status": status, "tolerance": 1e-9, "comparisons": comparisons,
+        "missing_nets": missing_nets,
+        "comparison_basis": "every-observed-board-net; all-native-samples-real-and-imaginary",
+    }
 
 
 def _reopened_topology(
@@ -416,6 +465,12 @@ def run_native_multiboard_acceptance(
                 raise RuntimeError(
                     f"{board_id}: native {analysis_kind} did not produce complete probe values"
                 )
+            native_series = extract_native_analysis_series(
+                native_analysis, outputs, analysis_kind, normalized_analysis_options
+            )
+            native_series_ready = all(
+                item.get("status") == "pass" for item in native_series.values()
+            )
             analysis_stem = "native-op" if analysis_kind == "dc" else f"native-{analysis_kind}"
             record = {
                 "board_id": board_id,
@@ -430,12 +485,15 @@ def run_native_multiboard_acceptance(
                 "analysis": analysis_kind,
                 "native_analysis_values": values,
                 "native_op_values": values if analysis_kind == "dc" else {},
-                "native_analysis_ready": True,
-                "native_analysis_informative": _analysis_informative(analysis_kind, values),
-                "native_op_ready": True,
+                "native_analysis_series": native_series,
+                "native_analysis_ready": native_series_ready,
+                "native_analysis_informative": native_series_informative(analysis_kind, native_series),
+                "native_op_ready": native_series_ready,
                 "native_analysis_artifacts": {
                     "json": f"{analysis_stem}.json",
                     "csv": f"{analysis_stem}.csv",
+                    "series_json": f"{analysis_stem}-series.json",
+                    "series_csv": f"{analysis_stem}-series.csv",
                 },
                 "post_save_netlist_sha256": _sha256(report_path),
                 "reopened_topology": reopened_topology,
@@ -444,6 +502,8 @@ def run_native_multiboard_acceptance(
             }
             _write_json(board_root / f"{analysis_stem}.json", native_analysis)
             _write_native_op_csv(board_root / f"{analysis_stem}.csv", values)
+            _write_json(board_root / f"{analysis_stem}-series.json", native_series)
+            write_native_series_csv(board_root / f"{analysis_stem}-series.csv", native_series)
             reopen_name = "native-reopen-op.json" if analysis_kind == "dc" else f"native-reopen-{analysis_kind}.json"
             _write_json(board_root / reopen_name, {
                 **record,
@@ -452,6 +512,7 @@ def run_native_multiboard_acceptance(
             records.append(record)
 
         observations = _observation_values(records)
+        series_observations = _series_observation_values(records)
         interface_nets = sorted({
             str(item["net"])
             for fixture in fixtures
@@ -459,8 +520,17 @@ def run_native_multiboard_acceptance(
             for item in [fixture]
             if item.get("net")
         })
-        interface_comparison = compare_multiboard_interface_observations(
+        scalar_interface_comparison = compare_multiboard_interface_observations(
             prepared, observations, nets=interface_nets or None
+        )
+        series_interface_comparison = compare_multiboard_interface_series(
+            prepared, series_observations, nets=interface_nets or None
+        )
+        # Preserve the original scalar result for DC consumers; transient and
+        # AC acceptance is gated by the complete sampled response instead.
+        interface_comparison = (
+            scalar_interface_comparison
+            if analysis_kind == "dc" else series_interface_comparison
         )
         # A complete-design reference uses the original source netlist and the
         # same explicitly observed nets; no fixture is inferred for it.
@@ -485,8 +555,15 @@ def run_native_multiboard_acceptance(
             ))
             if reference_build.get("success") is not True:
                 raise RuntimeError("full reference schematic generation failed")
+            _write_json(reference_root / "build.json", reference_build)
             client.save_circuit(str(reference_root / "circuit.ms14"))
             client.open_circuit(str(reference_root / "circuit.ms14"))
+            reference_report_path = reference_root / "reopened-report-netlist.txt"
+            client.report_netlist(str(reference_report_path), False, 0)
+            reference_topology = _reopened_topology(
+                {"design": design.to_dict()},
+                reference_report_path.read_bytes().decode("utf-8", errors="replace"),
+            )
             reference_outputs = [str(item) for item in client.enum_outputs(0)]
             if not reference_outputs:
                 raise RuntimeError("full reference project has no native probe outputs")
@@ -495,6 +572,10 @@ def run_native_multiboard_acceptance(
             )
             reference_values_by_output = _analysis_values(
                 reference_analysis, reference_outputs, analysis_kind
+            )
+            reference_series_by_output = extract_native_analysis_series(
+                reference_analysis, reference_outputs, analysis_kind,
+                normalized_analysis_options,
             )
             reference_probe_map = _probe_map(reference_build)
             reference_values = {
@@ -505,11 +586,20 @@ def run_native_multiboard_acceptance(
             reference_reopen_name = "native-reopen-op.json" if analysis_kind == "dc" else f"native-reopen-{analysis_kind}.json"
             _write_json(reference_root / f"{reference_stem}.json", reference_analysis)
             _write_native_op_csv(reference_root / f"{reference_stem}.csv", reference_values)
+            _write_json(reference_root / f"{reference_stem}-series.json", reference_series_by_output)
+            write_native_series_csv(
+                reference_root / f"{reference_stem}-series.csv", reference_series_by_output
+            )
             _write_json(reference_root / reference_reopen_name, {
                 "outputs": reference_outputs,
                 "analysis": reference_analysis,
                 "values": reference_values,
-                "artifacts": {"json": f"{reference_stem}.json", "csv": f"{reference_stem}.csv"},
+                "reopened_topology": reference_topology,
+                "artifacts": {
+                    "json": f"{reference_stem}.json", "csv": f"{reference_stem}.csv",
+                    "series_json": f"{reference_stem}-series.json",
+                    "series_csv": f"{reference_stem}-series.csv",
+                },
             })
             reference_board = next(
                 (
@@ -530,13 +620,27 @@ def run_native_multiboard_acceptance(
                 for net in reference_nets
                 if net in signal_values and isinstance(reference_values.get(net), (int, float))
             }
+            reference_comparison = _compare_full_reference_series(
+                records,
+                {
+                    net: reference_series_by_output[output]
+                    for net, output in reference_probe_map.items()
+                    if output in reference_series_by_output
+                },
+                reference_nets,
+            )
             full_reference = {
-                "status": "pass" if len(differences) == len(reference_nets) and all(value <= 1e-9 for value in differences.values()) else "fail",
-                "tolerance": 1e-9,
+                **reference_comparison,
                 "board": reference_board["board_id"] if reference_board is not None else None,
                 "board_values": signal_values,
                 "reference_values": reference_values,
                 "differences": differences,
+                "reopened_topology": reference_topology,
+                "layout": reference_build.get("layout_validation", {}),
+                "analysis_ready": bool(reference_series_by_output) and all(
+                    item["status"] == "pass" for item in reference_series_by_output.values()
+                ),
+                "analysis_informative": native_series_informative(analysis_kind, reference_series_by_output),
             }
         native_acceptance = {
             "all_boards_build": all(item["build_success"] for item in records),
@@ -556,7 +660,13 @@ def run_native_multiboard_acceptance(
             # Kept as a compatibility alias for consumers of the original DC-only gate.
             "all_native_op_ready": all(item["native_analysis_ready"] for item in records),
             "interface_values_match": interface_comparison["status"] == "pass",
+            "interface_series_match": series_interface_comparison["status"] == "pass",
             "matches_full_reference": full_reference is None or full_reference["status"] == "pass",
+            "full_reference_ready": full_reference is None or (
+                full_reference["analysis_ready"] and full_reference["analysis_informative"]
+                and full_reference["reopened_topology"]["status"] == "pass"
+                and full_reference["layout"].get("status") == "pass"
+            ),
         }
         result = {
             **preview,
@@ -571,6 +681,8 @@ def run_native_multiboard_acceptance(
             "boards": records,
             "observations": observations,
             "interface_comparison": interface_comparison,
+            "scalar_interface_comparison": scalar_interface_comparison,
+            "series_interface_comparison": series_interface_comparison,
             "full_reference": full_reference,
             "native_acceptance": native_acceptance,
             "report": "acceptance-report.md",

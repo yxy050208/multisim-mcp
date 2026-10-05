@@ -4,6 +4,7 @@ import math
 from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 from multisim_mcp.multiboard_fixtures import (
     compare_multiboard_interface_observations,
+    compare_multiboard_interface_series,
     materialize_multiboard_fixture_artifacts,
     validate_multiboard_fixture_contract,
 )
@@ -136,6 +137,25 @@ class MultiboardFixtureTest(unittest.TestCase):
         self.assertEqual(result["status"], "invalid")
         self.assertEqual(result["comparisons"], [])
         self.assertEqual(result["invalid_values"], [{"board_id": "power", "net": "bus"}])
+
+    def test_interface_series_comparison_checks_every_native_sample(self):
+        artifacts = materialize_multiboard_fixture_artifacts(
+            self._divider_artifacts(), self._fixtures()
+        )
+        power = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0],
+            "real": [5.0, 5.0, 5.0], "imaginary": [0.0, 0.0, 0.0],
+        }
+        signal = {**power}
+        passed = compare_multiboard_interface_series(
+            artifacts, {"power": {"bus": power}, "signal": {"bus": signal}}, nets=["bus"]
+        )
+        self.assertEqual(passed["status"], "pass")
+        changed = {**signal, "real": [5.0, 4.0, 5.0]}
+        failed = compare_multiboard_interface_series(
+            artifacts, {"power": {"bus": power}, "signal": {"bus": changed}}, nets=["bus"]
+        )
+        self.assertEqual(failed["status"], "fail")
 
     def test_voltage_source_can_declare_explicit_ac_model(self):
         artifacts = self._divider_artifacts()
