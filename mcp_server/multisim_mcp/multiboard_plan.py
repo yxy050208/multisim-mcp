@@ -1,6 +1,8 @@
 """Deterministic multi-board partition planning from a logical netlist."""
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from typing import Any, Mapping, Sequence
 from itertools import product
@@ -131,6 +133,111 @@ def score_multiboard_partition(plan: Mapping[str, Any]) -> dict[str, Any]:
             "objective": "minimize connector count and cross-board signal cost"}
 
 
+def materialize_multiboard_partition(
+    components: Sequence[Mapping[str, Any]],
+    partition: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Materialize a feasible partition into deterministic per-board logical artifacts.
+
+    The returned artifacts are a board-local view of the source components and
+    nets.  They deliberately do not contain ``.ms14`` files or claim native
+    verification; each board must still be built, reopened, and simulated by
+    the Multisim backend in a later stage.
+    """
+    if not isinstance(partition, Mapping):
+        raise ValueError("partition must be an object")
+    if partition.get("feasible") is not True or partition.get("violations"):
+        raise ValueError("only feasible partitions can be materialized")
+    raw_boards = partition.get("boards")
+    assignment = partition.get("component_assignment")
+    interfaces = partition.get("board_interfaces")
+    connectors = partition.get("connectors")
+    if not isinstance(raw_boards, Sequence) or isinstance(raw_boards, (str, bytes)):
+        raise ValueError("partition boards must be a list")
+    if not isinstance(assignment, Mapping) or not isinstance(interfaces, Mapping):
+        raise ValueError("partition assignment and interfaces are required")
+    if not isinstance(connectors, Sequence) or isinstance(connectors, (str, bytes)):
+        raise ValueError("partition connectors must be a list")
+    board_ids = [str(item.get("id", "")).strip() for item in raw_boards if isinstance(item, Mapping)]
+    if len(board_ids) != len(raw_boards) or any(not item for item in board_ids):
+        raise ValueError("partition boards require non-empty ids")
+    if len(set(board_ids)) != len(board_ids):
+        raise ValueError("partition boards require unique ids")
+
+    source_by_ref: dict[str, Mapping[str, Any]] = {}
+    for component in components:
+        if not isinstance(component, Mapping):
+            raise ValueError("each component must be an object")
+        refdes = str(component.get("refdes", "")).strip()
+        if not refdes or refdes in source_by_ref:
+            raise ValueError("components require unique non-empty refdes")
+        if refdes not in assignment:
+            raise ValueError(f"partition is missing component assignment for {refdes!r}")
+        assigned_board = str(assignment[refdes]).strip()
+        if assigned_board not in board_ids:
+            raise ValueError(f"component {refdes!r} has invalid partition board")
+        nodes = component.get("nodes", [])
+        if not isinstance(nodes, Sequence) or isinstance(nodes, (str, bytes)):
+            raise ValueError(f"component {refdes!r} nodes must be a list")
+        source_by_ref[refdes] = component
+    if set(assignment) != set(source_by_ref):
+        raise ValueError("partition assignment does not match components")
+
+    connector_by_net = {
+        str(item.get("net", "")): dict(item)
+        for item in connectors
+        if isinstance(item, Mapping) and str(item.get("net", "")).strip()
+    }
+    board_artifacts: list[dict[str, Any]] = []
+    for board_id in board_ids:
+        board_components: list[dict[str, Any]] = []
+        board_nets: set[str] = set()
+        for refdes, component in source_by_ref.items():
+            if str(assignment[refdes]).strip() != board_id:
+                continue
+            nodes = [str(node).strip() for node in component.get("nodes", [])]
+            board_components.append(dict(component, refdes=refdes, board=board_id, nodes=nodes))
+            board_nets.update(nodes)
+        board_net_records = []
+        for net in sorted(board_nets):
+            connector = connector_by_net.get(net)
+            board_net_records.append({
+                "name": net,
+                "scope": "cross-board" if connector else "board-local",
+                "connector": connector.get("id") if connector else None,
+                "pin": connector.get("pin") if connector else None,
+                "peer_boards": [
+                    peer for peer in connector.get("boards", []) if peer != board_id
+                ] if connector else [],
+            })
+        board_interfaces = [dict(item) for item in interfaces.get(board_id, [])]
+        board_artifacts.append({
+            "schema_version": 1,
+            "kind": "multisim-mcp-board-logical-artifact",
+            "board_id": board_id,
+            "status": "logical-only",
+            "verification_status": "unverified",
+            "components": board_components,
+            "nets": board_net_records,
+            "interfaces": board_interfaces,
+            "native_project": None,
+        })
+
+    payload = {
+        "schema_version": 1,
+        "kind": "multisim-mcp-multiboard-logical-artifacts",
+        "status": "logical-only",
+        "verification_status": "unverified",
+        "source": "feasible-multiboard-partition",
+        "boards": board_artifacts,
+        "native_projects": "pending-per-board-generation-and-acceptance",
+    }
+    payload["artifact_digest"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
 def rank_partition_candidates(
     components: Sequence[Mapping[str, Any]], boards: Sequence[Mapping[str, Any]],
     *, max_candidates: int = 256,
@@ -171,4 +278,9 @@ def rank_partition_candidates(
     return candidates[:max_candidates]
 
 
-__all__ = ["plan_multiboard_partition", "score_multiboard_partition", "rank_partition_candidates"]
+__all__ = [
+    "materialize_multiboard_partition",
+    "plan_multiboard_partition",
+    "score_multiboard_partition",
+    "rank_partition_candidates",
+]

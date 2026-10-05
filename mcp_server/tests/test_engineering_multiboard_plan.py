@@ -11,3 +11,8 @@ class EngineeringMultiboardPlanTest(unittest.TestCase):
                                   {"refdes": "R1", "nodes": ["out", "0"]}]}
         plan = build_engineering_plan(request)
         self.assertEqual(plan["multiboard_candidates"][0]["score"]["cost"], 0)
+        self.assertEqual(plan["multiboard_candidates"][0]["logical_artifacts"]["status"], "logical-only")
+        self.assertEqual(
+            plan["multiboard_candidates"][0]["logical_artifacts"]["verification_status"],
+            "unverified",
+        )

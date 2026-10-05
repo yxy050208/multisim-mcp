@@ -1,6 +1,11 @@
 import unittest
 
-from multisim_mcp.multiboard_plan import plan_multiboard_partition, score_multiboard_partition, rank_partition_candidates
+from multisim_mcp.multiboard_plan import (
+    materialize_multiboard_partition,
+    plan_multiboard_partition,
+    score_multiboard_partition,
+    rank_partition_candidates,
+)
 
 
 class MultiboardPlanTest(unittest.TestCase):
@@ -84,3 +89,36 @@ class MultiboardPlanTest(unittest.TestCase):
             rank_partition_candidates([
                 {"refdes": "V1", "board": "missing", "nodes": ["out", "0"]},
             ], [{"id": "power"}, {"id": "signal"}])
+
+    def test_materializes_board_local_components_and_cross_board_interfaces(self):
+        components = [
+            {"refdes": "V1", "kind": "V", "nodes": ["bus", "0"]},
+            {"refdes": "R1", "kind": "R", "nodes": ["bus", "sense"]},
+            {"refdes": "R2", "kind": "R", "nodes": ["sense", "0"]},
+        ]
+        partition = plan_multiboard_partition(
+            [dict(components[0], board="power"), dict(components[1], board="signal"), dict(components[2], board="signal")],
+            [{"id": "power"}, {"id": "signal"}],
+        )
+        artifacts = materialize_multiboard_partition(components, partition)
+        self.assertEqual(artifacts["status"], "logical-only")
+        self.assertEqual([item["board_id"] for item in artifacts["boards"]], ["power", "signal"])
+        power = artifacts["boards"][0]
+        signal = artifacts["boards"][1]
+        self.assertEqual([item["refdes"] for item in power["components"]], ["V1"])
+        self.assertEqual([item["refdes"] for item in signal["components"]], ["R1", "R2"])
+        self.assertEqual(next(item for item in power["nets"] if item["name"] == "bus")["scope"], "cross-board")
+        self.assertIn("bus", [item["net"] for item in signal["interfaces"]])
+        self.assertIsNotNone(artifacts["artifact_digest"])
+
+    def test_infeasible_partition_cannot_be_materialized(self):
+        partition = plan_multiboard_partition(
+            [{"refdes": "R1", "board": "a", "nodes": ["x", "0"]}],
+            [{"id": "a", "max_components": 1}],
+        )
+        # Make the infeasible state explicit without relying on an invalid board limit.
+        partition["feasible"] = False
+        partition["violations"] = [{"board": "a", "constraint": "test"}]
+        with self.assertRaises(ValueError):
+            materialize_multiboard_partition(
+                [{"refdes": "R1", "nodes": ["x", "0"]}], partition)

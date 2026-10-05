@@ -117,7 +117,9 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 板可以声明 `max_components` 和 `max_connector_pins` 约束；结果会返回每块板的
 `connector_pin_count`、`board_interfaces`、`violations` 和 `feasible`。候选排序会优先保留
 满足约束的方案，违反约束的方案仍保留并明确标记为 `infeasible`，不会被当作可交付设计。
-该结果是拓扑规划，尚未自动生成多个独立 `.ms14` 工程；每块板仍需分别通过原生网表和仿真验收。
+可行候选会附带 `logical_artifacts`：每块板的组件、板内网络、跨板连接器和接口清单。
+这些工件的 `status` 为 `logical-only`、`verification_status` 为 `unverified`，用于下一阶段
+逐板生成和验收，不是已经生成的 `.ms14` 工程。每块板仍需分别通过原生网表和仿真验收。
 
 ## 模型工程后端入口 / Model engineering handoff
 

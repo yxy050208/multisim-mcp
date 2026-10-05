@@ -106,8 +106,10 @@
   ProgID、独立 32 位 COM worker、版本探测范围，以及官方接口没有元件放置和导线绘制方法。
   未来接入新的 NI API 时沿用同一 EDA 后端契约，不改变源网表、拓扑门禁和实验报告格式。
 - 多板规划已增加板级 `max_components` / `max_connector_pins` 约束、每板接口清单和
-  `feasible`/`infeasible` 结果。当前仍是逻辑拓扑规划，尚未自动发布多个独立 `.ms14`
-  工程；下一步应把可行分区绑定到逐板原生生成、回读和仿真门禁。
+  `feasible`/`infeasible` 结果；固定的组件板归属会在候选枚举中保留。可行候选现在
+  附带确定性的逐板 `logical_artifacts`（组件、板内/跨板网络、连接器和接口），但其
+  `status=logical-only`、`verification_status=unverified`，尚未自动发布多个独立 `.ms14`
+  工程；下一步应将这些工件逐板绑定到原生生成、回读和仿真门禁。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的

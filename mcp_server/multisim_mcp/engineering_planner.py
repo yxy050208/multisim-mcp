@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .engineering_request import validate_engineering_request
-from .multiboard_plan import rank_partition_candidates
+from .multiboard_plan import materialize_multiboard_partition, rank_partition_candidates
 
 
 def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -43,6 +43,10 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
     if normalized["components"] and len(normalized["boards"]) > 1:
         plan["multiboard_candidates"] = rank_partition_candidates(
             normalized["components"], normalized["boards"], max_candidates=32)
+        for candidate in plan["multiboard_candidates"]:
+            if candidate.get("feasible") is True:
+                candidate["logical_artifacts"] = materialize_multiboard_partition(
+                    normalized["components"], candidate)
     else:
         plan["multiboard_candidates"] = []
     unsigned = dict(plan)
