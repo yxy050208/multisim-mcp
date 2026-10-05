@@ -154,6 +154,8 @@ class MultiboardPlanTest(unittest.TestCase):
         self.assertIn("R1 bus sense 1k", signal["spice_netlist"])
         self.assertIn("external interface", signal["spice_netlist"])
         self.assertEqual(power["design"]["components"][0]["refdes"], "V1")
+        self.assertNotIn("V1 bus 0 5", signal["design"]["source_netlist"])
+        self.assertEqual(signal["design"]["source_netlist"], signal["spice_netlist"])
 
     def test_empty_board_is_structurally_blocked(self):
         artifacts = materialize_multiboard_partition(

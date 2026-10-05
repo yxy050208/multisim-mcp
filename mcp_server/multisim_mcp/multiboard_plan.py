@@ -381,6 +381,20 @@ def materialize_circuit_design_partition(
             )
             lines[end_index:end_index] = interface_comments
             preview = "\n".join(lines) + "\n"
+        # The parent source is only used above to recover inline model
+        # definitions.  Persist the partitioned preview so a later default
+        # ``prefer_source=True`` serialization cannot restore the full design.
+        board_design = CircuitDesign(
+            design_id=board_design.design_id,
+            title=board_design.title,
+            components=board_design.components,
+            nets=board_design.nets,
+            parameters=board_design.parameters,
+            model_references=board_design.model_references,
+            annotations=board_design.annotations,
+            source_netlist=preview,
+            revision=board_design.revision,
+        )
         board_results.append({
             "board_id": board_id,
             "status": "logical-only",
