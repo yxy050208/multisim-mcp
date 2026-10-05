@@ -6,15 +6,33 @@ from typing import Any, Mapping, Sequence
 from itertools import product
 
 
+def _positive_limit(board: Mapping[str, Any], field: str, board_id: str) -> int | None:
+    value = board.get(field)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"board {board_id!r} {field} must be a positive integer")
+    return value
+
+
 def plan_multiboard_partition(
     components: Sequence[Mapping[str, Any]],
     boards: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     if not boards:
         raise ValueError("boards must not be empty")
+    if any(not isinstance(board, Mapping) for board in boards):
+        raise ValueError("each board must be an object")
     board_ids = [str(board.get("id", "")).strip() for board in boards]
     if any(not item for item in board_ids) or len(set(board_ids)) != len(board_ids):
         raise ValueError("boards require unique non-empty ids")
+    limits = {
+        board_id: {
+            "max_components": _positive_limit(board, "max_components", board_id),
+            "max_connector_pins": _positive_limit(board, "max_connector_pins", board_id),
+        }
+        for board_id, board in zip(board_ids, boards)
+    }
     assignment: dict[str, str] = {}
     nets: dict[str, set[str]] = defaultdict(set)
     for component in components:
@@ -27,7 +45,10 @@ def plan_multiboard_partition(
             raise ValueError(f"duplicate component refdes: {refdes}")
         assignment[refdes] = board
         for node in nodes:
-            nets[str(node)].add(board)
+            node_name = str(node).strip()
+            if not node_name:
+                raise ValueError(f"component {refdes!r} contains an empty node")
+            nets[node_name].add(board)
     crossings = [
         {"net": net, "boards": sorted(owners), "connector_required": True}
         for net, owners in sorted(nets.items()) if len(owners) > 1
@@ -37,19 +58,61 @@ def plan_multiboard_partition(
         connectors.append({
             "id": f"J{index}", "net": crossing["net"],
             "boards": crossing["boards"], "pin": index,
-            "signal_type": "ground" if crossing["net"] in {"0", "gnd", "ground"} else "signal",
+            "signal_type": "ground" if crossing["net"].casefold() in {"0", "gnd", "ground"} else "signal",
         })
+    connector_pins_by_board = {board_id: 0 for board_id in board_ids}
+    interfaces_by_board = {board_id: [] for board_id in board_ids}
+    for connector in connectors:
+        for board_id in connector["boards"]:
+            connector_pins_by_board[board_id] += 1
+            interfaces_by_board[board_id].append({
+                "connector": connector["id"],
+                "pin": connector["pin"],
+                "net": connector["net"],
+                "signal_type": connector["signal_type"],
+                "peer_boards": [peer for peer in connector["boards"] if peer != board_id],
+            })
+    component_counts = {
+        board_id: sum(value == board_id for value in assignment.values())
+        for board_id in board_ids
+    }
+    violations: list[dict[str, Any]] = []
+    for board_id in board_ids:
+        board_limit = limits[board_id]
+        if board_limit["max_components"] is not None and component_counts[board_id] > board_limit["max_components"]:
+            violations.append({
+                "board": board_id,
+                "constraint": "max_components",
+                "actual": component_counts[board_id],
+                "limit": board_limit["max_components"],
+            })
+        if board_limit["max_connector_pins"] is not None and connector_pins_by_board[board_id] > board_limit["max_connector_pins"]:
+            violations.append({
+                "board": board_id,
+                "constraint": "max_connector_pins",
+                "actual": connector_pins_by_board[board_id],
+                "limit": board_limit["max_connector_pins"],
+            })
     return {
         "schema_version": 1,
-        "boards": [{"id": board_id, "component_count": sum(value == board_id for value in assignment.values())}
+        "boards": [{
+            "id": board_id,
+            "component_count": component_counts[board_id],
+            "connector_pin_count": connector_pins_by_board[board_id],
+            "limits": limits[board_id],
+        }
                    for board_id in board_ids],
         "component_assignment": assignment,
         "cross_board_nets": crossings,
         "connectors": connectors,
         "connector_count": len(connectors),
+        "connector_pins_by_board": connector_pins_by_board,
+        "board_interfaces": interfaces_by_board,
         "interface_constraints": [{"connector": item["id"], "pin": item["pin"],
                                    "net": item["net"], "boards": item["boards"]} for item in connectors],
-        "status": "planned",
+        "feasible": not violations,
+        "violations": violations,
+        "status": "planned" if not violations else "infeasible",
     }
 
 
@@ -59,9 +122,12 @@ def score_multiboard_partition(plan: Mapping[str, Any]) -> dict[str, Any]:
     signal = sum(item.get("signal_type") == "signal" for item in connectors)
     ground = sum(item.get("signal_type") == "ground" for item in connectors)
     # Ground crossings are cheaper than signal crossings, but still consume a pin.
-    cost = len(connectors) * 10 + signal * 6 + ground * 2
+    constraint_penalty = len(list(plan.get("violations", []))) * 1_000_000
+    cost = len(connectors) * 10 + signal * 6 + ground * 2 + constraint_penalty
     return {"connector_count": len(connectors), "signal_crossings": signal,
-            "ground_crossings": ground, "cost": cost,
+            "ground_crossings": ground, "constraint_violations": len(list(plan.get("violations", []))),
+            "feasible": plan.get("feasible") is not False and not plan.get("violations"),
+            "cost": cost,
             "objective": "minimize connector count and cross-board signal cost"}
 
 
@@ -72,7 +138,11 @@ def rank_partition_candidates(
     """Enumerate bounded assignments and return lowest-cost plans first."""
     if max_candidates <= 0:
         raise ValueError("max_candidates must be positive")
-    board_ids = [str(item["id"]) for item in boards]
+    if any(not isinstance(item, Mapping) for item in boards):
+        raise ValueError("each board must be an object")
+    board_ids = [str(item.get("id", "")).strip() for item in boards]
+    if any(not board_id for board_id in board_ids) or len(set(board_ids)) != len(board_ids):
+        raise ValueError("boards require unique non-empty ids")
     refs = [str(item["refdes"]) for item in components]
     if len(refs) > 10:
         raise ValueError("enumeration is limited to 10 components; use a solver for larger designs")
@@ -82,7 +152,10 @@ def rank_partition_candidates(
         plan = plan_multiboard_partition(assigned, boards)
         plan["score"] = score_multiboard_partition(plan)
         candidates.append(plan)
-    candidates.sort(key=lambda item: (item["score"]["cost"], item["connector_count"], str(item["component_assignment"])))
+    candidates.sort(key=lambda item: (
+        not item["score"]["feasible"], item["score"]["cost"],
+        item["connector_count"], str(item["component_assignment"]),
+    ))
     return candidates[:max_candidates]
 
 
