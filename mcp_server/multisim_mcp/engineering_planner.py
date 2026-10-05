@@ -71,4 +71,46 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
     return plan
 
 
-__all__ = ["build_engineering_plan"]
+def select_multiboard_engineering_candidate(
+    plan: Mapping[str, Any],
+    candidate_index: int | None = None,
+) -> dict[str, Any]:
+    """Lock one structurally ready candidate without starting native execution."""
+    if not isinstance(plan, Mapping):
+        raise ValueError("plan must be an object")
+    request = plan.get("request")
+    if not isinstance(request, Mapping):
+        raise ValueError("plan.request is required")
+    rebuilt = build_engineering_plan(request)
+    if rebuilt != dict(plan):
+        raise ValueError("engineering plan or digest does not match request")
+    candidates = rebuilt.get("multiboard_candidates", [])
+    if not candidates:
+        raise ValueError("plan has no multiboard candidates")
+    if candidate_index is None:
+        candidate_index = rebuilt.get("recommended_multiboard_candidate")
+    if isinstance(candidate_index, bool) or not isinstance(candidate_index, int):
+        raise ValueError("candidate_index must be an integer")
+    if not 0 <= candidate_index < len(candidates):
+        raise ValueError("candidate_index is outside the candidate list")
+    candidate = candidates[candidate_index]
+    if candidate.get("structurally_ready") is not True:
+        raise ValueError("candidate is not structurally ready for native generation")
+    selected = {
+        "schema_version": 1,
+        "kind": "multisim-mcp-selected-multiboard-candidate",
+        "state": "selected",
+        "source_plan_digest": rebuilt["plan_digest"],
+        "candidate_index": candidate_index,
+        "candidate": candidate,
+    }
+    selected["selected_plan_digest"] = hashlib.sha256(
+        json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    selected["selection_digest"] = hashlib.sha256(
+        json.dumps(selected, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return selected
+
+
+__all__ = ["build_engineering_plan", "select_multiboard_engineering_candidate"]

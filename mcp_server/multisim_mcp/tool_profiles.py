@@ -33,6 +33,7 @@ ALL_TOOL_NAMES = frozenset(
         "plan_design_options",
         "plan_natural_engineering_request",
         "plan_multiboard_engineering_request",
+        "select_multiboard_engineering_candidate",
         "plan_natural_rlc_engineering_request",
         "run_natural_rlc_engineering_request",
         "run_natural_opamp_engineering_request",
@@ -175,6 +176,7 @@ _EXPERIMENT_WORKFLOW = frozenset(
     {
         "plan_natural_engineering_request",
         "plan_multiboard_engineering_request",
+        "select_multiboard_engineering_candidate",
         "plan_natural_rlc_engineering_request",
         "run_natural_rlc_engineering_request",
         "run_natural_opamp_engineering_request",

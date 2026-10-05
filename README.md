@@ -312,7 +312,7 @@ C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
 DeepSeek 模型与官方 Harness 的分层、凭据边界和版本兼容性见
 [`DeepSeek / Harness 适配说明`](docs/DEEPSEEK_HARNESS.md)。
 `--tool-profile core|experiment|optimization|full` 可限制客户端发现的工具；
-省略时保持 113 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
+省略时保持 114 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
 `--artifact-export-dir` 后可用，并且只能写入该目录之下。
 Harness Skill 安装默认不覆盖现有文件；需要恢复打包版本时显式增加 `--force`。
 模型 Provider 自助配置支持 DeepSeek、OpenAI、Ollama 和任意

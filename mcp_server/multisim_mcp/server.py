@@ -100,7 +100,10 @@ from multisim_mcp.natural_engineering import parse_natural_request
 from multisim_mcp.natural_rlc import parse_natural_rlc_request
 from multisim_mcp.natural_opamp import parse_natural_opamp_request
 from multisim_mcp.model_engineering import model_plan_engineering_request
-from multisim_mcp.engineering_planner import build_engineering_plan
+from multisim_mcp.engineering_planner import (
+    build_engineering_plan,
+    select_multiboard_engineering_candidate as select_multiboard_candidate_plan,
+)
 from multisim_mcp.native_sweep_report import (
     compare_native_sweep_baseline as compare_native_sweep_records,
     export_native_sweep_report as write_native_sweep_report,
@@ -2527,6 +2530,16 @@ def plan_multiboard_engineering_request(request: dict[str, Any]) -> dict[str, An
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
     return build_engineering_plan(request)
+
+
+@mcp.tool(com_serialized=False)
+def select_multiboard_engineering_candidate(
+    plan: dict[str, Any], candidate_index: int | None = None,
+) -> dict[str, Any]:
+    """Lock a structurally ready multi-board candidate without native execution."""
+    if not isinstance(plan, dict):
+        raise ValueError("plan must be an object")
+    return select_multiboard_candidate_plan(plan, candidate_index)
 
 
 @mcp.tool()
