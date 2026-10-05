@@ -34,6 +34,11 @@
 根目录同时生成 `acceptance-report.md`；每块板的 `native-op.json` 保留原始 COM 响应，
 `native-op.csv` 便于表格分析和后续实验报告引用。
 
+同一验收运行器还在仓库外完成了 TRAN 和 AC 接口验证：
+
+- `multiboard-fixture-divider-20261005-tran`：`accepted/native-verified`，末时刻读数与完整参考一致。
+- 旧的 `multiboard-fixture-divider-20261005-ac` 运行使用纯 DC 夹具并产生全零响应；在当前门禁下该结果会被拒绝，不能当作有效 AC 证据，必须改用显式 `DC 0 AC 1` 激励。
+
 ## 证据边界
 
 这只是 Multisim 14.3 安装环境的工程样例证据，不代表 14.2 或其他版本，也不代表

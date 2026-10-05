@@ -5,6 +5,9 @@ from pathlib import Path
 from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 from multisim_mcp.multiboard_plan import plan_multiboard_partition
 from multisim_mcp.native_multiboard_acceptance import (
+    _analysis_informative,
+    _analysis_values,
+    _normalize_analysis_options,
     _write_acceptance_report,
     _write_native_op_csv,
     run_native_multiboard_acceptance,
@@ -73,6 +76,33 @@ class NativeMultiboardAcceptanceTest(unittest.TestCase):
             self.assertIn("`accepted`", report)
             self.assertIn("`all_native_op_ready`", report)
             self.assertIn("`signal`", report)
+
+    def test_tran_and_ac_observation_reduction_is_explicit(self):
+        kind, options = _normalize_analysis_options(
+            "tran", {"sample_rate": 1000.0, "num_samples": 11, "duration": 0.01}
+        )
+        self.assertEqual(kind, "tran")
+        self.assertEqual(options["num_samples"], 11)
+        self.assertEqual(
+            _analysis_values(
+                {"ready": True, "results": {"V(out)": {"rows": [[0.0, 0.01], [1.0, 2.5]]}}},
+                ["V(out)"],
+                "tran",
+            ),
+            {"V(out)": 2.5},
+        )
+        self.assertEqual(
+            _analysis_values(
+                {"ready": True, "results": {"V(out)": {"rows": [[10.0, 100.0], [3.0, 4.0], [4.0, 3.0]]}}},
+                ["V(out)"],
+                "ac",
+            ),
+            {"V(out)": 5.0},
+        )
+        with self.assertRaises(ValueError):
+            _normalize_analysis_options("ac", {"stop_frequency": 10.0, "start_frequency": 10.0})
+        self.assertFalse(_analysis_informative("ac", {"V(bus)": 0.0, "V(sense)": 0.0}))
+        self.assertTrue(_analysis_informative("ac", {"V(sense)": 0.5}))
 
 
 if __name__ == "__main__":

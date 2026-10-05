@@ -15,9 +15,12 @@ The current contract is version `1` and supports four fixture kinds:
 | `observation` | request a voltage probe on a net | none; returned in `probe_nets` |
 
 Every fixture has `id`, `board_id`, `kind`, and `net`. Source and termination
-fixtures additionally require `reference_net`, a matching `refdes` prefix, and
-a single SPICE-token `value`. A ground fixture only accepts `0`, `gnd`, or
-`ground`; observation fixtures currently request voltage measurements.
+fixtures additionally require `reference_net` and a matching `refdes` prefix.
+A voltage source may use a single SPICE-token `value`, or an explicit source
+`model` tail such as `DC 0 AC 1` for AC/TRAN acceptance; the two forms cannot
+be combined. Terminations require a single SPICE-token `value`. A ground
+fixture only accepts `0`, `gnd`, or `ground`; observation fixtures currently
+request voltage measurements.
 
 Example for the two-board power-plus-divider test:
 

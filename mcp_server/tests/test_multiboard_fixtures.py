@@ -137,6 +137,16 @@ class MultiboardFixtureTest(unittest.TestCase):
         self.assertEqual(result["comparisons"], [])
         self.assertEqual(result["invalid_values"], [{"board_id": "power", "net": "bus"}])
 
+    def test_voltage_source_can_declare_explicit_ac_model(self):
+        artifacts = self._divider_artifacts()
+        fixtures = self._fixtures()
+        source = next(item for item in fixtures if item["id"] == "signal-bus-drive")
+        source.pop("value")
+        source["model"] = "DC 0 AC 1"
+        result = materialize_multiboard_fixture_artifacts(artifacts, fixtures)
+        signal = next(item for item in result["boards"] if item["board_id"] == "signal")
+        self.assertIn("VFIX1 bus 0 DC 0 AC 1", signal["spice_netlist"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -251,7 +251,22 @@ def compare_pin_connections(
             if set(by_pin) != expected_pin_numbers:
                 unverified.append(refdes)
                 continue
-            actual = [by_pin[index] for index in range(1, len(expected_nets) + 1)]
+            # ``expected_nets`` follows the source component's native port
+            # order.  Most parts declare ports as 1,2,..., but the generic
+            # Multisim voltage carrier used for AC sources declares them as
+            # 2,1.  When the native inventory is available, honor that
+            # declaration instead of silently assuming numeric order.  This
+            # preserves strict pin checks while avoiding a false mismatch for
+            # a valid AC source whose positive terminal is native pin 2.
+            declared_numeric = (declared_ports or {}).get(refdes, [])
+            if (
+                len(declared_numeric) == len(expected_nets)
+                and all(str(pin).isdigit() for pin in declared_numeric)
+                and {int(pin) for pin in declared_numeric} == expected_pin_numbers
+            ):
+                actual = [by_pin[int(pin)] for pin in declared_numeric]
+            else:
+                actual = [by_pin[index] for index in range(1, len(expected_nets) + 1)]
             checked += 1
             if [item.casefold() for item in actual] != [
                 item.casefold() for item in expected_nets

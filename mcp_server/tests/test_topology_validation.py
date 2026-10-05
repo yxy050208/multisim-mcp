@@ -45,6 +45,27 @@ out circuit R1 2
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["checked_components"], 1)
 
+    def test_numeric_pin_order_follows_native_port_inventory(self) -> None:
+        # Generic AC voltage carriers expose native ports in 2,1 order.  The
+        # source net list follows that native order: bus is pin 2 and ground
+        # is pin 1.  A fixed numeric 1,2 comparison would reject this valid
+        # connection.
+        report = """title
+-----
+header
+-----
+0 circuit V1 1
+bus circuit V1 2
+-----
+"""
+        result = compare_pin_connections(
+            {"V1": ["bus", "0"]},
+            report,
+            declared_ports={"V1": ["2", "1"]},
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["checked_components"], 1)
+
     def test_multisim_named_xspice_pins_are_explicitly_unverified(self) -> None:
         report = """title
 -----

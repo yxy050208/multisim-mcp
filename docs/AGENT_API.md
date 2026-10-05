@@ -137,7 +137,8 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 Multisim 版本逐板生成、打开、保存、重开、ReportNetlist 回读和原生 DC OP，并比较显式
 观测点与完整电路参考。只有返回 `status=accepted` 且 `verification_status=native-verified`
 时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版只覆盖
-DC operating point，AC/TRAN 多板验收仍需单独扩展。
+DC operating point，另支持显式 `analysis=tran` 或 `analysis=ac`；TRAN 比较末时刻读数，
+AC 比较末频率幅值，并要求 AC 响应不是全零，以防没有声明 AC 激励时误判为通过。
 执行目录还会为每块板保留 `native-op.json`、`native-op.csv` 和
 `native-reopen-op.json`，根目录提供 `acceptance.json` 与 `acceptance-report.md`，便于
 人工审阅、归档和后续实验报告组装。

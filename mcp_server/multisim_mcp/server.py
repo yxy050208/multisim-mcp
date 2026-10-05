@@ -2594,6 +2594,8 @@ def run_native_multiboard_acceptance(
     candidate_index: int | None = None,
     execute: bool = False,
     target_multisim_version: str = "14.3",
+    analysis: str = "dc",
+    analysis_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run or preview native acceptance for a selected structured multi-board request.
 
@@ -2601,6 +2603,9 @@ def run_native_multiboard_acceptance(
     any schematic or COM work.  Preview mode is side-effect free.  Execution opens,
     saves, reopens, reads back and simulates each board in the installed Multisim
     version, then compares explicit fixture observations and a full-design reference.
+    ``analysis`` accepts ``dc`` (default), ``tran`` or ``ac``. The latter two
+    use bounded values from ``analysis_options`` and compare final transient or
+    last-frequency magnitude observations.
     """
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
@@ -2615,6 +2620,8 @@ def run_native_multiboard_acceptance(
         output_directory,
         execute=execute,
         target_multisim_version=target_multisim_version,
+        analysis=analysis,
+        analysis_options=analysis_options,
     )
     return {
         **result,

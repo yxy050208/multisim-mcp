@@ -68,6 +68,7 @@ def _fixture_object(raw: object, index: int) -> dict[str, Any]:
         "reference_net",
         "refdes",
         "value",
+        "model",
         "quantity",
         "label",
         "notes",
@@ -101,8 +102,18 @@ def _fixture_object(raw: object, index: int) -> dict[str, Any]:
             raise ValueError(
                 f"fixtures[{index}].refdes must start with {expected_prefix!r} for {kind}"
             )
-        value = _token(raw.get("value"), f"fixtures[{index}].value")
-        normalized.update({"reference_net": reference_net, "refdes": refdes, "value": value})
+        model = raw.get("model")
+        if kind == "voltage_source" and model is not None:
+            model = _text(model, f"fixtures[{index}].model")
+        if kind == "resistor_termination" and model is not None:
+            raise ValueError(f"fixtures[{index}] resistor_termination does not accept model")
+        if kind == "voltage_source" and model is not None:
+            if raw.get("value") is not None:
+                raise ValueError(f"fixtures[{index}] voltage_source must use value or model, not both")
+            normalized.update({"reference_net": reference_net, "refdes": refdes, "model": model})
+        else:
+            value = _token(raw.get("value"), f"fixtures[{index}].value")
+            normalized.update({"reference_net": reference_net, "refdes": refdes, "value": value})
     elif kind == "ground_reference":
         if net.casefold() not in GROUND_NET_ALIASES:
             raise ValueError(
@@ -324,7 +335,8 @@ def materialize_multiboard_fixture_artifacts(
             if kind == "voltage_source":
                 fixture_components.append(CircuitComponent(
                     refdes=fixture["refdes"], kind="V",
-                    nodes=(fixture["net"], fixture["reference_net"]), value=fixture["value"],
+                    nodes=(fixture["net"], fixture["reference_net"]),
+                    value=fixture.get("value"), model=fixture.get("model"),
                     annotations={"role": "explicit multiboard test fixture", "fixture_id": fixture["id"]},
                 ))
             elif kind == "resistor_termination":
