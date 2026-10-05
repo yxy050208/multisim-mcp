@@ -121,6 +121,16 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 板可以声明 `max_components` 和 `max_connector_pins` 约束；结果会返回每块板的
 `connector_pin_count`、`board_interfaces`、`violations` 和 `feasible`。候选排序会优先保留
 满足约束的方案，违反约束的方案仍保留并明确标记为 `infeasible`，不会被当作可交付设计。
+`connector_count` 表示跨板 pin 记录数；多 pin 连接器的物理数量另由
+`physical_connector_count` 给出。
+工程请求还可以提供显式的 `connectors` 合同。每个连接器必须声明 `part`、参与的 `boards`、
+每块板的 `instances` 以及从 1 开始连续编号的 `pins`；每个 pin 声明 `net`、
+`signal_type` 和 `direction`，可选声明板端方向及电压/电流/阻抗约束。规划器会检查跨板
+网络覆盖、pin 编号、物理实例归属、地线类型、端点方向冲突和容量限制，并在
+`connector_contract` 中返回规范化合同与违反项。未提供该字段时仍生成兼容的逻辑连接器，
+但 `connector_contract_status=inferred`、物理映射保持 `unverified`，不能据此声称真实连接器
+已经确定。显式合同通过结构门禁后，接口记录会附带 `part` 和对应板端 `instance`；候选同时
+返回 `native_connector_status` 和 `native_connector_ready`，旧简写的后者为 `false`。
 可行候选会附带 `logical_artifacts`：每块板的组件、板内网络、跨板连接器和接口清单。
 这些工件的 `status` 为 `logical-only`、`verification_status` 为 `unverified`，用于下一阶段
 逐板生成和验收；EDA 核心还可以据此生成每块板的结构化 `CircuitDesign` 和 SPICE 预览。

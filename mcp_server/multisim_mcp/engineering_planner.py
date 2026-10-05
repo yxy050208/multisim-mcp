@@ -43,7 +43,8 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
     }
     if normalized["components"] and len(normalized["boards"]) > 1:
         plan["multiboard_candidates"] = rank_partition_candidates(
-            normalized["components"], normalized["boards"], max_candidates=32)
+            normalized["components"], normalized["boards"],
+            normalized.get("connectors"), max_candidates=32)
         for candidate in plan["multiboard_candidates"]:
             if candidate.get("feasible") is True:
                 candidate["logical_artifacts"] = materialize_multiboard_partition(
@@ -61,6 +62,12 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
                         structural_status = "incomplete-fixture-coverage"
                 candidate["structural_status"] = structural_status
                 candidate["structurally_ready"] = structural_status == "valid"
+                candidate["native_connector_status"] = (
+                    "verified-contract"
+                    if candidate.get("connector_contract_status") in {"valid", "not-required"}
+                    else "unverified-inferred"
+                )
+                candidate["native_connector_ready"] = candidate["native_connector_status"] == "verified-contract"
             else:
                 candidate["structural_status"] = "blocked-by-constraints"
                 candidate["structurally_ready"] = False

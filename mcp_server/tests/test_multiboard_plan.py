@@ -12,6 +12,102 @@ from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 
 
 class MultiboardPlanTest(unittest.TestCase):
+    def _explicit_connector_contract(self):
+        return [{
+            "id": "J1",
+            "part": "HEADER_1X2",
+            "boards": ["power", "signal"],
+            "instances": [
+                {"board": "power", "refdes": "J1P"},
+                {"board": "signal", "refdes": "J1S"},
+            ],
+            "pins": [
+                {"number": 1, "net": "bus", "signal_type": "analog", "direction": "bidirectional"},
+                {"number": 2, "net": "0", "signal_type": "ground", "direction": "passive"},
+            ],
+        }]
+
+    def test_explicit_connector_contract_expands_physical_pins(self):
+        result = plan_multiboard_partition([
+            {"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+            {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]},
+        ], [{"id": "power"}, {"id": "signal"}], self._explicit_connector_contract())
+        self.assertEqual(result["connector_contract_status"], "valid")
+        self.assertEqual(result["connector_count"], 2)
+        self.assertEqual(result["physical_connector_count"], 1)
+        self.assertEqual(result["connector_pins_by_board"], {"power": 2, "signal": 2})
+        self.assertTrue(result["feasible"])
+        power_bus = next(item for item in result["board_interfaces"]["power"] if item["net"] == "bus")
+        self.assertEqual(power_bus["part"], "HEADER_1X2")
+        self.assertEqual(power_bus["instance"]["refdes"], "J1P")
+
+    def test_explicit_connector_contract_rejects_duplicate_pin_numbers(self):
+        contract = self._explicit_connector_contract()
+        contract[0]["pins"][1]["number"] = 1
+        with self.assertRaisesRegex(ValueError, "duplicate pin number"):
+            plan_multiboard_partition(
+                [{"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+                 {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]}],
+                [{"id": "power"}, {"id": "signal"}], contract,
+            )
+
+    def test_explicit_connector_contract_requires_every_cross_board_pin(self):
+        contract = self._explicit_connector_contract()
+        contract[0]["pins"] = contract[0]["pins"][:1]
+        result = plan_multiboard_partition(
+            [{"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+             {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]}],
+            [{"id": "power"}, {"id": "signal"}], contract,
+        )
+        self.assertFalse(result["feasible"])
+        self.assertTrue(any(item["constraint"] == "missing_connector_pin" for item in result["violations"]))
+
+    def test_explicit_connector_contract_rejects_endpoint_direction_conflict(self):
+        contract = self._explicit_connector_contract()
+        contract[0]["pins"][0]["board_directions"] = {"power": "out", "signal": "out"}
+        result = plan_multiboard_partition(
+            [{"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+             {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]}],
+            [{"id": "power"}, {"id": "signal"}], contract,
+        )
+        self.assertFalse(result["feasible"])
+        self.assertTrue(any(item["constraint"] == "direction_conflict" for item in result["violations"]))
+
+    def test_explicit_connector_contract_rejects_ground_signal_mismatch(self):
+        contract = self._explicit_connector_contract()
+        contract[0]["pins"][1]["signal_type"] = "digital"
+        result = plan_multiboard_partition(
+            [{"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+             {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]}],
+            [{"id": "power"}, {"id": "signal"}], contract,
+        )
+        self.assertFalse(result["feasible"])
+        self.assertTrue(any(item["constraint"] == "signal_type" for item in result["violations"]))
+
+    def test_explicit_connector_contract_obeys_pin_capacity(self):
+        result = plan_multiboard_partition(
+            [{"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+             {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]}],
+            [{"id": "power", "max_connector_pins": 1}, {"id": "signal", "max_connector_pins": 1}],
+            self._explicit_connector_contract(),
+        )
+        self.assertFalse(result["feasible"])
+        self.assertEqual({item["constraint"] for item in result["violations"]}, {"max_connector_pins"})
+
+    def test_materialized_artifact_retains_explicit_connector_contract(self):
+        components = [
+            {"refdes": "V1", "kind": "V", "nodes": ["bus", "0"]},
+            {"refdes": "R1", "kind": "R", "nodes": ["bus", "0"]},
+        ]
+        partition = plan_multiboard_partition(
+            [dict(components[0], board="power"), dict(components[1], board="signal")],
+            [{"id": "power"}, {"id": "signal"}],
+            self._explicit_connector_contract(),
+        )
+        artifacts = materialize_multiboard_partition(components, partition)
+        self.assertEqual(artifacts["connector_contract"]["status"], "valid")
+        self.assertEqual(artifacts["interface_validation"]["status"], "valid")
+
     def test_cross_board_net_requires_connector(self):
         result = plan_multiboard_partition([
             {"refdes": "V1", "board": "power", "nodes": ["out", "0"]},

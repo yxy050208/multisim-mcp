@@ -4,6 +4,34 @@ from multisim_mcp.engineering_planner import build_engineering_plan
 
 
 class EngineeringMultiboardPlanTest(unittest.TestCase):
+    def test_plan_accepts_and_carries_explicit_connector_contract(self):
+        plan = build_engineering_plan({
+            "schema_version": 1,
+            "title": "two board explicit connector",
+            "application": "contract test",
+            "boards": [{"id": "power"}, {"id": "signal"}],
+            "components": [
+                {"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+                {"refdes": "R1", "board": "signal", "nodes": ["bus", "0"]},
+            ],
+            "connectors": [{
+                "id": "J1", "part": "HEADER_1X2", "boards": ["power", "signal"],
+                "instances": [
+                    {"board": "power", "refdes": "J1P"},
+                    {"board": "signal", "refdes": "J1S"},
+                ],
+                "pins": [
+                    {"number": 1, "net": "bus", "signal_type": "analog", "direction": "bidirectional"},
+                    {"number": 2, "net": "0", "signal_type": "ground", "direction": "passive"},
+                ],
+            }],
+        })
+        candidate = next(item for item in plan["multiboard_candidates"] if item["connector_contract_status"] == "valid")
+        self.assertTrue(candidate["feasible"])
+        self.assertEqual(candidate["logical_artifacts"]["connector_contract"]["status"], "valid")
+        self.assertTrue(candidate["structurally_ready"])
+        self.assertTrue(candidate["native_connector_ready"])
+
     def test_plan_includes_ranked_multiboard_candidates(self):
         request = {"schema_version": 1, "title": "two board", "application": "test",
                    "boards": [{"id": "power"}, {"id": "signal"}],
@@ -31,6 +59,7 @@ class EngineeringMultiboardPlanTest(unittest.TestCase):
         self.assertIsNotNone(plan["recommended_multiboard_candidate"])
         selected = plan["multiboard_candidates"][plan["recommended_multiboard_candidate"]]
         self.assertTrue(selected["structurally_ready"])
+        self.assertFalse(selected["native_connector_ready"])
         self.assertTrue(all(item["components"] for item in selected["logical_artifacts"]["boards"]))
 
     def test_plan_gates_native_candidate_on_explicit_fixture_contract(self):

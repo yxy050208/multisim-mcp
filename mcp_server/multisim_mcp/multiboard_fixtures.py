@@ -407,6 +407,7 @@ def materialize_multiboard_fixture_artifacts(
         "status": "logical-only",
         "verification_status": "unverified",
         "parent_artifact_digest": artifacts.get("artifact_digest"),
+        "connector_contract": artifacts.get("connector_contract"),
         "interface_validation": artifacts.get("interface_validation"),
         "fixture_contract": contract,
         "boards": board_results,
