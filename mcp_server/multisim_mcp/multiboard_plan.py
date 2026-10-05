@@ -331,6 +331,8 @@ def materialize_circuit_design_partition(
         raise ValueError("design must be CircuitDesign")
     component_payload = [component.to_dict() for component in design.components]
     logical = materialize_multiboard_partition(component_payload, partition)
+    if logical["interface_validation"].get("status") != "valid":
+        raise ValueError("multiboard interface contract is structurally invalid")
     assignment = partition["component_assignment"]
     board_results: list[dict[str, Any]] = []
     for board_artifact in logical["boards"]:
