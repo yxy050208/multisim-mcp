@@ -125,6 +125,8 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 `interface_validation.status=valid` 只表示接口工件结构对称且完整；空板或接口不对称时为
 `invalid`，不能送入逐板生成。上述预览不是已经生成的 `.ms14` 工程。每块板仍需分别通过
 原生网表和仿真验收。
+计划还返回 `structurally_ready` 和 `recommended_multiboard_candidate`；`score.feasible`
+只代表容量/连接器约束满足，不能替代逐板结构门禁。
 
 ## 模型工程后端入口 / Model engineering handoff
 

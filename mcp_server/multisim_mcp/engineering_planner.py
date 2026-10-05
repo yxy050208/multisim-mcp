@@ -47,8 +47,23 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
             if candidate.get("feasible") is True:
                 candidate["logical_artifacts"] = materialize_multiboard_partition(
                     normalized["components"], candidate)
+                structural_status = candidate["logical_artifacts"]["interface_validation"]["status"]
+                candidate["structural_status"] = structural_status
+                candidate["structurally_ready"] = structural_status == "valid"
+            else:
+                candidate["structural_status"] = "blocked-by-constraints"
+                candidate["structurally_ready"] = False
+        plan["recommended_multiboard_candidate"] = next(
+            (
+                index
+                for index, candidate in enumerate(plan["multiboard_candidates"])
+                if candidate.get("structurally_ready") is True
+            ),
+            None,
+        )
     else:
         plan["multiboard_candidates"] = []
+        plan["recommended_multiboard_candidate"] = None
     unsigned = dict(plan)
     plan["plan_digest"] = hashlib.sha256(
         json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

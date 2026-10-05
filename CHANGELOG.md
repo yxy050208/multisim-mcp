@@ -28,6 +28,8 @@
   `interface_validation` 失败时阻止后续逐板原生生成，且不改变 `native_status=unverified`。
 - 新增只读 MCP 工具 `plan_multiboard_engineering_request`，让 Agent 可以直接提交版本化
   多板请求并读取候选分区与逐板逻辑工件；该工具不启动 COM、不写入工程文件。
+- 区分多板候选的约束可行性与结构可交付性：计划返回 `structural_status`、
+  `structurally_ready` 和推荐候选索引，避免把带空板的低连接器成本方案误选为多板设计。
 
 ## [1.3.0rc3] - 2026-09-25
 
