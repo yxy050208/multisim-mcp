@@ -79,13 +79,14 @@ class McpStdioSmokeTest(unittest.IsolatedAsyncioTestCase):
                 mode
             )
             self.assertEqual(protocol, expected_protocol)
-            self.assertEqual(len(names), 114)
+            self.assertEqual(len(names), 115)
             self.assertEqual(len(prompts), 5)
             self.assertEqual(len(resources), 20)
 
             self.assertIn("runtime_status", names)
             self.assertIn("schematic_component_catalog", names)
             self.assertIn("create_schematic_from_netlist", names)
+            self.assertIn("run_native_multiboard_acceptance", names)
             self.assertIn("run_circuit_experiment", names)
             self.assertIn("submit_circuit_experiment", names)
             self.assertIn("plan_design_options", names)

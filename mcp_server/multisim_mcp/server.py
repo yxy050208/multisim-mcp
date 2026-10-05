@@ -108,6 +108,9 @@ from multisim_mcp.native_sweep_report import (
     compare_native_sweep_baseline as compare_native_sweep_records,
     export_native_sweep_report as write_native_sweep_report,
 )
+from multisim_mcp.native_multiboard_acceptance import (
+    run_native_multiboard_acceptance as run_native_multiboard_acceptance_gate,
+)
 from multisim_mcp.native_metadata import extract_native_component_metadata
 from multisim_mcp.design_specifications import (
     prepare_design_specification as build_design_specification,
@@ -139,7 +142,7 @@ from multisim_mcp.eda_backend import (
     SchematicRequest,
     SimulationRequest,
 )
-from multisim_mcp.eda_core import CircuitDesign
+from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 from multisim_mcp.model_provider import ModelProviderRegistry
 from multisim_mcp.provider_config import read_provider_config
 from multisim_mcp.eda_service import EdaApplicationService
@@ -2540,6 +2543,85 @@ def select_multiboard_engineering_candidate(
     if not isinstance(plan, dict):
         raise ValueError("plan must be an object")
     return select_multiboard_candidate_plan(plan, candidate_index)
+
+
+def _engineering_request_design(
+    normalized_request: Mapping[str, Any], plan_digest: str,
+) -> CircuitDesign:
+    """Convert a validated structured request into the backend-neutral design object."""
+    components: list[CircuitComponent] = []
+    for index, item in enumerate(normalized_request.get("components", [])):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"request.components[{index}] must be an object")
+        kind = item.get("kind")
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError(
+                f"request.components[{index}] requires kind for native acceptance"
+            )
+        parameters = item.get("parameters", {})
+        annotations = item.get("annotations", {})
+        if not isinstance(parameters, Mapping) or not isinstance(annotations, Mapping):
+            raise ValueError(
+                f"request.components[{index}] parameters and annotations must be objects"
+            )
+        components.append(CircuitComponent(
+            refdes=str(item["refdes"]),
+            kind=kind.strip(),
+            nodes=tuple(str(node) for node in item["nodes"]),
+            value=item.get("value"),
+            model=item.get("model"),
+            parameters=parameters,
+            annotations=annotations,
+        ))
+    if not components:
+        raise ValueError("request.components must contain at least one component")
+    nets = tuple(dict.fromkeys(
+        node for component in components for node in component.nodes
+    ))
+    return CircuitDesign(
+        design_id=f"engineering-{plan_digest[:16]}",
+        title=str(normalized_request["title"]),
+        components=tuple(components),
+        nets=nets,
+        annotations={"source": "validated engineering request", "plan_digest": plan_digest},
+    )
+
+
+@mcp.tool()
+def run_native_multiboard_acceptance(
+    request: dict[str, Any],
+    output_directory: str,
+    candidate_index: int | None = None,
+    execute: bool = False,
+    target_multisim_version: str = "14.3",
+) -> dict[str, Any]:
+    """Run or preview native acceptance for a selected structured multi-board request.
+
+    The request is re-planned and a structurally ready candidate is selected before
+    any schematic or COM work.  Preview mode is side-effect free.  Execution opens,
+    saves, reopens, reads back and simulates each board in the installed Multisim
+    version, then compares explicit fixture observations and a full-design reference.
+    """
+    if not isinstance(request, dict):
+        raise ValueError("request must be an object")
+    plan = build_engineering_plan(request)
+    selected = select_multiboard_candidate_plan(plan, candidate_index)
+    normalized = plan["request"]
+    design = _engineering_request_design(normalized, plan["plan_digest"])
+    result = run_native_multiboard_acceptance_gate(
+        design,
+        selected["candidate"],
+        normalized.get("fixtures", []),
+        output_directory,
+        execute=execute,
+        target_multisim_version=target_multisim_version,
+    )
+    return {
+        **result,
+        "engineering_plan_digest": plan["plan_digest"],
+        "candidate_index": selected["candidate_index"],
+        "selection_digest": selected["selection_digest"],
+    }
 
 
 @mcp.tool()

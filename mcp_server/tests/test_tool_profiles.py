@@ -35,7 +35,7 @@ class ToolProfileTest(unittest.TestCase):
             )
         }
         self.assertEqual(decorated, ALL_TOOL_NAMES)
-        self.assertEqual(len(ALL_TOOL_NAMES), 114)
+        self.assertEqual(len(ALL_TOOL_NAMES), 115)
         self.assertIn("prepare_netlist_draft", ALL_TOOL_NAMES)
         self.assertIn("resolve_component_requirements", ALL_TOOL_NAMES)
         self.assertIn("approve_component_resolution", ALL_TOOL_NAMES)
@@ -44,6 +44,7 @@ class ToolProfileTest(unittest.TestCase):
         self.assertIn("approve_simulation_plan", ALL_TOOL_NAMES)
         self.assertIn("plan_multiboard_engineering_request", ALL_TOOL_NAMES)
         self.assertIn("select_multiboard_engineering_candidate", ALL_TOOL_NAMES)
+        self.assertIn("run_native_multiboard_acceptance", ALL_TOOL_NAMES)
 
     def test_profiles_are_bounded_and_keep_runtime_diagnostics(self) -> None:
         for name, tools in PROFILE_TOOL_NAMES.items():

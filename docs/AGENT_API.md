@@ -130,6 +130,15 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 计划还返回 `structurally_ready` 和 `recommended_multiboard_candidate`；`score.feasible`
 只代表容量/连接器约束满足，不能替代逐板结构门禁。
 
+完成规划后可调用 `run_native_multiboard_acceptance` 进入首版原生验收闭环。该工具接收
+同一份 `request`、新的 `output_directory` 和可选 `candidate_index`；它会重新计算计划、
+只接受 `structurally_ready=true` 的候选，并把选择摘要、计划摘要和验收结果绑定在一起。
+`execute=false`（默认）只返回夹具工件预览，不启动 COM；显式 `execute=true` 才会按目标
+Multisim 版本逐板生成、打开、保存、重开、ReportNetlist 回读和原生 DC OP，并比较显式
+观测点与完整电路参考。只有返回 `status=accepted` 且 `verification_status=native-verified`
+时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版只覆盖
+DC operating point，AC/TRAN 多板验收仍需单独扩展。
+
 ## 模型工程后端入口 / Model engineering handoff
 
 未来独立软件可调用以下 loopback 后端入口；两者复用 MCP/CLI 的同一审计服务：

@@ -24,6 +24,7 @@ from .multiboard_fixtures import (
 from .multiboard_plan import materialize_circuit_design_partition
 from .multisim_compat import parse_multisim_version
 from .spice_adapter import circuit_design_to_spice
+from .topology_validation import compare_roundtrip_topology
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -89,6 +90,38 @@ def _observation_values(
             and isinstance(native_values[output], (int, float))
             and math.isfinite(float(native_values[output]))
         }
+    return result
+
+
+def _reopened_topology(
+    board: Mapping[str, Any], report_text: str,
+) -> dict[str, Any]:
+    """Check stable component/net names in the final saved-and-reopened report."""
+    design = board.get("design", {})
+    raw_components = design.get("components", []) if isinstance(design, Mapping) else []
+    components = [
+        item for item in raw_components
+        if isinstance(item, Mapping) and str(item.get("kind", "")).upper() != "GND"
+    ]
+    net_counts: dict[str, int] = {}
+    for component in components:
+        raw_nodes = component.get("nodes", [])
+        if not isinstance(raw_nodes, Sequence) or isinstance(raw_nodes, (str, bytes)):
+            continue
+        for node in raw_nodes:
+            node_name = str(node)
+            if node_name != "0":
+                net_counts[node_name] = net_counts.get(node_name, 0) + 1
+    required_nets = [name for name, count in net_counts.items() if count >= 2]
+    result = compare_roundtrip_topology(
+        [str(item.get("refdes", "")) for item in components],
+        required_nets,
+        report_text,
+    )
+    result["evidence"] = (
+        "final saved-and-reopened Multisim ReportNetlist text presence; "
+        "singleton source nets remain informational"
+    )
     return result
 
 
@@ -187,6 +220,8 @@ def run_native_multiboard_acceptance(
             reopened = client.open_circuit(str(ms14))
             report_path = board_root / "reopened-report-netlist.txt"
             client.report_netlist(str(report_path), False, 0)
+            reopened_report = report_path.read_bytes().decode("utf-8", errors="replace")
+            reopened_topology = _reopened_topology(board, reopened_report)
             outputs = [str(item) for item in client.enum_outputs(0)]
             if not outputs:
                 raise RuntimeError(f"{board_id}: saved/reopened project has no native probe outputs")
@@ -207,6 +242,7 @@ def run_native_multiboard_acceptance(
                 "native_op_values": values,
                 "native_op_ready": True,
                 "post_save_netlist_sha256": _sha256(report_path),
+                "reopened_topology": reopened_topology,
                 "topology": build.get("topology_diff", {}),
                 "layout": build.get("layout_validation", {}),
             }
@@ -298,6 +334,9 @@ def run_native_multiboard_acceptance(
                 for item in records
             ),
             "all_topology_pass": all(item["topology"].get("status") == "pass" for item in records),
+            "all_reopened_topology_pass": all(
+                item["reopened_topology"].get("status") == "pass" for item in records
+            ),
             "all_layout_pass": all(item["layout"].get("status") == "pass" for item in records),
             "all_native_op_ready": all(item["native_op_ready"] for item in records),
             "interface_values_match": interface_comparison["status"] == "pass",
