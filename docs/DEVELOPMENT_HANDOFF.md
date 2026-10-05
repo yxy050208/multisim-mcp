@@ -143,8 +143,14 @@
 - 兼容策略：没有显式 `connectors` 的旧请求仍能生成逻辑预览，但返回
   `connector_contract_status=inferred`、`verification_status=unverified`；这只是网表级
   连接器推断，不是实际封装或 Multisim 原生连接器证据；候选的
-  `native_connector_ready` 会保持 `false`。已有 14.3 多板验收证据未被重写。
+  `native_connector_ready` 会保持 `false`。即使显式合同结构有效，当前候选仍为
+  `native_connector_status=mapping-pending`，直到目标版本的符号/封装完成独立实机映射。
+  已有 14.3 多板验收证据未被重写。
 - 回归结果：`mcp_server/tests` 当前 `915 passed, 45 skipped, 154 subtests passed`。
 - 下一项：把显式合同绑定到 Multisim 元件库中的具体连接器符号/封装，随后在 14.3 实机
   重新验证多引脚连接器的打开、保存、重开、ReportNetlist 和逐点 DC/TRAN/AC；再扩展
   14.2/其他版本独立兼容矩阵。此前 14.3 分压夹具的通过结论不外推到未测试的连接器模型。
+- 已完成接口准备：兼容层新增 `resolve_connector_mapping`，只接受目标版本 manifest 中
+  同时匹配 part 标识和完整 pin signature 的条目；没有独立条目时返回 `unavailable`，
+  不会把通用 `XSUB2` 载体冒充真实连接器。下一阶段需要用本机 Multisim 元件库抽取一套
+  真实连接器模板和 pin 证据，再把 manifest 条目标记为 verified。

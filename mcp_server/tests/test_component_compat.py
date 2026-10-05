@@ -1,6 +1,6 @@
 import unittest
 
-from multisim_mcp.component_compat import resolve_component_mapping, validate_component_manifest, require_verified_mappings, load_manifest_for_version
+from multisim_mcp.component_compat import resolve_component_mapping, resolve_connector_mapping, validate_component_manifest, require_verified_mappings, load_manifest_for_version
 
 
 class ComponentCompatibilityTest(unittest.TestCase):
@@ -72,3 +72,24 @@ class ComponentCompatibilityTest(unittest.TestCase):
                 "14.4",
                 {"digital-jk": ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"]},
             )
+
+    def test_connector_mapping_requires_exact_part_and_pin_signature(self):
+        manifest = {
+            "schema_version": 1,
+            "multisim_version": "14.3",
+            "components": [{
+                "logical_family": "connector:HEADER_1X2",
+                "native_name": "HEADER_1X2",
+                "part_number": "HEADER_1X2",
+                "model_source": "user-local-native-template",
+                "pin_signature": ["1", "2"],
+                "supported_versions": ["14.3"],
+                "verified": True,
+            }],
+        }
+        connector = {"part": "HEADER_1X2", "pins": [{"number": 1}, {"number": 2}]}
+        result = resolve_connector_mapping(manifest, connector, "14.3")
+        self.assertEqual(result["status"], "native-verified")
+        self.assertEqual(result["mapping"]["part_number"], "HEADER_1X2")
+        connector["pins"][1]["number"] = 3
+        self.assertEqual(resolve_connector_mapping(manifest, connector, "14.3")["status"], "unavailable")

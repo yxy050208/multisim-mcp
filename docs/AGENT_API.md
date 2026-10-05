@@ -130,7 +130,12 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 `connector_contract` 中返回规范化合同与违反项。未提供该字段时仍生成兼容的逻辑连接器，
 但 `connector_contract_status=inferred`、物理映射保持 `unverified`，不能据此声称真实连接器
 已经确定。显式合同通过结构门禁后，接口记录会附带 `part` 和对应板端 `instance`；候选同时
-返回 `native_connector_status` 和 `native_connector_ready`，旧简写的后者为 `false`。
+返回 `native_connector_status` 和 `native_connector_ready`。当前显式合同的状态是
+`mapping-pending`，因为仍需把 `part` 绑定到目标 Multisim 版本中经过实机验证的符号/封装；
+旧简写的状态为 `unverified-inferred`，两者的 `native_connector_ready` 都是 `false`。
+兼容层提供 `resolve_connector_mapping`，要求 manifest 同时匹配连接器标识、完整 pin
+signature 和目标版本；没有独立 manifest 条目时返回 `unavailable`，不会退回到通用 `XSUB2`
+载体。
 可行候选会附带 `logical_artifacts`：每块板的组件、板内网络、跨板连接器和接口清单。
 这些工件的 `status` 为 `logical-only`、`verification_status` 为 `unverified`，用于下一阶段
 逐板生成和验收；EDA 核心还可以据此生成每块板的结构化 `CircuitDesign` 和 SPICE 预览。

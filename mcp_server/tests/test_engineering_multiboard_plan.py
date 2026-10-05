@@ -30,7 +30,8 @@ class EngineeringMultiboardPlanTest(unittest.TestCase):
         self.assertTrue(candidate["feasible"])
         self.assertEqual(candidate["logical_artifacts"]["connector_contract"]["status"], "valid")
         self.assertTrue(candidate["structurally_ready"])
-        self.assertTrue(candidate["native_connector_ready"])
+        self.assertEqual(candidate["native_connector_status"], "mapping-pending")
+        self.assertFalse(candidate["native_connector_ready"])
 
     def test_plan_includes_ranked_multiboard_candidates(self):
         request = {"schema_version": 1, "title": "two board", "application": "test",

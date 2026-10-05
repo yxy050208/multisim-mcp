@@ -62,12 +62,18 @@ def build_engineering_plan(request: Mapping[str, Any]) -> dict[str, Any]:
                         structural_status = "incomplete-fixture-coverage"
                 candidate["structural_status"] = structural_status
                 candidate["structurally_ready"] = structural_status == "valid"
-                candidate["native_connector_status"] = (
-                    "verified-contract"
-                    if candidate.get("connector_contract_status") in {"valid", "not-required"}
-                    else "unverified-inferred"
-                )
-                candidate["native_connector_ready"] = candidate["native_connector_status"] == "verified-contract"
+                if candidate.get("connector_contract_status") == "not-required":
+                    candidate["native_connector_status"] = "not-required"
+                    candidate["native_connector_ready"] = True
+                elif candidate.get("connector_contract_status") == "valid":
+                    # A structural part/pin contract is not yet a Multisim
+                    # symbol/pack mapping.  Keep native readiness closed until
+                    # a versioned mapping is independently verified.
+                    candidate["native_connector_status"] = "mapping-pending"
+                    candidate["native_connector_ready"] = False
+                else:
+                    candidate["native_connector_status"] = "unverified-inferred"
+                    candidate["native_connector_ready"] = False
             else:
                 candidate["structural_status"] = "blocked-by-constraints"
                 candidate["structurally_ready"] = False

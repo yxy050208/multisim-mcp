@@ -84,6 +84,64 @@ def require_verified_mappings(
     return {"requested_version": requested_version, "mappings": resolved}
 
 
+def resolve_connector_mapping(
+    manifest: Mapping[str, Any],
+    connector: Mapping[str, Any],
+    requested_version: str,
+) -> dict[str, Any]:
+    """Resolve a physical connector against an exact Multisim manifest.
+
+    Connector contracts use the physical part number and pin numbers, while
+    compatibility manifests use logical families and pin signatures.  This
+    adapter deliberately matches both the part identifier and the complete
+    pin sequence; a generic two-pin carrier is never silently accepted for a
+    different connector.  Until a manifest contains a verified entry the
+    result is ``unavailable`` or ``native-unverified``.
+    """
+    checked = validate_component_manifest(manifest)
+    if not isinstance(connector, Mapping):
+        raise ValueError("connector must be an object")
+    part = str(connector.get("part", "")).strip()
+    if not part:
+        raise ValueError("connector.part is required")
+    raw_pins = connector.get("pins")
+    if not isinstance(raw_pins, Sequence) or isinstance(raw_pins, (str, bytes)) or not raw_pins:
+        raise ValueError("connector.pins must be a non-empty list")
+    numbers = [item.get("number") for item in raw_pins if isinstance(item, Mapping)]
+    if len(numbers) != len(raw_pins) or any(isinstance(item, bool) or not isinstance(item, int) for item in numbers):
+        raise ValueError("connector pins require integer numbers")
+    expected_pins = [str(number) for number in sorted(numbers)]
+    target = parse_multisim_version(requested_version)
+    candidates: list[dict[str, Any]] = []
+    for item in checked["components"]:
+        family = str(item.get("logical_family", "")).casefold()
+        native_name = str(item.get("native_name", "")).casefold()
+        part_number = str(item.get("part_number", "")).casefold()
+        if family not in {"connector", f"connector:{part.casefold()}"} and native_name != part.casefold() and part_number != part.casefold():
+            continue
+        versions = item.get("supported_versions") or [checked.get("multisim_version", "")]
+        if not any(parse_multisim_version(str(version)) == target for version in versions):
+            continue
+        if [str(pin).casefold() for pin in item["pin_signature"]] != [pin.casefold() for pin in expected_pins]:
+            continue
+        candidates.append(item)
+    if not candidates:
+        return {
+            "status": "unavailable",
+            "part": part,
+            "requested_version": requested_version,
+            "expected_pins": expected_pins,
+        }
+    selected = sorted(candidates, key=lambda item: not bool(item.get("verified", False)))[0]
+    return {
+        "status": "native-verified" if bool(selected.get("verified", False)) else "native-unverified",
+        "part": part,
+        "requested_version": requested_version,
+        "expected_pins": expected_pins,
+        "mapping": selected,
+    }
+
+
 def load_component_manifest(path: str | Path) -> dict[str, Any]:
     source = Path(path).expanduser().resolve()
     try:
@@ -121,4 +179,4 @@ def detect_multisim_version() -> str:
         worker.close()
 
 
-__all__ = ["resolve_component_mapping", "validate_component_manifest", "require_verified_mappings", "load_component_manifest", "load_manifest_for_version", "detect_multisim_version"]
+__all__ = ["resolve_component_mapping", "resolve_connector_mapping", "validate_component_manifest", "require_verified_mappings", "load_component_manifest", "load_manifest_for_version", "detect_multisim_version"]

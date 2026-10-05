@@ -42,6 +42,7 @@ instruments. The project therefore defines coverage by capability tier.
 | Four-bit ADC/DAC bridge | `X... @ADC4/@DAC4` | Portable model, Multisim 14.3 bridge verified | Four-bit thresholded/binary-weighted behavioral model; higher-resolution device fidelity pending |
 | Multimeter / Bode / logic analyzer | completed experiment data | Data-backed instrument | Structured values/edges; missing Bode phase stays unavailable |
 | Ground/named nets | `0`, node names | Verified | Complete |
+| Multi-board physical connector | explicit `connectors` contract | Structural contract only; native symbol mapping pending | part, board instances, pin signature, direction and ratings are retained; no generic `XSUB2` fallback |
 
 Every opened generated design is exported back through Multisim's native netlist
 report. Missing ordinary components make generation fail instead of being reported

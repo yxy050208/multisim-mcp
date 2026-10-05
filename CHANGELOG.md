@@ -31,7 +31,10 @@
 - 新增显式多板物理连接器合同：连接器型号、各板实例、连续 pin map、信号类型、端点方向
   和可选电压/电流/阻抗约束均进入结构门禁；跨板网络缺 pin、重复 pin、板归属错误、地线
   类型错误和端点方向冲突会使候选标记为 `infeasible`。旧的自动连接器继续用于逻辑预览，
-  但明确标记为 `inferred`/`unverified`，不冒充原生物理连接证据。
+  但明确标记为 `inferred`/`unverified`，不冒充原生物理连接证据；显式合同在原生符号/封装
+  映射完成前保持 `native_connector_status=mapping-pending`。
+- 兼容层新增 `resolve_connector_mapping`，按目标 Multisim 版本、连接器标识和完整 pin
+  signature 精确匹配 manifest；缺少独立条目时返回 `unavailable`，不会静默退回通用载体。
 - 将可行分区接入 EDA 核心：可从 `CircuitDesign` 生成逐板结构化设计和带跨板接口
   注释的 SPICE 预览，保留源设计的内联模型定义；这些预览仍保持 `logical-only`，
   不替代 Multisim 原生重开和仿真验收。
