@@ -238,6 +238,98 @@ def materialize_multiboard_partition(
     return payload
 
 
+def materialize_circuit_design_partition(
+    design: Any,
+    partition: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Create board-local :class:`CircuitDesign` and SPICE preview artifacts.
+
+    This is the bridge between the generic engineering planner and the EDA
+    core.  It keeps only components assigned to each board, retains inline
+    model definitions from the source design, and annotates cross-board nets.
+    The previews are not native Multisim projects and remain unverified.
+    """
+    from .eda_core import CircuitDesign
+    from .spice_adapter import circuit_design_to_spice
+
+    if not isinstance(design, CircuitDesign):
+        raise ValueError("design must be CircuitDesign")
+    component_payload = [component.to_dict() for component in design.components]
+    logical = materialize_multiboard_partition(component_payload, partition)
+    assignment = partition["component_assignment"]
+    board_results: list[dict[str, Any]] = []
+    for board_artifact in logical["boards"]:
+        board_id = board_artifact["board_id"]
+        selected = tuple(
+            component
+            for component in design.components
+            if str(assignment[component.refdes]).strip() == board_id
+        )
+        if not selected:
+            raise ValueError(f"board {board_id!r} has no assigned components")
+        selected_nets = tuple(dict.fromkeys(
+            node for component in selected for node in component.nodes
+        ))
+        board_digest = hashlib.sha256(board_id.encode("utf-8")).hexdigest()[:12]
+        board_design = CircuitDesign(
+            design_id=f"{design.design_id}.board-{board_digest}",
+            title=f"{design.title} [{board_id}]",
+            components=selected,
+            nets=selected_nets,
+            parameters=design.parameters,
+            model_references=design.model_references,
+            annotations={
+                **dict(design.annotations),
+                "multiboard": {
+                    "parent_design_id": design.design_id,
+                    "board_id": board_id,
+                    "status": "logical-only",
+                    "verification_status": "unverified",
+                    "interfaces": board_artifact["interfaces"],
+                },
+            },
+            source_netlist=design.source_netlist,
+            revision=design.revision,
+        )
+        preview = circuit_design_to_spice(board_design, prefer_source=False)
+        interface_comments = [
+            "* multisim-mcp external interface "
+            f"{item['connector']} pin={item['pin']} net={item['net']} "
+            f"peers={','.join(item['peer_boards'])}"
+            for item in board_artifact["interfaces"]
+        ]
+        if interface_comments:
+            lines = preview.rstrip().splitlines()
+            end_index = next(
+                (index for index, line in enumerate(lines) if line.strip().lower() == ".end"),
+                len(lines),
+            )
+            lines[end_index:end_index] = interface_comments
+            preview = "\n".join(lines) + "\n"
+        board_results.append({
+            "board_id": board_id,
+            "status": "logical-only",
+            "verification_status": "unverified",
+            "design": board_design.to_dict(),
+            "spice_netlist": preview,
+            "interfaces": board_artifact["interfaces"],
+            "native_project": None,
+        })
+    payload = {
+        "schema_version": 1,
+        "kind": "multisim-mcp-multiboard-design-artifacts",
+        "status": "logical-only",
+        "verification_status": "unverified",
+        "parent_design_id": design.design_id,
+        "boards": board_results,
+        "native_projects": "pending-per-board-generation-and-acceptance",
+    }
+    payload["artifact_digest"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
 def rank_partition_candidates(
     components: Sequence[Mapping[str, Any]], boards: Sequence[Mapping[str, Any]],
     *, max_candidates: int = 256,
@@ -279,6 +371,7 @@ def rank_partition_candidates(
 
 
 __all__ = [
+    "materialize_circuit_design_partition",
     "materialize_multiboard_partition",
     "plan_multiboard_partition",
     "score_multiboard_partition",

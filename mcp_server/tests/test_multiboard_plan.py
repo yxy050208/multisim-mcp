@@ -1,11 +1,13 @@
 import unittest
 
 from multisim_mcp.multiboard_plan import (
+    materialize_circuit_design_partition,
     materialize_multiboard_partition,
     plan_multiboard_partition,
     score_multiboard_partition,
     rank_partition_candidates,
 )
+from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 
 
 class MultiboardPlanTest(unittest.TestCase):
@@ -122,3 +124,31 @@ class MultiboardPlanTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             materialize_multiboard_partition(
                 [{"refdes": "R1", "nodes": ["x", "0"]}], partition)
+
+    def test_materializes_circuit_design_and_board_spice_previews(self):
+        design = CircuitDesign(
+            design_id="divider",
+            title="Divider",
+            components=(
+                CircuitComponent("V1", "V", ("bus", "0"), value="5"),
+                CircuitComponent("R1", "R", ("bus", "sense"), value="1k"),
+                CircuitComponent("R2", "R", ("sense", "0"), value="1k"),
+            ),
+        )
+        partition = plan_multiboard_partition(
+            [
+                {"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+                {"refdes": "R1", "board": "signal", "nodes": ["bus", "sense"]},
+                {"refdes": "R2", "board": "signal", "nodes": ["sense", "0"]},
+            ],
+            [{"id": "power"}, {"id": "signal"}],
+        )
+        artifacts = materialize_circuit_design_partition(design, partition)
+        self.assertEqual(artifacts["parent_design_id"], "divider")
+        power = artifacts["boards"][0]
+        signal = artifacts["boards"][1]
+        self.assertIn("V1 bus 0 5", power["spice_netlist"])
+        self.assertNotIn("R1 bus sense 1k", power["spice_netlist"])
+        self.assertIn("R1 bus sense 1k", signal["spice_netlist"])
+        self.assertIn("external interface", signal["spice_netlist"])
+        self.assertEqual(power["design"]["components"][0]["refdes"], "V1")
