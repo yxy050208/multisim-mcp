@@ -139,9 +139,9 @@ Multisim 版本逐板生成、打开、保存、重开、ReportNetlist 回读和
 时才表示这组 14.3 原生证据通过；其他状态必须继续标为未验证或失败。当前首版只覆盖
 DC operating point，另支持显式 `analysis=tran` 或 `analysis=ac`；TRAN 比较末时刻读数，
 AC 比较末频率幅值，并要求 AC 响应不是全零，以防没有声明 AC 激励时误判为通过。
-执行目录还会为每块板保留 `native-op.json`、`native-op.csv` 和
-`native-reopen-op.json`，根目录提供 `acceptance.json` 与 `acceptance-report.md`，便于
-人工审阅、归档和后续实验报告组装。
+执行目录还会为每块板保留与分析类型对应的 `native-op.*`、`native-tran.*` 或
+`native-ac.*`，以及相应的重开记录；根目录提供 `acceptance.json` 与
+`acceptance-report.md`，便于人工审阅、归档和后续实验报告组装。
 
 ## 模型工程后端入口 / Model engineering handoff
 
