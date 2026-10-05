@@ -20,3 +20,17 @@ class EngineeringRequestTest(unittest.TestCase):
                 "schema_version": 1, "title": "x", "application": "y",
                 "boards": [{"id": "a"}, {"id": "a"}],
             })
+
+    def test_rejects_invalid_board_capacity(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_engineering_request({
+                "schema_version": 1, "title": "x", "application": "y",
+                "boards": [{"id": "a", "max_connector_pins": 0}],
+            })
+
+    def test_rejects_empty_component_node(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_engineering_request({
+                "schema_version": 1, "title": "x", "application": "y",
+                "components": [{"refdes": "R1", "nodes": ["a", ""]}],
+            })

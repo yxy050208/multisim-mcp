@@ -32,6 +32,10 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
         board_id = board["id"].strip()
         if board_id in seen:
             raise ValueError(f"duplicate board id: {board_id}")
+        for field in ("max_components", "max_connector_pins"):
+            limit = board.get(field)
+            if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0):
+                raise ValueError(f"board {board_id!r} {field} must be a positive integer")
         seen.add(board_id)
         normalized_boards.append(dict(board, id=board_id))
     normalized_objectives = []
@@ -51,7 +55,10 @@ def validate_engineering_request(request: Mapping[str, Any]) -> dict[str, Any]:
         nodes = item.get("nodes", [])
         if not isinstance(nodes, Sequence) or isinstance(nodes, (str, bytes)):
             raise ValueError("each component nodes must be a list")
-        normalized_components.append(dict(item, refdes=item["refdes"].strip(), nodes=[str(node) for node in nodes]))
+        normalized_nodes = [str(node).strip() for node in nodes]
+        if any(not node for node in normalized_nodes):
+            raise ValueError(f"component {item['refdes'].strip()!r} contains an empty node")
+        normalized_components.append(dict(item, refdes=item["refdes"].strip(), nodes=normalized_nodes))
     return {
         "schema_version": 1,
         "title": title.strip(),
