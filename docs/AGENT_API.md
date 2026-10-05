@@ -120,7 +120,9 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 可行候选会附带 `logical_artifacts`：每块板的组件、板内网络、跨板连接器和接口清单。
 这些工件的 `status` 为 `logical-only`、`verification_status` 为 `unverified`，用于下一阶段
 逐板生成和验收；EDA 核心还可以据此生成每块板的结构化 `CircuitDesign` 和 SPICE 预览。
-这些预览不是已经生成的 `.ms14` 工程。每块板仍需分别通过原生网表和仿真验收。
+`interface_validation.status=valid` 只表示接口工件结构对称且完整；空板或接口不对称时为
+`invalid`，不能送入逐板生成。上述预览不是已经生成的 `.ms14` 工程。每块板仍需分别通过
+原生网表和仿真验收。
 
 ## 模型工程后端入口 / Model engineering handoff
 

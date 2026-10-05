@@ -6,6 +6,7 @@ from multisim_mcp.multiboard_plan import (
     plan_multiboard_partition,
     score_multiboard_partition,
     rank_partition_candidates,
+    validate_multiboard_logical_artifacts,
 )
 from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 
@@ -111,6 +112,7 @@ class MultiboardPlanTest(unittest.TestCase):
         self.assertEqual([item["refdes"] for item in signal["components"]], ["R1", "R2"])
         self.assertEqual(next(item for item in power["nets"] if item["name"] == "bus")["scope"], "cross-board")
         self.assertIn("bus", [item["net"] for item in signal["interfaces"]])
+        self.assertEqual(artifacts["interface_validation"]["status"], "valid")
         self.assertIsNotNone(artifacts["artifact_digest"])
 
     def test_infeasible_partition_cannot_be_materialized(self):
@@ -152,3 +154,15 @@ class MultiboardPlanTest(unittest.TestCase):
         self.assertIn("R1 bus sense 1k", signal["spice_netlist"])
         self.assertIn("external interface", signal["spice_netlist"])
         self.assertEqual(power["design"]["components"][0]["refdes"], "V1")
+
+    def test_empty_board_is_structurally_blocked(self):
+        artifacts = materialize_multiboard_partition(
+            [{"refdes": "R1", "nodes": ["a", "0"]}],
+            plan_multiboard_partition(
+                [{"refdes": "R1", "board": "a", "nodes": ["a", "0"]}],
+                [{"id": "a"}, {"id": "b"}],
+            ),
+        )
+        self.assertEqual(artifacts["interface_validation"]["status"], "invalid")
+        self.assertEqual(artifacts["interface_validation"]["native_status"], "unverified")
+        self.assertTrue(any(item["constraint"] == "non_empty_board" for item in artifacts["interface_validation"]["violations"]))

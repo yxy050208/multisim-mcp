@@ -24,6 +24,8 @@
 - 将可行分区接入 EDA 核心：可从 `CircuitDesign` 生成逐板结构化设计和带跨板接口
   注释的 SPICE 预览，保留源设计的内联模型定义；这些预览仍保持 `logical-only`，
   不替代 Multisim 原生重开和仿真验收。
+- 增加逐板接口结构门禁：检查跨板连接器对称性、网络存在性、对端板引用和空板；
+  `interface_validation` 失败时阻止后续逐板原生生成，且不改变 `native_status=unverified`。
 
 ## [1.3.0rc3] - 2026-09-25
 

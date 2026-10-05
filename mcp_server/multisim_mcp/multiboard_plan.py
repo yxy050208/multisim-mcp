@@ -232,10 +232,85 @@ def materialize_multiboard_partition(
         "boards": board_artifacts,
         "native_projects": "pending-per-board-generation-and-acceptance",
     }
+    payload["interface_validation"] = validate_multiboard_logical_artifacts(payload)
     payload["artifact_digest"] = hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return payload
+
+
+def validate_multiboard_logical_artifacts(
+    artifacts: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate board-local interface symmetry without claiming native validity."""
+    violations: list[dict[str, Any]] = []
+    raw_boards = artifacts.get("boards")
+    if not isinstance(raw_boards, Sequence) or isinstance(raw_boards, (str, bytes)):
+        return {"status": "invalid", "native_status": "unverified", "violations": [
+            {"constraint": "boards", "message": "boards must be a list"},
+        ]}
+    board_ids = [
+        str(item.get("board_id", "")).strip()
+        for item in raw_boards
+        if isinstance(item, Mapping)
+    ]
+    if len(board_ids) != len(raw_boards) or len(set(board_ids)) != len(board_ids):
+        violations.append({"constraint": "board_ids", "message": "board ids must be unique and non-empty"})
+    board_by_id = {
+        str(item.get("board_id", "")).strip(): item
+        for item in raw_boards
+        if isinstance(item, Mapping)
+    }
+    interface_index: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for board_id, board in board_by_id.items():
+        components = board.get("components", [])
+        nets = board.get("nets", [])
+        interfaces = board.get("interfaces", [])
+        if not isinstance(components, Sequence) or isinstance(components, (str, bytes)):
+            violations.append({"board": board_id, "constraint": "components", "message": "components must be a list"})
+        elif not components:
+            violations.append({"board": board_id, "constraint": "non_empty_board", "message": "board has no components"})
+        net_names = {
+            str(item.get("name", "")).strip()
+            for item in nets
+            if isinstance(item, Mapping)
+        } if isinstance(nets, Sequence) and not isinstance(nets, (str, bytes)) else set()
+        if not isinstance(interfaces, Sequence) or isinstance(interfaces, (str, bytes)):
+            violations.append({"board": board_id, "constraint": "interfaces", "message": "interfaces must be a list"})
+            continue
+        for interface in interfaces:
+            if not isinstance(interface, Mapping):
+                violations.append({"board": board_id, "constraint": "interface_object", "message": "interface must be an object"})
+                continue
+            connector = str(interface.get("connector", "")).strip()
+            net = str(interface.get("net", "")).strip()
+            pin = interface.get("pin")
+            peers = interface.get("peer_boards", [])
+            key = (connector, str(pin))
+            if not connector or not net or not isinstance(pin, int) or isinstance(pin, bool):
+                violations.append({"board": board_id, "constraint": "interface_fields", "message": "connector, net and integer pin are required"})
+                continue
+            if net not in net_names:
+                violations.append({"board": board_id, "connector": connector, "constraint": "interface_net", "message": f"interface net {net!r} is absent from board nets"})
+            if not isinstance(peers, Sequence) or isinstance(peers, (str, bytes)) or any(str(peer) not in board_by_id for peer in peers):
+                violations.append({"board": board_id, "connector": connector, "constraint": "peer_boards", "message": "interface peers must reference declared boards"})
+            interface_index[(board_id, connector)] = interface
+    for (board_id, connector), interface in interface_index.items():
+        for peer in interface.get("peer_boards", []):
+            peer_id = str(peer)
+            counterpart = interface_index.get((peer_id, connector))
+            if counterpart is None:
+                violations.append({"board": board_id, "connector": connector, "constraint": "interface_symmetry", "message": f"missing counterpart on {peer_id!r}"})
+                continue
+            if counterpart.get("net") != interface.get("net") or counterpart.get("pin") != interface.get("pin"):
+                violations.append({"board": board_id, "connector": connector, "constraint": "interface_symmetry", "message": f"counterpart on {peer_id!r} disagrees"})
+            if board_id not in [str(item) for item in counterpart.get("peer_boards", [])]:
+                violations.append({"board": board_id, "connector": connector, "constraint": "interface_symmetry", "message": f"counterpart on {peer_id!r} does not point back"})
+    return {
+        "status": "valid" if not violations else "invalid",
+        "native_status": "unverified",
+        "violations": violations,
+    }
 
 
 def materialize_circuit_design_partition(
@@ -376,4 +451,5 @@ __all__ = [
     "plan_multiboard_partition",
     "score_multiboard_partition",
     "rank_partition_candidates",
+    "validate_multiboard_logical_artifacts",
 ]

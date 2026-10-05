@@ -110,7 +110,8 @@
   附带确定性的逐板 `logical_artifacts`（组件、板内/跨板网络、连接器和接口），但其
   `status=logical-only`、`verification_status=unverified`，尚未自动发布多个独立 `.ms14`
   工程；EDA 核心现可从 `CircuitDesign` 生成逐板结构化设计和 SPICE 预览。下一步应将
-  这些预览逐板绑定到原生 `.ms14` 生成、回读和仿真门禁。
+  这些预览先通过 `interface_validation` 结构门禁，再逐板绑定到原生 `.ms14` 生成、
+  回读和仿真门禁；结构 `valid` 仍不代表原生电气通过。
 - 不再采用“最终生成后替换标签就宣布工程正确”的流程；必须让 Multisim 打开、保存、
   回读真实器件属性并导出实际图像，然后核验最终产物的 manifest。
 - RLC 入口另外拒绝电压源载体遗留的 `10Vpk/5kHz` 示例标签，并重新解码每个候选的
