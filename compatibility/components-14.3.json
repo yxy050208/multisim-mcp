@@ -141,6 +141,18 @@
       "template": "djk7_element.xml",
       "verified": true,
       "evidence": "shift4_load regression with four native JK stages and native XML pin mapping"
+    },
+    {
+      "logical_family": "connector:HDR1X4",
+      "native_name": "HDR1X4",
+      "part_number": "HDR1X4",
+      "model_source": "licensed-local-template",
+      "pin_signature": ["1", "2", "3", "4"],
+      "supported_versions": ["14.3"],
+      "template": "hdr1x4_element.xml",
+      "symbol_template": "sym_hdr1x4.xml",
+      "verified": true,
+      "evidence": "Getting Started/Getting Started 1.ms14 J1; native value HDR1X4, four CIITPinSymbolComp/CIITPinConnectorComp pairs; 14.3 open/save/reopen, all-pin ReportNetlist, DC/AC/TRAN acceptance on the local derived pack (2026-10-07)"
     }
   ]
 }

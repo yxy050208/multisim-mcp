@@ -103,6 +103,12 @@
       "status": "template-extracted",
       "native_model": "5T_Virtual",
       "source": "local NI sample LowPassFilter.ms14, component U4"
+    },
+    "HDR1X4": {
+      "status": "native-open-save-netlist-and-analysis-verified",
+      "source": "local NI sample Getting Started/Getting Started 1.ms14, component J1",
+      "pin_signature": ["1", "2", "3", "4"],
+      "notice": "Verified on Multisim 14.3 with the user-local derived pack; the connector template is not bundled and other versions require separate acceptance."
     }
   }
 }

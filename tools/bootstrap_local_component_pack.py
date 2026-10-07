@@ -66,6 +66,10 @@ EXTRACTIONS = (
     Extraction("Up-DownCounter.ms14", "U14", "DOR5"),
     Extraction("Up-DownCounter.ms14", "U1", "DJK7"),
     Extraction("Getting Started/Getting Started 1.ms14", "R2", "XSUB16"),
+    # Native four-pin connector.  The sample identifies J1 as HDR1X4 and
+    # carries four numbered pin symbols; keep it local because the extracted
+    # artwork is derived from the user's licensed NI installation.
+    Extraction("Getting Started/Getting Started 1.ms14", "J1", "HDR1X4"),
     Extraction("LowPassFilter.ms14", "XSC1", "OSC6"),
     Extraction("Non-InvertingOpAmp.ms14", "XFG1", "XFG3"),
 )

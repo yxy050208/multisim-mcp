@@ -174,6 +174,21 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         ("mnmos_port1.xml", "mnmos_port2.xml", "mnmos_port3.xml", "mnmos_port4.xml"),
         432, 1377, 180, "subcircuit",
     ),
+    # Native four-pin header extracted from Multisim's Getting Started sample
+    # (value ``HDR1X4``).  This is deliberately a separate family instead of
+    # reusing XSUB4: the header has no SPICE model and its pin geometry/order
+    # is part of the native connector contract.  The XML files are supplied by
+    # the user's local pack; this project never bundles NI database assets.
+    "HDR1X4": ComponentDefinition(
+        "HDR1X4", "hdr1x4_element.xml", "sym_hdr1x4.xml",
+        (
+            "hdr1x4_port1.xml",
+            "hdr1x4_port2.xml",
+            "hdr1x4_port3.xml",
+            "hdr1x4_port4.xml",
+        ),
+        432, 1377, 180, "native-connector",
+    ),
     "XSUB5": ComponentDefinition(
         "XSUB5", "opamp5_element.xml", "sym_opamp5.xml",
         (
@@ -1459,6 +1474,23 @@ def parse_netlist(text: str) -> ParsedNetlist:
                     kind=model.upper(), refdes=refdes[1:] if refdes.upper().startswith("XU") else refdes,
                     nodes=nodes, model=model, parameters=instance_parameters,
                 ))
+            elif len(nodes) == 4 and model.upper() == "HDR1X4":
+                # The native sample uses refdes J1.  Keep the portable
+                # netlist unambiguous by accepting XJ1 ... HDR1X4 and
+                # normalizing the leading X before emitting the native part.
+                parsed.components.append(
+                    ComponentSpec(
+                        kind="HDR1X4",
+                        refdes=(
+                            refdes[1:]
+                            if refdes[:2].upper() == "XJ"
+                            else refdes
+                        ),
+                        nodes=nodes,
+                        model=model,
+                        parameters=instance_parameters,
+                    )
+                )
             elif len(nodes) == 5 and model.upper() in {
                 "OPAMP5",
                 "IDEALOPAMP",
@@ -2263,7 +2295,7 @@ def _configure_component_semantics(
     if spec.kind not in {
         "R", "V", "I", "BV", "BI", "T", "XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN",
         "D", "QNPN", "QPNP", "MNMOS", "MPMOS", "S", "JN", "JP", "ZN", "ZP", "W", "K", "O", "U",
-        "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "TIMER8", "DFF8", "CD4017", "OPAMP5",
+        "DNAND5", "DNOR5", "DXOR5", "DXNOR5", "TIMER8", "DFF8", "CD4017", "OPAMP5", "HDR1X4",
     }:
         return
     if spec.kind in {"DNAND5", "DNOR5", "DXOR5", "DXNOR5"}:
@@ -2313,6 +2345,11 @@ def _configure_component_semantics(
         if template is None:
             raise ValueError("Native OPAMP5 carrier has no SPICE template")
         template.set("String", _asc("e%p %tOUT 0 %tIN+ %tIN- 1e5"))
+        return
+    if spec.kind == "HDR1X4":
+        # A passive native header has no SPICE card.  Its electrical identity
+        # is carried by the four CiPort records and their symbol connectors;
+        # do not fall through to the behavioral-source validation below.
         return
     if spec.kind in {"V", "I"}:
         if not spec.model and spec.kind != "V":

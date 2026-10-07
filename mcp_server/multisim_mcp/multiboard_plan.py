@@ -7,6 +7,7 @@ import math
 from collections import defaultdict
 from typing import Any, Mapping, Sequence
 from itertools import product
+from pathlib import Path
 
 
 CONNECTOR_CONTRACT_VERSION = 1
@@ -650,6 +651,9 @@ def validate_multiboard_logical_artifacts(
 def materialize_circuit_design_partition(
     design: Any,
     partition: Mapping[str, Any],
+    *,
+    target_multisim_version: str | None = None,
+    compatibility_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create board-local :class:`CircuitDesign` and SPICE preview artifacts.
 
@@ -658,7 +662,8 @@ def materialize_circuit_design_partition(
     model definitions from the source design, and annotates cross-board nets.
     The previews are not native Multisim projects and remain unverified.
     """
-    from .eda_core import CircuitDesign
+    from .eda_core import CircuitComponent, CircuitDesign
+    from .component_compat import load_manifest_for_version, resolve_connector_mapping
     from .spice_adapter import circuit_design_to_spice
 
     if not isinstance(design, CircuitDesign):
@@ -668,6 +673,57 @@ def materialize_circuit_design_partition(
     if logical["interface_validation"].get("status") != "valid":
         raise ValueError("multiboard interface contract is structurally invalid")
     assignment = partition["component_assignment"]
+    connector_contract = partition.get("connector_contract", {})
+    explicit_connectors = (
+        list(connector_contract.get("connectors", []))
+        if isinstance(connector_contract, Mapping)
+        else []
+    )
+    connector_resolutions: list[dict[str, Any]] = []
+    resolution_by_id: dict[str, dict[str, Any]] = {}
+    verified_connectors: dict[str, dict[str, Any]] = {}
+    if explicit_connectors:
+        manifest = compatibility_manifest
+        if manifest is None and target_multisim_version is not None:
+            manifest = load_manifest_for_version(
+                Path(__file__).resolve().parent / "compatibility",
+                target_multisim_version,
+            )
+        for connector in explicit_connectors:
+            connector_id = str(connector.get("id", "")).strip()
+            if manifest is None or target_multisim_version is None:
+                resolution = {
+                    "status": "mapping-pending",
+                    "id": connector_id,
+                    "part": connector.get("part"),
+                    "requested_version": target_multisim_version,
+                }
+            else:
+                resolution = dict(resolve_connector_mapping(
+                    manifest, connector, target_multisim_version
+                ))
+                resolution["id"] = connector_id
+            connector_resolutions.append(resolution)
+            resolution_by_id[connector_id] = resolution
+            if resolution.get("status") == "native-verified":
+                verified_connectors[connector_id] = connector
+
+    connector_contract_status = str(
+        connector_contract.get("status", "")
+    ).strip().casefold() if isinstance(connector_contract, Mapping) else ""
+    if explicit_connectors:
+        native_connector_status = (
+            "native-verified"
+            if len(verified_connectors) == len(explicit_connectors)
+            else "mapping-pending"
+        )
+    elif connector_contract_status == "inferred" and partition.get("connectors"):
+        # The legacy shorthand identifies crossing nets only.  It has no
+        # physical part, instance, or pin mapping and must never open the
+        # native execution gate.
+        native_connector_status = "unverified-inferred"
+    else:
+        native_connector_status = "not-required"
     board_results: list[dict[str, Any]] = []
     for board_artifact in logical["boards"]:
         board_id = board_artifact["board_id"]
@@ -678,14 +734,63 @@ def materialize_circuit_design_partition(
         )
         if not selected:
             raise ValueError(f"board {board_id!r} has no assigned components")
+        connector_components: list[CircuitComponent] = []
+        existing_refs = {component.refdes.casefold() for component in selected}
+        for connector in explicit_connectors:
+            connector_id = str(connector.get("id", "")).strip()
+            if connector_id not in verified_connectors:
+                continue
+            instance = next(
+                (
+                    item for item in connector.get("instances", [])
+                    if isinstance(item, Mapping)
+                    and str(item.get("board", "")).strip() == board_id
+                ),
+                None,
+            )
+            if instance is None:
+                raise ValueError(
+                    f"connector {connector_id!r} has no instance for board {board_id!r}"
+                )
+            refdes = str(instance.get("refdes", "")).strip()
+            if refdes.casefold() in existing_refs:
+                raise ValueError(
+                    f"connector {connector_id!r} instance {refdes!r} collides with a board component"
+                )
+            instance_part = str(instance.get("part", connector.get("part", ""))).strip()
+            mapped_part = str(
+                resolution_by_id[connector_id].get("mapping", {}).get("native_name", "")
+            ).strip()
+            if instance_part.casefold() != str(connector.get("part", "")).strip().casefold():
+                raise ValueError(
+                    f"connector {connector_id!r} instance {refdes!r} part does not match connector part"
+                )
+            pins = sorted(connector.get("pins", []), key=lambda item: item["number"])
+            nodes = tuple(str(item["net"]).strip() for item in pins)
+            connector_components.append(CircuitComponent(
+                refdes=refdes,
+                kind=mapped_part,
+                nodes=nodes,
+                model=mapped_part,
+                annotations={
+                    "role": "physical multiboard connector",
+                    "connector_id": connector_id,
+                    "part": connector.get("part"),
+                    "pin_numbers": [item["number"] for item in pins],
+                    "target_multisim_version": target_multisim_version,
+                    "mapping_status": "native-verified",
+                },
+            ))
+            existing_refs.add(refdes.casefold())
+        selected_with_connectors = tuple((*selected, *connector_components))
         selected_nets = tuple(dict.fromkeys(
-            node for component in selected for node in component.nodes
+            node for component in selected_with_connectors for node in component.nodes
         ))
         board_digest = hashlib.sha256(board_id.encode("utf-8")).hexdigest()[:12]
         board_design = CircuitDesign(
             design_id=f"{design.design_id}.board-{board_digest}",
             title=f"{design.title} [{board_id}]",
-            components=selected,
+            components=selected_with_connectors,
             nets=selected_nets,
             parameters=design.parameters,
             model_references=design.model_references,
@@ -696,6 +801,8 @@ def materialize_circuit_design_partition(
                     "board_id": board_id,
                     "status": "logical-only",
                     "verification_status": "unverified",
+                    "native_connector_status": native_connector_status,
+                    "connector_resolutions": connector_resolutions,
                     "interfaces": board_artifact["interfaces"],
                 },
             },
@@ -738,6 +845,9 @@ def materialize_circuit_design_partition(
             "design": board_design.to_dict(),
             "spice_netlist": preview,
             "interfaces": board_artifact["interfaces"],
+            "connector_components": [item.to_dict() for item in connector_components],
+            "native_connector_status": native_connector_status,
+            "connector_resolutions": connector_resolutions,
             "native_project": None,
         })
     payload = {
@@ -747,6 +857,9 @@ def materialize_circuit_design_partition(
         "verification_status": "unverified",
         "parent_design_id": design.design_id,
         "connector_contract": logical.get("connector_contract"),
+        "native_connector_status": native_connector_status,
+        "native_connector_ready": native_connector_status in {"native-verified", "not-required"},
+        "connector_resolutions": connector_resolutions,
         "boards": board_results,
         "native_projects": "pending-per-board-generation-and-acceptance",
         "interface_validation": logical["interface_validation"],

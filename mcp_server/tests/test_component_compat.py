@@ -73,6 +73,25 @@ class ComponentCompatibilityTest(unittest.TestCase):
                 {"digital-jk": ["J", "K", "CLK", "SET", "RESET", "Q", "~Q"]},
             )
 
+    def test_repo_manifest_exposes_verified_hdr1x4_mapping(self):
+        from pathlib import Path
+
+        manifest = load_manifest_for_version(
+            Path(__file__).resolve().parents[2] / "compatibility", "14.3"
+        )
+        connector = {
+            "part": "HDR1X4",
+            "pins": [{"number": 1}, {"number": 2}, {"number": 3}, {"number": 4}],
+        }
+        result = resolve_connector_mapping(manifest, connector, "14.3")
+        self.assertEqual(result["status"], "native-verified")
+        self.assertEqual(result["mapping"]["native_name"], "HDR1X4")
+        connector["pins"][-1]["number"] = 5
+        self.assertEqual(
+            resolve_connector_mapping(manifest, connector, "14.3")["status"],
+            "unavailable",
+        )
+
     def test_connector_mapping_requires_exact_part_and_pin_signature(self):
         manifest = {
             "schema_version": 1,

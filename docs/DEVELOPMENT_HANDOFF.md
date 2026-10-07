@@ -143,14 +143,35 @@
 - 兼容策略：没有显式 `connectors` 的旧请求仍能生成逻辑预览，但返回
   `connector_contract_status=inferred`、`verification_status=unverified`；这只是网表级
   连接器推断，不是实际封装或 Multisim 原生连接器证据；候选的
-  `native_connector_ready` 会保持 `false`。即使显式合同结构有效，当前候选仍为
-  `native_connector_status=mapping-pending`，直到目标版本的符号/封装完成独立实机映射。
-  已有 14.3 多板验收证据未被重写。
-- 回归结果：`mcp_server/tests` 当前 `915 passed, 45 skipped, 154 subtests passed`。
-- 下一项：把显式合同绑定到 Multisim 元件库中的具体连接器符号/封装，随后在 14.3 实机
-  重新验证多引脚连接器的打开、保存、重开、ReportNetlist 和逐点 DC/TRAN/AC；再扩展
-  14.2/其他版本独立兼容矩阵。此前 14.3 分压夹具的通过结论不外推到未测试的连接器模型。
+  `native_connector_ready` 会保持 `false`。显式合同只有在版本感知的原生执行阶段
+  解析到已验收的映射后才会打开；当前 14.3 清单已经加入 `HDR1X4`，其他 part 仍为
+  `mapping-pending`。已有 14.3 多板验收证据未被重写。
+- 2026-10-07 已完成 `HDR1X4`：来源为 Getting Started 样例 J1，完成本地包提取、
+  14.3 打开/保存/重开、四 pin `ReportNetlist` 以及带探针的 DC/AC/TRAN；证据保存在
+  仓库外的 `multisim-evidence/connector-scan/hdr1x4-native-acceptance.json`。
+- 回归结果：连接器相关聚焦测试已扩展为 `39 passed`；本轮全量回归为 `924 passed,
+  45 skipped, 154 subtests passed`。
+- 下一项：继续对 14.2/其他版本建立独立 connector manifest 和实机矩阵，并扩展更多
+  已明确验收的连接器规格。不能把 `HDR1X4` 的结论外推到其他连接器型号。
 - 已完成接口准备：兼容层新增 `resolve_connector_mapping`，只接受目标版本 manifest 中
   同时匹配 part 标识和完整 pin signature 的条目；没有独立条目时返回 `unavailable`，
-  不会把通用 `XSUB2` 载体冒充真实连接器。下一阶段需要用本机 Multisim 元件库抽取一套
-  真实连接器模板和 pin 证据，再把 manifest 条目标记为 verified。
+  不会把通用 `XSUB2` 载体冒充真实连接器。14.3 的 `HDR1X4` 条目已在闭环验收后标记
+  `verified=true`。
+
+## 2026-10-07 多板 HDR1X4 原生物化闭环
+
+- 已完成：`materialize_circuit_design_partition` 接受目标 Multisim 版本并调用精确的
+  `resolve_connector_mapping`。只有 manifest 中 `verified=true` 且 pin signature 完整
+  匹配的连接器，才会按显式 `instances` 在每块板加入真实的 `CircuitComponent`；未映射
+  型号保持 `mapping-pending`，不会退回到 `XSUB2` 或自动猜测。
+- 已完成：SPICE 适配器输出 `XJ<n> net1 net2 net3 net4 HDR1X4`，原生构建器随后从本机
+  授权模板包写入四个 `CiPort`。原生验收执行器在映射未验证时主动拒绝执行，避免生成
+  没有物理连接器的“看似多板工程”。旧的无 `connectors` 请求仍可生成逻辑预览，但
+  `unverified-inferred` 不会打开原生执行门。
+- 实机证据：Multisim 14.3 双板四引脚样例已完成两块板分别生成、打开、保存、重开、
+  `ReportNetlist` 元件/网络回读，以及 DC、TRAN、AC 三种原生分析；跨板接口序列和
+  完整电路参考比较均通过，三次结果都是 `accepted/native-verified`。证据保存在源码
+  仓库外的 `C:\Users\18331\Documents\multisim-evidence\multiboard-hdr1x4-20261007-*`，
+  不提交 NI 模板、样例工程或解码 XML。
+- 回归测试新增连接器物化、映射待定和旧推断连接器门禁；后续仍需在 14.2 及其他目标
+  版本建立独立 manifest 和实机验收，不能把 14.3 的 `HDR1X4` 结论外推到其他连接器。

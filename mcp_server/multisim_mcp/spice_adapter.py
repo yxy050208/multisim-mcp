@@ -325,6 +325,22 @@ def _component_to_spice(component: CircuitComponent) -> str:
                 *parameters,
             ]
         )
+    if kind == "HDR1X4":
+        # HDR1X4 is a passive native connector.  Its electrical identity is
+        # carried by the four native port records, so the portable preview
+        # uses the same XJ<n> ... HDR1X4 form accepted by schematic_builder.
+        if len(component.nodes) != 4:
+            raise ValueError(f"{refdes} HDR1X4 requires 4 nodes")
+        model = component.model or "HDR1X4"
+        if model.upper() != "HDR1X4":
+            raise ValueError(f"{refdes} HDR1X4 model must be HDR1X4")
+        return " ".join(
+            [
+                refdes if refdes[:1].upper() == "X" else f"X{refdes}",
+                *(_token(node, f"{refdes}.node") for node in component.nodes),
+                "HDR1X4",
+            ]
+        )
     if kind == "OPAMP5" or kind.startswith("XSUB"):
         if not 2 <= len(component.nodes) <= 16:
             raise ValueError(f"{refdes} subcircuit requires 2 to 16 nodes")

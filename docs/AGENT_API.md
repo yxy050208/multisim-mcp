@@ -111,6 +111,12 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 `unverified`、`target-not-met` 和 `failed` 都必须展示为未通过，不能仅凭生成了 `.ms14`
 就宣称电路正确。
 
+当显式连接器合同与目标版本 manifest 匹配时，原生多板阶段会把每块板的物理实例加入
+结构化设计，并输出与 pin 顺序一致的 `XJ<n> ... <native_name>` 记录；14.3 的
+`HDR1X4` 已完成这一闭环。目标版本缺少 `verified` 映射时，物化结果保持
+`native_connector_status=mapping-pending`，`run_native_multiboard_acceptance(execute=true)`
+会拒绝继续，避免把只有逻辑接口注释的工程误报为物理连接器工程。
+
 ## 多板规划 / Multi-board planning
 
 MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求，执行只读校验和候选
@@ -130,9 +136,11 @@ MCP 工具 `plan_multiboard_engineering_request` 接受版本化结构化请求�
 `connector_contract` 中返回规范化合同与违反项。未提供该字段时仍生成兼容的逻辑连接器，
 但 `connector_contract_status=inferred`、物理映射保持 `unverified`，不能据此声称真实连接器
 已经确定。显式合同通过结构门禁后，接口记录会附带 `part` 和对应板端 `instance`；候选同时
-返回 `native_connector_status` 和 `native_connector_ready`。当前显式合同的状态是
-`mapping-pending`，因为仍需把 `part` 绑定到目标 Multisim 版本中经过实机验证的符号/封装；
-旧简写的状态为 `unverified-inferred`，两者的 `native_connector_ready` 都是 `false`。
+返回 `native_connector_status` 和 `native_connector_ready`。版本感知的原生执行阶段会先
+调用 `resolve_connector_mapping`；14.3 的 `HDR1X4` 已有完整 pin signature 和实机闭环
+证据，其他 part 没有对应条目时仍保持 `mapping-pending`。旧简写的状态为
+`unverified-inferred`，不能把它当作真实封装；通用规划预览在未绑定目标版本时仍保持
+`native_connector_ready=false`。
 兼容层提供 `resolve_connector_mapping`，要求 manifest 同时匹配连接器标识、完整 pin
 signature 和目标版本；没有独立 manifest 条目时返回 `unavailable`，不会退回到通用 `XSUB2`
 载体。

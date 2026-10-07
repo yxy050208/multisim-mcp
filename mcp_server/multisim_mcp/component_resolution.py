@@ -80,6 +80,10 @@ _NATIVE_KIND_BY_FAMILY: Final[dict[str, str]] = {
     "nmos-pair": "MNMOS",
     "transistor-buffer": "QNPN",
     "connector": "XSUB2",
+    # Exact native connector families are opt-in.  The generic ``connector``
+    # role above remains a portable two-terminal placeholder until a physical
+    # part and versioned pin mapping are supplied.
+    "connector:hdr1x4": "HDR1X4",
     "op-amp-integrator": "OPAMP5",
     "rail-to-rail-op-amp": "OPAMP5",
     "instrumentation-amplifier": "OPAMP5",
@@ -263,6 +267,7 @@ _FAMILY_LABELS: Final[dict[str, tuple[str, str]]] = {
     "analog-limiter": ("模拟限幅器", "Analog limiter"),
     "diode-shaper": ("二极管整形器", "Diode shaper"),
     "connector": ("连接器", "Connector"),
+    "connector:hdr1x4": ("HDR1X4 连接器", "HDR1X4 header"),
     "active-filter": ("有源滤波器", "Active filter"),
     "compensation-network": ("补偿网络", "Compensation network"),
     "controller-and-mosfets": ("控制器与 MOSFET", "Controller and MOSFETs"),

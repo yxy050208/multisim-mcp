@@ -384,7 +384,16 @@ def run_native_multiboard_acceptance(
         analysis, analysis_options
     )
     root = _validate_output_directory(output_directory)
-    logical = materialize_circuit_design_partition(design, partition)
+    logical = materialize_circuit_design_partition(
+        design,
+        partition,
+        target_multisim_version=target_multisim_version,
+    )
+    if execute and logical.get("native_connector_ready") is not True:
+        raise RuntimeError(
+            "native multi-board acceptance requires a verified connector mapping "
+            f"for Multisim {target_multisim_version}"
+        )
     prepared = materialize_multiboard_fixture_artifacts(logical, fixtures)
     preview: dict[str, Any] = {
         "schema_version": 1,
@@ -394,6 +403,9 @@ def run_native_multiboard_acceptance(
         "target_multisim_version": str(target_multisim_version).strip(),
         "analysis": analysis_kind,
         "analysis_options": normalized_analysis_options,
+        "native_connector_status": logical.get("native_connector_status"),
+        "native_connector_ready": logical.get("native_connector_ready"),
+        "connector_resolutions": logical.get("connector_resolutions", []),
         "prepared_artifacts": prepared,
         "output_directory": str(root),
         "execution_started": False,
