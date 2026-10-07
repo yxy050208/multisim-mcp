@@ -399,6 +399,9 @@ def materialize_multiboard_fixture_artifacts(
             "fixture_components": [item.to_dict() for item in fixture_components],
             "probe_nets": list(dict.fromkeys(probe_nets)),
             "interfaces": board.get("interfaces", []),
+            "connector_components": list(board.get("connector_components", [])),
+            "native_connector_status": board.get("native_connector_status"),
+            "connector_resolutions": list(board.get("connector_resolutions", [])),
             "native_project": None,
         })
     payload: dict[str, Any] = {
@@ -408,6 +411,9 @@ def materialize_multiboard_fixture_artifacts(
         "verification_status": "unverified",
         "parent_artifact_digest": artifacts.get("artifact_digest"),
         "connector_contract": artifacts.get("connector_contract"),
+        "native_connector_status": artifacts.get("native_connector_status"),
+        "native_connector_ready": artifacts.get("native_connector_ready"),
+        "connector_resolutions": artifacts.get("connector_resolutions", []),
         "interface_validation": artifacts.get("interface_validation"),
         "fixture_contract": contract,
         "boards": board_results,
