@@ -168,6 +168,9 @@
   授权模板包写入四个 `CiPort`。原生验收执行器在映射未验证时主动拒绝执行，避免生成
   没有物理连接器的“看似多板工程”。旧的无 `connectors` 请求仍可生成逻辑预览，但
   `unverified-inferred` 不会打开原生执行门。
+- 已完成：重开后的 `ReportNetlist` 不再只检查连接器/网络名称是否出现；对每个
+  `HDR1X4` 实例逐 pin 校验 `P1`–`P4` 到源网的对应关系。缺针、错序或错网会把板级
+  `reopened_topology` 置为 `fail`/`unverified`，从而阻断 `native-verified` 结果。
 - 实机证据：Multisim 14.3 双板四引脚样例已完成两块板分别生成、打开、保存、重开、
   `ReportNetlist` 元件/网络回读，以及 DC、TRAN、AC 三种原生分析；跨板接口序列和
   完整电路参考比较均通过，三次结果都是 `accepted/native-verified`。证据保存在源码

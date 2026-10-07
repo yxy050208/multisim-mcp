@@ -31,7 +31,7 @@ from .native_analysis_series import (
     write_native_series_csv,
 )
 from .spice_adapter import circuit_design_to_spice
-from .topology_validation import compare_roundtrip_topology
+from .topology_validation import compare_pin_connections, compare_roundtrip_topology
 
 
 _ANALYSIS_KINDS = frozenset({"dc", "tran", "ac"})
@@ -343,8 +343,44 @@ def _reopened_topology(
         required_nets,
         report_text,
     )
+    connector_expected: dict[str, list[str]] = {}
+    connector_ports: dict[str, list[str]] = {}
+    connector_named: dict[str, dict[str, str]] = {}
+    for component in components:
+        if str(component.get("kind", "")).upper() != "HDR1X4":
+            continue
+        refdes = str(component.get("refdes", "")).strip()
+        raw_nodes = component.get("nodes", [])
+        if not refdes or not isinstance(raw_nodes, Sequence) or len(raw_nodes) != 4:
+            continue
+        nodes = [str(node) for node in raw_nodes]
+        ports = [f"P{index}" for index in range(1, 5)]
+        connector_expected[refdes] = nodes
+        connector_ports[refdes] = ports
+        connector_named[refdes] = dict(zip(ports, nodes))
+    if connector_expected:
+        pin_connections = compare_pin_connections(
+            connector_expected,
+            report_text,
+            declared_ports=connector_ports,
+            expected_named_ports=connector_named,
+        )
+        result["connector_pin_connections"] = pin_connections
+        if pin_connections.get("status") == "fail":
+            result["status"] = "fail"
+        elif pin_connections.get("status") != "pass" and result.get("status") == "pass":
+            result["status"] = "unverified"
+    else:
+        result["connector_pin_connections"] = {
+            "status": "not-applicable",
+            "checked_components": 0,
+            "unverified_components": [],
+            "mismatches": [],
+            "evidence": "no verified native connector component in board design",
+        }
     result["evidence"] = (
         "final saved-and-reopened Multisim ReportNetlist text presence; "
+        "native HDR1X4 P1-P4 pin/net rows are checked when present; "
         "singleton source nets remain informational"
     )
     return result

@@ -7,6 +7,7 @@ from multisim_mcp.multiboard_plan import plan_multiboard_partition
 from multisim_mcp.native_multiboard_acceptance import (
     _analysis_informative,
     _analysis_values,
+    _reopened_topology,
     _normalize_analysis_options,
     _write_acceptance_report,
     _write_native_op_csv,
@@ -15,6 +16,27 @@ from multisim_mcp.native_multiboard_acceptance import (
 
 
 class NativeMultiboardAcceptanceTest(unittest.TestCase):
+    def test_reopened_topology_checks_hdr1x4_pin_to_net_order(self):
+        board = {
+            "design": {
+                "components": [{
+                    "refdes": "J1",
+                    "kind": "HDR1X4",
+                    "nodes": ["bus", "0", "clk", "data"],
+                }],
+            },
+        }
+        report = """header\n--------------------------------------\nheader\n--------------------------------------\n0 circuit J1 P2\nbus circuit J1 P1\nclk circuit J1 P3\ndata circuit J1 P4\n--------------------------------------\n"""
+        result = _reopened_topology(board, report)
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["connector_pin_connections"]["status"], "pass")
+        wrong_order = report.replace("bus circuit J1 P1", "bus circuit J1 P4").replace(
+            "data circuit J1 P4", "data circuit J1 P1"
+        )
+        failed = _reopened_topology(board, wrong_order)
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(failed["connector_pin_connections"]["status"], "fail")
+
     def test_preview_is_com_free_and_preserves_unverified_boundary(self):
         design = CircuitDesign(
             design_id="native-preview",
