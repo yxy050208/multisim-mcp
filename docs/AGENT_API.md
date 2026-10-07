@@ -116,6 +116,8 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 `HDR1X4` 已完成这一闭环。目标版本缺少 `verified` 映射时，物化结果保持
 `native_connector_status=mapping-pending`，`run_native_multiboard_acceptance(execute=true)`
 会拒绝继续，避免把只有逻辑接口注释的工程误报为物理连接器工程。
+目标版本没有 manifest 时，预览会返回 `connector_resolutions[].status=unavailable` 并保持
+`native_connector_ready=false`，不会因为缺少版本清单而合成连接器。
 重开后的 `ReportNetlist` 还会对已验证 `HDR1X4` 的 `P1`–`P4` 与源网逐针比对；连接器
 存在但针脚顺序错误时，板级拓扑验收会失败。
 

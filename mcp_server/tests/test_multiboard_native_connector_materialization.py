@@ -112,6 +112,20 @@ class MultiboardNativeConnectorMaterializationTest(unittest.TestCase):
         self.assertEqual(artifacts["native_connector_status"], "unverified-inferred")
         self.assertFalse(artifacts["native_connector_ready"])
 
+    def test_missing_target_version_manifest_is_pending_not_synthesized(self):
+        design, partition = self._design_and_partition()
+        artifacts = materialize_circuit_design_partition(
+            design, partition, target_multisim_version="14.2"
+        )
+        self.assertEqual(artifacts["native_connector_status"], "mapping-pending")
+        self.assertFalse(artifacts["native_connector_ready"])
+        resolution = artifacts["connector_resolutions"][0]
+        self.assertEqual(resolution["status"], "unavailable")
+        self.assertIn("no component manifest", resolution["reason"])
+        for board in artifacts["boards"]:
+            self.assertEqual(board["connector_components"], [])
+            self.assertNotIn("HDR1X4", board["spice_netlist"])
+
 
 if __name__ == "__main__":
     unittest.main()

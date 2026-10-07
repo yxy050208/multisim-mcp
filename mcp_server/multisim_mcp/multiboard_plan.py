@@ -682,22 +682,33 @@ def materialize_circuit_design_partition(
     connector_resolutions: list[dict[str, Any]] = []
     resolution_by_id: dict[str, dict[str, Any]] = {}
     verified_connectors: dict[str, dict[str, Any]] = {}
+    manifest_error: str | None = None
     if explicit_connectors:
         manifest = compatibility_manifest
         if manifest is None and target_multisim_version is not None:
-            manifest = load_manifest_for_version(
-                Path(__file__).resolve().parent / "compatibility",
-                target_multisim_version,
-            )
+            try:
+                manifest = load_manifest_for_version(
+                    Path(__file__).resolve().parent / "compatibility",
+                    target_multisim_version,
+                )
+            except ValueError as exc:
+                # A missing version manifest is a compatibility result, not a
+                # reason to synthesize a connector or abort a review preview.
+                # Native execution remains closed until that version is
+                # independently mapped and verified.
+                manifest = None
+                manifest_error = str(exc)
         for connector in explicit_connectors:
             connector_id = str(connector.get("id", "")).strip()
             if manifest is None or target_multisim_version is None:
                 resolution = {
-                    "status": "mapping-pending",
+                    "status": "unavailable" if target_multisim_version is not None else "mapping-pending",
                     "id": connector_id,
                     "part": connector.get("part"),
                     "requested_version": target_multisim_version,
                 }
+                if manifest_error:
+                    resolution["reason"] = manifest_error
             else:
                 resolution = dict(resolve_connector_mapping(
                     manifest, connector, target_multisim_version
