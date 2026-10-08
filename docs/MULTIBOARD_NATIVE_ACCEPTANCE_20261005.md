@@ -3,7 +3,7 @@
 本次验证使用本机授权 **Multisim 14.3**、32 位 Python COM worker 和本地模板包。
 证据目录在源码仓库之外：
 
-`C:\Users\18331\Documents\multisim-evidence\multiboard-fixture-divider-20261005-v8`
+`C:\path\to\multisim-evidence\multiboard-fixture-divider-20261005-v8`
 
 ## 验证流程
 

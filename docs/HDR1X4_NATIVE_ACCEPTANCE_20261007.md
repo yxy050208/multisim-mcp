@@ -37,7 +37,7 @@ R4 d 0 4k
 5. 原生 DC、AC、TRAN 均返回 `ready=true`，没有组件丢失或仿真错误。
 
 证据 JSON 保存在本机目录：
-`C:\Users\18331\Documents\multisim-evidence\connector-scan\hdr1x4-native-acceptance.json`。
+`C:\path\to\multisim-evidence\connector-scan\hdr1x4-native-acceptance.json`。
 
 ## 使用边界
 

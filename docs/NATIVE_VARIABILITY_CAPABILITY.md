@@ -74,7 +74,7 @@ py -3.12-32 tools/probe_native_temperature.py `
 5%”执行完整插件闭环。证据目录为：
 
 ```text
-C:\Users\18331\Documents\multisim-evidence\ce_model_corners_sine_20261003
+C:\path\to\multisim-evidence\ce_model_corners_sine_20261003
 ```
 
 该运行保留 5 个 E24 候选和 9 个模型角落工程。9/9 个角落在 Multisim 14.3 中完成打开、

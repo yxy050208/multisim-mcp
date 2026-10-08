@@ -17,14 +17,14 @@
 
 ```powershell
 $env:PYTHONPATH = "mcp_server"
-$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\Documents\multisim-evidence\local-pack-20261003"
+$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\path\to\multisim-evidence\local-pack-20261003"
 
 python tools/run_multiboard_digital_regression.py `
-  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-baseline-v7 `
+  --output C:\path\to\multisim-evidence\multiboard-digital-20261009-baseline-v7 `
   --case split_logic_load --analysis all --target-version "Multisim 14.3" --execute
 
 python tools/run_multiboard_digital_regression.py `
-  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2 `
+  --output C:\path\to\multisim-evidence\multiboard-digital-20261009-mixed-v2 `
   --case split_mixed_logic --analysis all --target-version "Multisim 14.3" --execute
 ```
 
@@ -49,6 +49,6 @@ Multisim 的瞬态求解器会为独立板选择不同的自适应采样轴。�
 - 远端 `io_out` 及 1 kΩ 负载保留并参与仿真；
 - DC、TRAN、AC 的完整采样结果和实验报告均已写入证据目录。
 
-第二个案例的证据位于 `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2`。该案例最初暴露出完整参考工程中的 `clk` 探针落在 `data` 线的交点，Multisim 重开后丢弃探针；生成器现已在选点阶段排除其他网络线段，修复后再次通过三种原生分析。
+第二个案例的证据位于 `C:\path\to\multisim-evidence\multiboard-digital-20261009-mixed-v2`。该案例最初暴露出完整参考工程中的 `clk` 探针落在 `data` 线的交点，Multisim 重开后丢弃探针；生成器现已在选点阶段排除其他网络线段，修复后再次通过三种原生分析。
 
 这些结果只证明该案例在 Multisim 14.3 上的闭环，不外推到其他连接器、元件型号或 Multisim 版本。目标版本没有独立 manifest 或实机验收时，运行器仍会失败关闭。

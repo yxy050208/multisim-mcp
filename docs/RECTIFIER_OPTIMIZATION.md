@@ -45,7 +45,7 @@ python tools/run_rectifier_optimization_acceptance.py --output D:/experiments/re
 
 通过中文目录的真实 MCP 调用，执行 **27 次原生运行**（每次 OP + TRAN），而非只生成网表。
 当前复验日期为 2026-10-03，完整证据目录为本机
-`C:\Users\18331\Documents\New project 2\paper01_native_validation\evidence\rectifier-optimization-20261003`。
+`C:\path\to\multisim-evidence\rectifier-optimization-20261003`。
 
 | 方案 | 标称纹波 | 最差已测工况纹波 | 结论 |
 | --- | ---: | ---: | --- |

@@ -23,7 +23,7 @@
 
 ```powershell
 $env:PYTHONPATH = "mcp_server"
-$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\AppData\Local\multisim-mcp\component-pack-rc3"
+$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\path\to\component-pack-rc3"
 python tools/run_digital_regression.py --output C:\Temp\multisim-digital-regression
 ```
 
@@ -68,7 +68,7 @@ python tools/run_digital_regression.py --case counter4_load `
 然后完整执行五案例矩阵。`logic_chain_load`、`dff_load`、`counter4_load`、
 `shift4_load` 和 `counter4_decode_load` 全部通过；每个案例的布局、拓扑、原生器件
 完整性、瞬态仿真和声明输出均通过，5/5 案例的引脚证据完整，拓扑不匹配为 0。证据
-保存在本机 `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-main`，
+保存在本机 `C:\path\to\multisim-evidence\digital-matrix-20261003-main`，
 不提交到仓库。该结果也重新验证了带输出电阻负载的计数器路径，当前主线未复现历史
 PR17 中“门输出负载被 Multisim 静默丢弃”的阻塞现象。
 

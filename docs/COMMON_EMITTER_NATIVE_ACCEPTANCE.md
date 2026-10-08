@@ -98,7 +98,7 @@ THD 为 `1.6907%`，因此当前证据给出最大已验证输入峰值 `200mV`�
 可复现实测边界，同时仍明确使用“最大已验证值”和“首个超限值”，不会把有限次二分
 误报为连续数学意义上的精确摆幅。若粗扫描未形成双端区间，则不会虚构细化结果。
 
-新增实机回归 `C:\Users\18331\Documents\multisim-evidence\ce_sine_swing_refined_20261003_b`
+新增实机回归 `C:\path\to\multisim-evidence\ce_sine_swing_refined_20261003_b`
 在 Multisim 14.3 上完成 5 个候选搜索和 12 个幅值工程的原生打开、保存、拓扑回读、
 OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过）、
 `425mV`（`1.1944%`，超限）、`387.5mV`（`1.0156%`，超限）和
@@ -106,7 +106,7 @@ OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过�
 `368.75mV–387.5mV`，区间宽度 `18.75mV`；最大已验证输出峰峰值为
 `6.9690V`。这仍是有限次原生采样的边界，不代表连续精确最大摆幅。
 
-随后在 `C:\Users\18331\Documents\multisim-evidence\ce_sine_margin_20261003` 增加了统一
+随后在 `C:\path\to\multisim-evidence\ce_sine_margin_20261003` 增加了统一
 工作区判定。每个幅值点同时要求 H2–H5 THD、三个声明的 OP 工作点检查通过，并在
 `1–2ms` 稳态窗口内检查集电极到地和到 `VCC=12V` 的最小裕量（阈值为
 `max(0.1V, 1%·VCC)=0.12V`）。12 个原生工程全部成功回读；边界两侧的最小集电极
@@ -116,7 +116,7 @@ OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过�
 
 自然语言需求加入“元件容差 5%”后，入口会执行确定性的 13 点电阻角落扫描：标称点、
 5 个电阻逐一 ±5% 以及全体电阻同时 ±5%。证据目录
-`C:\Users\18331\Documents\multisim-evidence\ce_tolerance_20261003` 在 Multisim 14.3
+`C:\path\to\multisim-evidence\ce_tolerance_20261003` 在 Multisim 14.3
 上 13/13 个角落均完成原生仿真、拓扑回读、THD、OP 和电源裕量验收；最坏 1kHz 增益
 为 `9.08999`，相对目标误差约 `9.10%`，仍在当前 ±10% 增益门槛内。该扫描覆盖的是
 声明的电阻角落，不等同于温度、晶体管参数、随机蒙特卡洛或实物容差验证。
@@ -124,7 +124,7 @@ OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过�
 波形参数也已进入同一原生链路：例如“正弦输入频率 2kHz，输入峰值 10mV”会生成
 `SIN(0 10m 2k)`，AC 增益/相位在请求频率邻域验收，TRAN 输出范围按实际输入幅值
 缩放，THD 谐波计算使用请求频率。Multisim 14.3 实测目录
-`C:\Users\18331\Documents\multisim-evidence\ce_waveform_2khz_20261003_b` 中，
+`C:\path\to\multisim-evidence\ce_waveform_2khz_20261003_b` 中，
 5 个候选均完成原生仿真；选中的 `RE=560Ω` 增益 `9.54039`，2kHz THD `0.01985%`，
 拓扑、模型、工作点和幅值扫描均通过。这修复了任意非 1kHz/1mV 请求仍沿用旧验收
 窗口的问题。
@@ -143,7 +143,7 @@ OP/AC/TRAN 与 manifest 校验。细化点为 `350mV`（THD `0.8647%`，通过�
 自然语言请求“12V NPN 共射、增益 10、2kHz 正弦输入峰值 10mV、晶体管参数容差 5%”
 现在会生成标称、`Is`、`Vaf`、`Bf` 各自 ±5% 以及全体 ±5% 共 9 个角落。每个角落都
 通过受控 XML 模型覆盖，再由 Multisim 打开、保存并回读模型正文。证据目录为
-`C:\Users\18331\Documents\multisim-evidence\ce_model_corners_sine_20261003`。
+`C:\path\to\multisim-evidence\ce_model_corners_sine_20261003`。
 Multisim 14.3 实测 9/9 个角落完成 OP/AC/TRAN、增益、THD 和轨裕量验收；选中
 `RE=560Ω`，最坏增益误差 `4.6619%`，最高 THD `0.02001%`，最小集电极轨裕量
 `5.6118V`。这仍是 2N3904 本地模型的离散参数角落证据，不代表温度、统计分布或实物测量。

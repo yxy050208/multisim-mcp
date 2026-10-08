@@ -23,7 +23,7 @@ DAC 重构和最终 RC 输出。
 本机实测（Multisim 14.3、本地授权模板包）命令：
 
 ```powershell
-$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\Documents\multisim-evidence\local-pack-20261003"
+$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\path\to\multisim-evidence\local-pack-20261003"
 python tools/run_hybrid_regression.py `
   --target-version "Multisim 14.3" `
   --output C:\Temp\multisim-hybrid-regression
@@ -43,10 +43,10 @@ DAC/ADC 行为桥会为表达式读取的数字、模拟输入和电源轨加入
 Multisim 重开并直接执行 COM
 瞬态，数字输出均覆盖 0/5 V，模拟输出均有连续 RC 动态响应；每个案例的命名引脚
 连接证据均完整且无不匹配。完整证据保存在本机
-`C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261005-v13`，不提交到开源仓库。
+`C:\path\to\multisim-evidence\hybrid-native-matrix-20261005-v13`，不提交到开源仓库。
 
 四位桥接的独立原生探针证据保存在本机
-`C:\Users\18331\Documents\multisim-evidence\hybrid-multibit-probe-20261004`；ADC4 四路
+`C:\path\to\multisim-evidence\hybrid-multibit-probe-20261004`；ADC4 四路
 数字输出均覆盖 0–5 V，DAC4 输出经过 0、0.333、0.667 … 5 V 的 16 级组合。两个案例
 已由正式回归器纳入上方的 13/13 矩阵目录。
 

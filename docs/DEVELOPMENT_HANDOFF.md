@@ -55,11 +55,11 @@
   `components-<version>.json`。指定 14.2 而实际运行 14.3 时，实机验证在 0 个案例执行
   前返回 `version-mismatch`；指定 14.3 的 `counter4_load` 通过布局、重开拓扑、原生
   器件完整性、瞬态和四路输出观察，证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\digital-counter4-gated-20261003`。
+  `C:\path\to\multisim-evidence\digital-counter4-gated-20261003`。
 - 已完成：在版本准入生效后重新运行完整五案例数字矩阵；`logic_chain_load`、`dff_load`、
   `counter4_load`、`shift4_load`、`counter4_decode_load` 全部通过，5/5 案例引脚证据
   完整，141 个命名引脚连接通过，0 个失败、0 个拓扑不匹配。证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\digital-matrix-20261003-gated`。
+  `C:\path\to\multisim-evidence\digital-matrix-20261003-gated`。
 - 已完成混合信号阶段第一组原生基线：新增 `hybrid_regression` 与
   `tools/run_hybrid_regression.py`，`not_rc_load`、`logic_chain_rc_load`、
   `counter_q0_rc_load` 和 `shift_s0_rc_load` 四个案例均在 Multisim 14.3 实机通过，
@@ -68,7 +68,7 @@
   的原生拓扑、器件完整性、命名引脚连接、数字 0/5 V 摆幅和模拟 RC 动态响应均通过；
   回归器把完整引脚证据纳入最终通过条件，并为二极管增加 A/K 到源网络的显式契约。
   正式矩阵证据保存在
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261003-v7`；
+  `C:\path\to\multisim-evidence\hybrid-native-matrix-20261003-v7`；
   这只是数字到模拟边界基线，尚不代表 ADC/DAC、二极管整形、受控源或任意混合信号拓扑
   已覆盖。
 - `vcvs_rc_bridge` 已通过原生重开、D/G/S/SUB 到源网络的端子回读、瞬态和 RC 响应门禁；
@@ -82,7 +82,7 @@
   输出通道缺失。ADC/DAC 适配器现在为表达式依赖网加入 1 GΩ 高值锚点。`dac_rc_bridge`
   在 Multisim 14.3 完成重开、拓扑、引脚、布局和 COM 瞬态验收，输出 `raw` 为 0–5 V，
   `filt` 具有 0–0.3768 V 的 RC 响应；单比特 ADC/DAC 阶段的正式矩阵为 10/10。历史证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261004-v10`。
+  `C:\path\to\multisim-evidence\hybrid-native-matrix-20261004-v10`。
 - 已完成对称的 `adc_rc_bridge` 原生闭环。ADC 端的模拟输入和电源依赖同样通过 1 GΩ
   高值锚点物化；Multisim 14.3 重开、拓扑、引脚、布局和 COM 瞬态均通过，输出 `digital`
   为 0–5 V，`filt` 具有 0–0.3768 V 的 RC 响应。ADC/DAC 的单比特桥接现均有独立原生
@@ -90,18 +90,18 @@
 - 已完成 `ADC4`/`DAC4` 四位便携桥的 Multisim 14.3 原生探针：ADC4 四路输出和各自
   RC 负载均通过 0–5 V 摆幅、重开拓扑、引脚和 COM 瞬态；DAC4 原生输出出现 16 级
   组合电平（0、0.333、0.667 … 5 V）。独立证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-multibit-probe-20261004`，
+  `C:\path\to\multisim-evidence\hybrid-multibit-probe-20261004`，
   正式混合信号回归矩阵已扩展并通过 12/12。
 - 已完成 `adc4_dac4_transfer` 原生闭环：在 Multisim 14.3 重开工程后执行 68 点三角
   输入扫描，阈值附近排除 2 点后仍覆盖 0–15 全部 16 个编码；ADC 编码、数字电平、
   DAC 加权重构和最终 RC 输出均通过。证据保存在本机
-  `C:\Users\18331\Documents\multisim-evidence\hybrid-native-matrix-20261005-v13`，
+  `C:\path\to\multisim-evidence\hybrid-native-matrix-20261005-v13`，
   当前正式混合信号矩阵为 13/13。
 - H 源（CCVS）已用闭合控制支路重新验证，排除了此前“理想源控制回路未闭合”造成的
   假阴性：命令引擎能得到 `raw` 的 0–5 V 和 `filt` 的 RC 响应，但 Multisim 14.3
   原生工程重开后的 COM 输出仍为全零。其连接表和引脚拓扑正确，但原生行为未通过，
   因此 H 源继续标记为 `native unsupported/unverified`，不计入 13/13 正式矩阵。有效
-  失败证据保存在本机 `C:\Users\18331\Documents\multisim-evidence\hybrid-ccvs-rc-20261004-v4`。
+  失败证据保存在本机 `C:\path\to\multisim-evidence\hybrid-ccvs-rc-20261004-v4`。
 - Multisim 后端能力现在显式记录官方 Automation API 的来源、`MultisimInterface.MultisimApp`
   ProgID、独立 32 位 COM worker、版本探测范围，以及官方接口没有元件放置和导线绘制方法。
   未来接入新的 NI API 时沿用同一 EDA 后端契约，不改变源网表、拓扑门禁和实验报告格式。
@@ -174,7 +174,7 @@
 - 实机证据：Multisim 14.3 双板四引脚样例已完成两块板分别生成、打开、保存、重开、
   `ReportNetlist` 元件/网络回读，以及 DC、TRAN、AC 三种原生分析；跨板接口序列和
   完整电路参考比较均通过，三次结果都是 `accepted/native-verified`。证据保存在源码
-  仓库外的 `C:\Users\18331\Documents\multisim-evidence\multiboard-hdr1x4-20261007-*`，
+  仓库外的 `C:\path\to\multisim-evidence\multiboard-hdr1x4-20261007-*`，
   不提交 NI 模板、样例工程或解码 XML。
 - 回归测试新增连接器物化、映射待定和旧推断连接器门禁；后续仍需在 14.2 及其他目标
   版本建立独立 manifest 和实机验收，不能把 14.3 的 `HDR1X4` 结论外推到其他连接器。
@@ -194,7 +194,7 @@
 - 实机证据：Windows 11、Multisim 14.3、32 位 Python 3.12、本地授权模板包上，DC、
   TRAN、AC 均为 `accepted/native-verified`；两板生成/重开、ReportNetlist、逐针连接、
   布局、跨板接口、完整参考和远端负载均通过。证据保存在仓库外的
-  `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-*`。
+  `C:\path\to\multisim-evidence\multiboard-digital-20261009-*`。
 - 当前边界：该结论只覆盖 `HDR1X4`、本案例元件族和 Multisim 14.3；其他连接器、目标版本
   和更复杂的多板拓扑仍需独立 manifest 与实机证据，不能由本案例自动外推。
 - 回归结果：全量 `931 passed, 45 skipped, 154 subtests passed`；新增定向测试 11 项。
@@ -207,7 +207,7 @@
 - 实机证据：Windows 11、Multisim 14.3、本地授权模板包上，`split_mixed_logic` 的 DC、
   TRAN、AC 均通过生成、保存重开、ReportNetlist、逐针连接、布局、接口序列和完整参考
   比较，结果为 `accepted/native-verified`。证据保存在
-  `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2`。
+  `C:\path\to\multisim-evidence\multiboard-digital-20261009-mixed-v2`。
 - 期间发现：混合门布局中 `clk` 探针候选点恰好落在 `data` 网络的线段交点；Multisim 重开
   后会丢弃该探针，导致完整参考比较出现 `clk` 未验证。探针选点现在会枚举候选线段并排除
   其他网络占用的点，随后重新完成三种原生分析。
