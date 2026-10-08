@@ -20,16 +20,12 @@ $env:PYTHONPATH = "mcp_server"
 $env:MULTISIM_MCP_TEMPLATE_DIR = "C:\Users\18331\Documents\multisim-evidence\local-pack-20261003"
 
 python tools/run_multiboard_digital_regression.py `
-  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-dc-v6 `
-  --case split_logic_load --analysis dc --target-version "Multisim 14.3" --execute
+  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-baseline-v7 `
+  --case split_logic_load --analysis all --target-version "Multisim 14.3" --execute
 
 python tools/run_multiboard_digital_regression.py `
-  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-tran-v5 `
-  --case split_logic_load --analysis tran --target-version "Multisim 14.3" --execute
-
-python tools/run_multiboard_digital_regression.py `
-  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-ac-v1 `
-  --case split_logic_load --analysis ac --target-version "Multisim 14.3" --execute
+  --output C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2 `
+  --case split_mixed_logic --analysis all --target-version "Multisim 14.3" --execute
 ```
 
 不带 `--execute` 时只做 COM-free 预览，输出根目录的 `matrix.json` 会显示结构化合同、fixture 覆盖和版本化连接器映射，但仍标记为 `logical-only/unverified`。
