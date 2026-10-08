@@ -8,14 +8,14 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前源码候选版为 `1.3.0rc3`；GitHub/PyPI 当前公开稳定版仍为 `v1.2.0`，rc3 尚未创建公开标签或发行包。项目非 NI 官方产品，需要本机安装并授权
+> 当前公开稳定版仍为 `v1.2.0`；`1.3.0rc3` 已创建 Git 标签并发布到 PyPI 与官方 MCP Registry，作为预发布候选版提供。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
 > **当前 `main` 主干状态（2026-10-09）**：已完成双板复杂数字回归的
 > Multisim 14.3 原生验收，覆盖 `split_logic_load`、`split_mixed_logic`、HDR1X4
 > 逐针连接、跨板接口、远端 1 kΩ 负载以及 DC/TRAN/AC。该能力属于源码候选版，
-> 详细门禁和边界见[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)；公开稳定包仍为 `v1.2.0`。
+> 详细门禁和边界见[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)；稳定包仍为 `v1.2.0`，预发布包为 `1.3.0rc3`。
 
 开发分支已加入[组合模拟电路原生工作流](docs/COMPOSED_ANALOG_WORKFLOW.md)：宿主 AI
 可通过 `run_generated_analog_project` 提交组合网表与采样指标，完成原生连接核对、
@@ -62,7 +62,8 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [DeepSeek Harness npm 插件](https://www.npmjs.com/package/multisim-mcp-dsh-plugin) ·
-[GitHub Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.2.0)
+[GitHub 稳定版 Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.2.0) ·
+[1.3.0rc3 预发布 Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.3.0rc3)
 
 ## 开源发布状态
 
@@ -74,6 +75,11 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 
 请不要上传 `analysis/`、`.ms14`、解码 XML、类型库转储、实验输出或当前包含 142 个
 本地模板的开发 wheel。完整发布步骤见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+
+`1.3.0rc3` 已通过 GitHub Actions 的 Windows 32 位协议、Linux ngspice、公开工件边界和
+DeepSeek Harness 兼容性检查，并已同步到 PyPI 与官方 MCP Registry。它是预发布候选版，
+不会替代 `v1.2.0` 的稳定安装指引；npm 插件的 `next` 标签继续指向已存在的
+`1.3.0-rc.3`，`latest` 仍保持 `1.1.0`。
 
 `1.2.0` 正式核心将公共面扩展为 78 个工具、20 个资源模板和 5 个双语提示词，新增
 审批式设计规划、诊断/补丁评估、全局优化、自主纠错、Multisim/ngspice 差分验证与

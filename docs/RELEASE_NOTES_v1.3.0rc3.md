@@ -1,6 +1,6 @@
 # Multisim MCP 1.3.0rc3（源码候选版）
 
-`1.3.0rc3` 是当前源码树的开发候选版，尚未创建 GitHub/PyPI 公开发行包。
+`1.3.0rc3` 已创建 Git 标签并发布到 PyPI 与官方 MCP Registry，作为预发布候选版提供。
 公开稳定版仍为 `v1.2.0`；已发布的 `v1.3.0rc1` 说明保留在
 [`RELEASE_NOTES_v1.3.0rc1.md`](RELEASE_NOTES_v1.3.0rc1.md)。
 
