@@ -3428,8 +3428,27 @@ def _pick_probe_point(
     pin_points: list[tuple[float, float]] | None = None,
     *,
     prefer_interior: bool = False,
+    other_wire_paths: list[list[tuple[float, float]]] | None = None,
 ) -> tuple[float, float] | None:
-    """Pick a native-stable terminal point on an existing wire for a probe."""
+    """Pick a native-stable point that does not sit on another net crossing."""
+    foreign_paths = other_wire_paths or []
+
+    def blocked(point: tuple[float, float]) -> bool:
+        px, py = point
+        for path in foreign_paths:
+            for start, end in zip(path, path[1:]):
+                sx, sy = start
+                ex, ey = end
+                cross = (px - sx) * (ey - sy) - (py - sy) * (ex - sx)
+                if abs(cross) > 1e-6:
+                    continue
+                if (
+                    min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6
+                    and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
+                ):
+                    return True
+        return False
+
     if prefer_interior:
         # A probe rendered exactly on a resistor/source pin is electrically
         # valid but obscures the symbol and makes a generated sheet look as if
@@ -3443,12 +3462,13 @@ def _pick_probe_point(
                 length = abs(end[0] - start[0]) + abs(end[1] - start[1])
                 if length >= 24.0:
                     interior_candidates.append((length, (start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
-        if interior_candidates:
-            _, x, y = max(interior_candidates, key=lambda item: item[0])
+        available = [item for item in interior_candidates if not blocked((item[1], item[2]))]
+        if available:
+            _, x, y = max(available, key=lambda item: item[0])
             return x, y
     if pin_points:
         terminals = {point for path in wire_paths for point in (path[0], path[-1])}
-        candidates = [point for point in pin_points if point in terminals]
+        candidates = [point for point in pin_points if point in terminals and not blocked(point)]
         if candidates:
             return max(candidates, key=lambda point: (point[0], -point[1]))
     # Multisim 14.x can omit a voltage probe placed in the middle of a wire
@@ -3459,24 +3479,30 @@ def _pick_probe_point(
         # avoids placing a probe on a junction branch in series RLC layouts.
         direct = min((path for path in wire_paths if path), key=lambda path: (len(path), -max(point[0] for point in path)), default=None)
         if direct:
-            return max(direct, key=lambda point: point[0])
+            candidates = [point for point in direct if not blocked(point)]
+            if candidates:
+                return max(candidates, key=lambda point: point[0])
     for points in wire_paths:
         for start, end in zip(points, points[1:]):
             mid_x = (start[0] + end[0]) / 2.0
             mid_y = (start[1] + end[1]) / 2.0
-            if min(
+            if not blocked((mid_x, mid_y)) and min(
                 abs(mid_x - start[0]) + abs(mid_y - start[1]),
                 abs(end[0] - mid_x) + abs(end[1] - mid_y),
             ) >= 12.0:
                 return mid_x, mid_y
     if wire_paths and len(wire_paths[0]) > 1:
         points = wire_paths[0]
-        return (
+        midpoint = (
             (points[0][0] + points[-1][0]) / 2.0,
             (points[0][1] + points[-1][1]) / 2.0,
         )
+        if not blocked(midpoint):
+            return midpoint
     if wire_paths:
-        return wire_paths[0][0]
+        for point in wire_paths[0]:
+            if not blocked(point):
+                return point
     return None
 
 
@@ -3542,6 +3568,12 @@ def _add_probes(
             net_wires.get(net, []),
             (net_pin_points or {}).get(net),
             prefer_interior=net in (prefer_interior_nets or set()),
+            other_wire_paths=[
+                path
+                for other_net, paths in net_wires.items()
+                if other_net != net
+                for path in paths
+            ],
         )
         if point is None:
             continue

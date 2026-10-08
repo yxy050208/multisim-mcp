@@ -148,12 +148,55 @@ def _split_logic_load_request() -> dict[str, Any]:
     }
 
 
+def _split_mixed_logic_request() -> dict[str, Any]:
+    """Return a second two-board case covering the remaining gate families.
+
+    The physical boundary is the same as ``split_logic_load`` so that a
+    failure can be attributed to the gate model rather than to a new
+    connector or fixture arrangement.  The board-local logic intentionally
+    uses OR/XOR/NOR/XNOR models and keeps the remote 1 kOhm load.
+    """
+    request = _split_logic_load_request()
+    request.update({
+        "title": "Two-board mixed-gate chain with remote load",
+        "application": "mixed digital gate multi-board regression",
+        "constraints": [
+            {"text": "all cross-board nets must use the declared HDR1X4 pins"},
+            {"text": "OR, XOR, NOR and XNOR model objects must survive reopen"},
+            {"text": "remote mixed-gate output must retain its resistive load after reopen"},
+        ],
+    })
+    replacements = {
+        "A1": ("DOR5", ["data", "clk", "logic_mid", "high", "0"], "OR2"),
+        "A2": ("DXOR5", ["logic_mid", "data", "logic_out", "high", "0"], "XOR2"),
+        "A3": ("DNOR5", ["data", "clk", "io_mid", "high", "0"], "NOR2"),
+        "A4": ("DXNOR5", ["io_mid", "clk", "io_out", "high", "0"], "XNOR2"),
+    }
+    for component in request["components"]:
+        replacement = replacements.get(component["refdes"])
+        if replacement:
+            component["kind"], component["nodes"], component["model"] = replacement
+    request["experiments"] = [
+        {"type": "dc", "outputs": ["clk", "data", "io_out"]},
+        {"type": "tran", "outputs": ["clk", "data", "io_out"]},
+        {"type": "ac", "outputs": ["clk", "data", "io_out"]},
+    ]
+    return request
+
+
 def multiboard_digital_regression_matrix() -> tuple[DigitalMultiboardRegressionCase, ...]:
     cases = (
         DigitalMultiboardRegressionCase(
             case_id="split_logic_load",
             description="Two-board NOT/AND/NOT/AND chain with two digital crossings, shared supply and return, explicit remote input fixtures, and a 1 kOhm load.",
             request=_split_logic_load_request(),
+            interface_nets=("clk", "data"),
+            output_nets=("io_out",),
+        ),
+        DigitalMultiboardRegressionCase(
+            case_id="split_mixed_logic",
+            description="Two-board OR/XOR/NOR/XNOR chain with two digital crossings, shared supply and return, explicit remote input fixtures, and a 1 kOhm load.",
+            request=_split_mixed_logic_request(),
             interface_nets=("clk", "data"),
             output_nets=("io_out",),
         ),

@@ -10,6 +10,12 @@ from multisim_mcp.spice_adapter import circuit_design_to_spice
 
 
 class MultiboardDigitalRegressionTest(unittest.TestCase):
+    def test_matrix_contains_baseline_and_mixed_gate_cases(self):
+        self.assertEqual(
+            [case.case_id for case in multiboard_digital_regression_matrix()],
+            ["split_logic_load", "split_mixed_logic"],
+        )
+
     def test_matrix_is_structurally_ready_and_has_explicit_four_pin_connector(self):
         case = multiboard_digital_regression_matrix()[0]
         plan = build_engineering_plan(case.request)
@@ -34,6 +40,17 @@ class MultiboardDigitalRegressionTest(unittest.TestCase):
         self.assertIn("RLOAD io_out 0 1k", netlist)
         self.assertIn("PULSE(0 5", netlist)
         self.assertIn("AC 1", netlist)
+
+    def test_mixed_gate_case_serializes_all_declared_models(self):
+        case = select_multiboard_digital_regression_cases("split_mixed_logic")[0]
+        plan = build_engineering_plan(case.request)
+        design = _engineering_request_design(plan["request"], plan["plan_digest"])
+        netlist = circuit_design_to_spice(design)
+        self.assertIn("A1 data clk logic_mid high 0 OR2", netlist)
+        self.assertIn("A2 logic_mid data logic_out high 0 XOR2", netlist)
+        self.assertIn("A3 data clk io_mid high 0 NOR2", netlist)
+        self.assertIn("A4 io_mid clk io_out high 0 XNOR2", netlist)
+        self.assertIn("RLOAD io_out 0 1k", netlist)
 
     def test_selector_rejects_unknown_case(self):
         with self.assertRaisesRegex(ValueError, "unknown multi-board digital case"):

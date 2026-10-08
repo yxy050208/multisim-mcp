@@ -198,3 +198,18 @@
 - 当前边界：该结论只覆盖 `HDR1X4`、本案例元件族和 Multisim 14.3；其他连接器、目标版本
   和更复杂的多板拓扑仍需独立 manifest 与实机证据，不能由本案例自动外推。
 - 回归结果：全量 `931 passed, 45 skipped, 154 subtests passed`；新增定向测试 11 项。
+
+## 2026-10-09 双板混合门级回归与探针交叉修复
+
+- 已完成：矩阵新增 `split_mixed_logic`，在相同的 HDR1X4、边界夹具和远端 1 kΩ 负载合同下
+  覆盖 OR/XOR/NOR/XNOR 四类门模型。它与 `split_logic_load` 共用物理边界，便于把门模型
+  差异和连接器/夹具差异分开验证。
+- 实机证据：Windows 11、Multisim 14.3、本地授权模板包上，`split_mixed_logic` 的 DC、
+  TRAN、AC 均通过生成、保存重开、ReportNetlist、逐针连接、布局、接口序列和完整参考
+  比较，结果为 `accepted/native-verified`。证据保存在
+  `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2`。
+- 期间发现：混合门布局中 `clk` 探针候选点恰好落在 `data` 网络的线段交点；Multisim 重开
+  后会丢弃该探针，导致完整参考比较出现 `clk` 未验证。探针选点现在会枚举候选线段并排除
+  其他网络占用的点，随后重新完成三种原生分析。
+- 回归结果：全量 `935 passed, 45 skipped, 154 subtests passed`；新增探针交叉门禁和混合门
+  双板案例测试均通过。

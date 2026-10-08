@@ -48,6 +48,15 @@ class RouterTests(unittest.TestCase):
     def test_probe_uses_pin_not_rightmost_bend(self):
         self.assertEqual(_pick_probe_point([[(0,0),(100,0),(100,30),(30,30)]],[(0,0),(30,30)]),(30,30))
 
+    def test_probe_avoids_foreign_net_crossing(self):
+        point = _pick_probe_point(
+            [[(0, 0), (100, 0)]],
+            prefer_interior=True,
+            other_wire_paths=[[(50, -20), (50, 20)]],
+        )
+        self.assertNotEqual(point, (50.0, 0.0))
+        self.assertIn(point, {(0, 0), (100, 0)})
+
 
 class ReferenceTests(unittest.TestCase):
     def test_two_active_poles_against_closed_form_complex_transfer(self):

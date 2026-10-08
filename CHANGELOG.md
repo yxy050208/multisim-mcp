@@ -12,6 +12,9 @@
   TRAN/AC 仅在调用方显式选择 `series_alignment=linear` 时对独立板的自适应采样轴做有
   边界检查的线性重采样，默认仍严格拒绝轴不一致。Multisim 14.3 实机三种分析均为
   `accepted/native-verified`；证据留在仓库外，详见 `docs/MULTIBOARD_DIGITAL_REGRESSION.md`。
+- 扩展双板数字矩阵 `split_mixed_logic`，覆盖 OR/XOR/NOR/XNOR 四类数字模型；同时让
+  原生探针选点主动避开其他网络的线段交点，避免 Multisim 保存重开时丢失交叉点上的源网
+  探针。第二个案例在 14.3 上 DC/TRAN/AC 三种分析均为 `accepted/native-verified`。
 - 新增 Multisim 14.3 原生 `HDR1X4` 四针连接器族：从官方 Getting Started 样例 J1
   提取本地模板，支持 `XJ1 ... HDR1X4` 网表语法、连续 P1–P4 引脚和精确 pin signature
   映射；完成打开/保存/重开、全引脚 ReportNetlist 及 DC/AC/TRAN 闭环验收。模板仍由

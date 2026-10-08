@@ -1,6 +1,6 @@
 # 双板复杂数字回归
 
-`tools/run_multiboard_digital_regression.py` 是单板数字矩阵之外的多板闭环入口。案例 `split_logic_load` 将一个数字链拆到 `logic` 与 `io` 两块板：源板产生时钟和数据，远端板用显式边界电压夹具复现这两个输入，再经过 NOT/AND 级联驱动 1 kΩ 负载。J1 使用已经在 Multisim 14.3 实机验收的 `HDR1X4`，四针固定为：
+`tools/run_multiboard_digital_regression.py` 是单板数字矩阵之外的多板闭环入口。当前有两个案例：`split_logic_load` 覆盖 NOT/AND 级联，`split_mixed_logic` 覆盖 OR/XOR/NOR/XNOR 级联。两者都将逻辑拆到 `logic` 与 `io` 两块板：源板产生时钟和数据，远端板用显式边界电压夹具复现这两个输入，再驱动 1 kΩ 负载。J1 使用已经在 Multisim 14.3 实机验收的 `HDR1X4`，四针固定为：
 
 | 针脚 | 网络 | 作用 |
 | --- | --- | --- |
@@ -38,11 +38,13 @@ python tools/run_multiboard_digital_regression.py `
 
 每个分析都要求两块板完成生成、保存重开、原生器件完整性、布局和 `ReportNetlist` 拓扑检查；`HDR1X4` 的 P1–P4 逐针连接也必须通过。DC 比较工作点，TRAN 和 AC 保存完整原生序列并比较接口及完整设计参考。
 
+探针选点会避开其他网络的线段交点。布局统计仍会报告不同网络交叉数，但探针不会落在交叉点上；否则 Multisim 可能在保存重开时丢弃该探针，导致本来存在的源网络无法进入完整参考比较。
+
 Multisim 的瞬态求解器会为独立板选择不同的自适应采样轴。严格比较仍是默认行为；本案例对 TRAN/AC 显式使用 `series_alignment=linear`，只在轴单调、覆盖相同分析区间且样本完整时，将远端序列线性重采样到基准板的原生轴。结果会在 `comparison_basis` 中记录这一事实，不能把这种比较当成连续时间等价证明。
 
 ## 2026-10-09 实测结果
 
-在 Windows 11、Multisim 14.3、本地 `local-pack-20261003` 模板包上，`split_logic_load` 的 DC、TRAN、AC 均为 `accepted/native-verified`。三次运行的门禁均为真：
+在 Windows 11、Multisim 14.3、本地 `local-pack-20261003` 模板包上，`split_logic_load` 和 `split_mixed_logic` 的 DC、TRAN、AC 均为 `accepted/native-verified`。六次运行的门禁均为真：
 
 - 两块板生成、保存、重开和输出探针完整；
 - 两块板 `ReportNetlist` 拓扑和布局通过；
@@ -50,5 +52,7 @@ Multisim 的瞬态求解器会为独立板选择不同的自适应采样轴。�
 - 跨板 `clk`、`data` 接口与完整参考一致；
 - 远端 `io_out` 及 1 kΩ 负载保留并参与仿真；
 - DC、TRAN、AC 的完整采样结果和实验报告均已写入证据目录。
+
+第二个案例的证据位于 `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-mixed-v2`。该案例最初暴露出完整参考工程中的 `clk` 探针落在 `data` 线的交点，Multisim 重开后丢弃探针；生成器现已在选点阶段排除其他网络线段，修复后再次通过三种原生分析。
 
 这些结果只证明该案例在 Multisim 14.3 上的闭环，不外推到其他连接器、元件型号或 Multisim 版本。目标版本没有独立 manifest 或实机验收时，运行器仍会失败关闭。
