@@ -12,6 +12,11 @@
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
+> **当前 `main` 主干状态（2026-10-09）**：已完成双板复杂数字回归的
+> Multisim 14.3 原生验收，覆盖 `split_logic_load`、`split_mixed_logic`、HDR1X4
+> 逐针连接、跨板接口、远端 1 kΩ 负载以及 DC/TRAN/AC。该能力属于源码候选版，
+> 详细门禁和边界见[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)；公开稳定包仍为 `v1.2.0`。
+
 开发分支已加入[组合模拟电路原生工作流](docs/COMPOSED_ANALOG_WORKFLOW.md)：宿主 AI
 可通过 `run_generated_analog_project` 提交组合网表与采样指标，完成原生连接核对、
 OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 器件）和四级

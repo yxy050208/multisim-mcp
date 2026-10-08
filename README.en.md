@@ -16,6 +16,13 @@ and create reproducible reports.
 > COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
 > 32-bit or 64-bit Python.
 
+> **Current `main` status (2026-10-09):** the source branch has completed native
+> Multisim 14.3 acceptance for the two-board digital regression, covering
+> `split_logic_load`, `split_mixed_logic`, HDR1X4 pin checks, cross-board
+> interfaces, a remote 1 kΩ load, and DC/TRAN/AC. This remains source-candidate
+> functionality; see the [regression evidence](docs/MULTIBOARD_DIGITAL_REGRESSION.md).
+> The published stable package remains `v1.2.0`.
+
 > `v1.2.0` is the **frontend-free MCP Core release**. It contains the
 > Python MCP server, CLI, EDA core, model/DeepSeek adapters, tests, documentation,
 > and optional loopback bridge APIs. It deliberately excludes the independently
