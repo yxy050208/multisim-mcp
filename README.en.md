@@ -35,6 +35,9 @@ evaluation, global optimization, autonomous correction, Multisim/ngspice
 differential validation, and recoverable jobs. See the
 [release notes](docs/RELEASE_NOTES_v1.2.0.md).
 
+The unreleased source candidate currently exposes 115 tools in its `full`
+profile; the stable `v1.2.0` package remains the published 78-tool release.
+
 ## End-to-end workflow
 
 `run_circuit_experiment` uses one validated source netlist to:
@@ -78,6 +81,19 @@ Version 1.0 adds computable design verification and batch experiments:
 Real Multisim 14.3 regressions cover resistor dividers, coupled inductors,
 digital truth tables, JK timing, and a combined function-generator/oscilloscope
 experiment.
+
+The current main branch also includes a
+[two-board complex-digital regression](docs/MULTIBOARD_DIGITAL_REGRESSION.md).
+`split_logic_load` and `split_mixed_logic` divide the design across `logic` and
+`io` boards and verify the cross-board `clk`/`data` interface, an accepted HDR1X4
+connector, explicit boundary fixtures, a remote 1 kΩ load, and complete DC,
+TRAN, and AC sampling. Six native runs on Windows 11 with Multisim 14.3 and a
+locally licensed component pack were `accepted/native-verified`, including
+generation, save/reopen, ReportNetlist, pin-by-pin connector checks, layout,
+interface comparison, and report export. This evidence covers the stated
+fixtures, component families, and Multisim 14.3 only; other connectors,
+versions, or more complex multi-board topologies require separate manifests and
+native acceptance.
 
 Version 1.0 also adds portable models without redistributing NI database assets:
 

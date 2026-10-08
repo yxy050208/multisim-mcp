@@ -40,6 +40,14 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 选定通过全部声明工况的最小候选，重开保存工程复验并导出对比报告。
 12V/100mA/纹波≤0.3V 的本机测试完成 27 次原生运行，将电容从4700μF降至3900μF。
 
+最新主干已加入[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)：
+`split_logic_load` 和 `split_mixed_logic` 将逻辑拆分到 `logic`、`io` 两块板，
+通过已验收的 HDR1X4 连接器和显式边界夹具验证跨板 `clk`/`data` 接口、远端 1 kΩ
+负载以及 DC/TRAN/AC 完整采样。Windows 11、Multisim 14.3 和本地授权模板包上的
+六次原生运行均为 `accepted/native-verified`，并完成生成、保存重开、ReportNetlist、
+逐针连接、布局、接口比较和报告导出。该证据只覆盖当前案例、元件族和 Multisim 14.3；
+其他连接器、版本或更复杂的多板拓扑仍需独立 manifest 与实机验收。
+
 > `v1.2.0` 是**不含 React 前端的 MCP Core 正式版**：包含 Python MCP 服务、CLI、EDA
 > 核心、模型/DeepSeek 适配、测试、文档及可选 loopback 桥接 API；不包含仍在独立
 > 开发的 React Workbench 前端。GitHub、PyPI 与 MCP Registry 均已发布 `v1.2.0`。
@@ -71,7 +79,7 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 [`需求契约审查`](docs/REQUIREMENT_ENGINEERING.md)。
 开发分支还新增 `bind_requirement_review_to_design`，把契约绑定到已有设计快照并报告
 缺失信号与可优化参数，以及 `snapshot_open_circuit` 的 COM 导入快照入口；已发布的
-`v1.2.0` 仍保持 78 个工具，开发分支公共面为 95 个工具。
+`v1.2.0` 仍保持 78 个工具，当前源码候选版的 `full` profile 为 115 个工具。
 
 开发分支已提供 [自然语言 RC/RLC/OPAMP 工程入口](docs/NATURAL_ENGINEERING.md)：从明确的中文/英文需求生成
 可编辑 Multisim 工程，原生仿真并比较 E24 候选，导出带验收状态的报告。当前为有限规则解析，
