@@ -2605,8 +2605,11 @@ def run_native_multiboard_acceptance(
     version, then compares explicit fixture observations and a full-design reference.
     ``analysis`` accepts ``dc`` (default), ``tran`` or ``ac``. Native results
     retain complete sampled axes; TRAN and AC compare every aligned sample
-    (AC compares real and imaginary parts) without interpolation. Scalar
-    endpoint values remain a report summary only.
+    (AC compares real and imaginary parts) without interpolation by default.
+    Set ``analysis_options.series_alignment`` to ``"linear"`` only when
+    independently simulated boards have different adaptive axes; the bounded
+    resampling basis is recorded in the result. Scalar endpoint values remain
+    a report summary only.
     """
     if not isinstance(request, dict):
         raise ValueError("request must be an object")

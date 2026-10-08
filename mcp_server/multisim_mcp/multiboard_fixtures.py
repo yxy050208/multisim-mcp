@@ -533,14 +533,14 @@ def compare_multiboard_interface_series(
     *,
     nets: Sequence[str] | None = None,
     absolute_tolerance: float = 1e-9,
+    allow_resampling: bool = False,
 ) -> dict[str, Any]:
     """Compare complete native sampled responses at every board endpoint.
 
     ``observations`` is keyed by board id and net, with each leaf being a
-    decoded native series.  The function deliberately refuses interpolation:
-    independently simulated boards must expose the same native sample axis.
-    This keeps a scalar end-point match from hiding a transient or phase
-    mismatch.
+    decoded native series.  Interpolation remains disabled by default.  A
+    caller comparing independent adaptive transient runs may explicitly allow
+    linear resampling; the result records that comparison basis.
     """
     if (
         isinstance(absolute_tolerance, bool)
@@ -605,6 +605,7 @@ def compare_multiboard_interface_series(
             board_id: compare_native_series(
                 endpoints[baseline_board], endpoints[board_id],
                 absolute_tolerance=absolute_tolerance,
+                allow_resampling=allow_resampling,
             )
             for board_id in sorted(endpoints)
             if board_id != baseline_board
@@ -634,7 +635,11 @@ def compare_multiboard_interface_series(
         "missing": missing,
         "invalid_series": invalid_series,
         "absolute_tolerance": float(absolute_tolerance),
-        "comparison_basis": "all-native-samples-real-and-imaginary; no interpolation",
+        "comparison_basis": (
+            "all-native-samples-real-and-imaginary; linear resampling explicitly enabled"
+            if allow_resampling else
+            "all-native-samples-real-and-imaginary; no interpolation"
+        ),
     }
 
 

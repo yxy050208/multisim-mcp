@@ -6,6 +6,12 @@
 
 ### 中文
 
+- 新增双板复杂数字回归案例 `split_logic_load`：以已验收的 `HDR1X4` 真实连接器跨接
+  `clk`、`data`、共享电源和地，在远端板保留 1 kΩ 输出负载，并分别覆盖 DC、TRAN、AC
+  原生验收。新增结构化案例模块和 `tools/run_multiboard_digital_regression.py` 运行器；
+  TRAN/AC 仅在调用方显式选择 `series_alignment=linear` 时对独立板的自适应采样轴做有
+  边界检查的线性重采样，默认仍严格拒绝轴不一致。Multisim 14.3 实机三种分析均为
+  `accepted/native-verified`；证据留在仓库外，详见 `docs/MULTIBOARD_DIGITAL_REGRESSION.md`。
 - 新增 Multisim 14.3 原生 `HDR1X4` 四针连接器族：从官方 Getting Started 样例 J1
   提取本地模板，支持 `XJ1 ... HDR1X4` 网表语法、连续 P1–P4 引脚和精确 pin signature
   映射；完成打开/保存/重开、全引脚 ReportNetlist 及 DC/AC/TRAN 闭环验收。模板仍由

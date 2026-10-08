@@ -67,8 +67,8 @@ def _normalize_analysis_options(
     raw = {} if options is None else dict(options)
     allowed = {
         "dc": {"timeout", "max_points"},
-        "tran": {"sample_rate", "num_samples", "duration", "timeout", "max_points"},
-        "ac": {"sweep_type", "num_points", "start_frequency", "stop_frequency", "timeout", "max_points"},
+        "tran": {"sample_rate", "num_samples", "duration", "timeout", "max_points", "series_alignment"},
+        "ac": {"sweep_type", "num_points", "start_frequency", "stop_frequency", "timeout", "max_points", "series_alignment"},
     }[kind]
     unknown = set(raw) - allowed
     if unknown:
@@ -78,9 +78,9 @@ def _normalize_analysis_options(
         "max_points": 2000,
     }
     if kind == "tran":
-        defaults.update({"sample_rate": 1_000_000.0, "num_samples": 1000, "duration": 0.001})
+        defaults.update({"sample_rate": 1_000_000.0, "num_samples": 1000, "duration": 0.001, "series_alignment": "strict"})
     elif kind == "ac":
-        defaults.update({"sweep_type": 0, "num_points": 10, "start_frequency": 100.0, "stop_frequency": 1_000_000.0})
+        defaults.update({"sweep_type": 0, "num_points": 10, "start_frequency": 100.0, "stop_frequency": 1_000_000.0, "series_alignment": "strict"})
     values = {**defaults, **raw}
     for name in ("timeout", "max_points"):
         value = values[name]
@@ -89,6 +89,9 @@ def _normalize_analysis_options(
                 raise ValueError("analysis_options.max_points must be an integer from 1 to 100000")
         elif isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) <= 0:
             raise ValueError(f"analysis_options.{name} must be finite and positive")
+    if kind in {"tran", "ac"}:
+        if values.get("series_alignment") not in {"strict", "linear"}:
+            raise ValueError("analysis_options.series_alignment must be 'strict' or 'linear'")
     if kind == "tran":
         if isinstance(values["num_samples"], bool) or not isinstance(values["num_samples"], int) or not 1 <= values["num_samples"] <= 100000:
             raise ValueError("analysis_options.num_samples must be an integer from 1 to 100000")
@@ -282,6 +285,8 @@ def _compare_full_reference_series(
     board_records: Sequence[Mapping[str, Any]],
     reference_series: Mapping[str, Mapping[str, Any]],
     reference_nets: Sequence[str],
+    *,
+    allow_resampling: bool = False,
 ) -> dict[str, Any]:
     """Compare every declared board-local observation to the original circuit.
 
@@ -304,6 +309,7 @@ def _compare_full_reference_series(
                 **compare_native_series(
                     reference_series.get(net), observations.get(board_id, {}).get(net),
                     absolute_tolerance=1e-9,
+                    allow_resampling=allow_resampling,
                 ),
             })
     statuses = [item["status"] for item in comparisons]
@@ -314,7 +320,10 @@ def _compare_full_reference_series(
     return {
         "status": status, "tolerance": 1e-9, "comparisons": comparisons,
         "missing_nets": missing_nets,
-        "comparison_basis": "every-observed-board-net; all-native-samples-real-and-imaginary",
+        "comparison_basis": (
+            "every-observed-board-net; all-native-samples-real-and-imaginary; "
+            + ("linear resampling explicitly enabled" if allow_resampling else "no interpolation")
+        ),
     }
 
 
@@ -572,7 +581,8 @@ def run_native_multiboard_acceptance(
             prepared, observations, nets=interface_nets or None
         )
         series_interface_comparison = compare_multiboard_interface_series(
-            prepared, series_observations, nets=interface_nets or None
+            prepared, series_observations, nets=interface_nets or None,
+            allow_resampling=normalized_analysis_options.get("series_alignment") == "linear",
         )
         # Preserve the original scalar result for DC consumers; transient and
         # AC acceptance is gated by the complete sampled response instead.
@@ -676,6 +686,7 @@ def run_native_multiboard_acceptance(
                     if output in reference_series_by_output
                 },
                 reference_nets,
+                allow_resampling=normalized_analysis_options.get("series_alignment") == "linear",
             )
             full_reference = {
                 **reference_comparison,

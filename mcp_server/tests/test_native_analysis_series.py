@@ -41,6 +41,23 @@ class NativeAnalysisSeriesTest(unittest.TestCase):
         self.assertEqual(comparison["status"], "fail")
         self.assertEqual(comparison["worst_sample_index"], 1)
 
+    def test_transient_comparison_can_explicitly_resample_adaptive_axes(self):
+        expected = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0],
+            "real": [0.0, 1.0, 0.0], "imaginary": [0.0, 0.0, 0.0],
+        }
+        actual = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 0.5, 1.0, 1.5, 2.0],
+            "real": [0.0, 0.5, 1.0, 0.5, 0.0], "imaginary": [0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+        strict = compare_native_series(expected, actual, absolute_tolerance=1e-9)
+        self.assertEqual(strict["status"], "unverified")
+        aligned = compare_native_series(
+            expected, actual, absolute_tolerance=1e-9, allow_resampling=True
+        )
+        self.assertEqual(aligned["status"], "pass")
+        self.assertIn("resampled", aligned["reason"])
+
     def test_ac_comparison_checks_complex_phase(self):
         base = {
             "ready": True,

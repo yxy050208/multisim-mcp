@@ -1,7 +1,8 @@
 """Strict sampled comparisons of native OP, transient and complex AC results.
 
-No interpolation, extrapolation or synthetic samples are used. A different
-native sampling axis, missing data or downsampled response stays unverified.
+Interpolation is disabled by default. A different native sampling axis,
+missing data or downsampled response stays unverified unless a caller
+explicitly opts into bounded linear resampling for independent board runs.
 Passing this comparison proves agreement of returned samples, not continuous
 time behavior, physical board behavior or an undeclared fixture condition.
 """
@@ -10,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import math
+from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -117,11 +119,60 @@ def native_series_informative(analysis: str, series: Mapping[str, Mapping[str, A
     )
 
 
+def _resample_series(
+    series: Mapping[str, Any], target_axis: Sequence[float],
+) -> tuple[list[float], list[float]] | None:
+    """Linearly resample one complete native series onto a checked axis.
+
+    Native Multisim transient output uses an adaptive axis.  Resampling is an
+    explicit opt-in for comparing independently opened board projects; the
+    default comparison remains strict and refuses mismatched axes.
+    """
+    axis = [float(value) for value in series.get("axis", [])]
+    real = [float(value) for value in series.get("real", [])]
+    imaginary = [float(value) for value in series.get("imaginary", [])]
+    if len(axis) < 2 or len(axis) != len(real) or len(axis) != len(imaginary):
+        return None
+    if any(not _finite(value) for row in (axis, real, imaginary) for value in row):
+        return None
+    if any(b <= a for a, b in zip(axis, axis[1:])):
+        return None
+    if not target_axis or target_axis[0] < axis[0] - 1e-12 or target_axis[-1] > axis[-1] + 1e-12:
+        return None
+    out_real: list[float] = []
+    out_imaginary: list[float] = []
+    for point in target_axis:
+        x = float(point)
+        if x <= axis[0]:
+            index = 0
+            out_real.append(real[index])
+            out_imaginary.append(imaginary[index])
+            continue
+        if x >= axis[-1]:
+            index = -1
+            out_real.append(real[index])
+            out_imaginary.append(imaginary[index])
+            continue
+        right = bisect_right(axis, x)
+        left = right - 1
+        span = axis[right] - axis[left]
+        ratio = (x - axis[left]) / span
+        out_real.append(real[left] + ratio * (real[right] - real[left]))
+        out_imaginary.append(imaginary[left] + ratio * (imaginary[right] - imaginary[left]))
+    return out_real, out_imaginary
+
+
 def compare_native_series(
     expected: Mapping[str, Any] | None, actual: Mapping[str, Any] | None,
     *, absolute_tolerance: float = 1e-9,
+    allow_resampling: bool = False,
 ) -> dict[str, Any]:
-    """Compare every aligned native sample, including AC phase through complex values."""
+    """Compare native samples, optionally resampling an adaptive axis.
+
+    ``allow_resampling`` is deliberately false by default.  Callers must opt
+    in when comparing independently simulated board projects whose native
+    transient solver chose different adaptive time points.
+    """
     if not _finite(absolute_tolerance) or absolute_tolerance < 0:
         raise ValueError("absolute_tolerance must be finite and non-negative")
     result: dict[str, Any] = {
@@ -136,15 +187,24 @@ def compare_native_series(
         result.update(status="invalid", reason="analysis kinds differ")
         return result
     axis_a, axis_b = expected["axis"], actual["axis"]
-    if len(axis_a) != len(axis_b) or not all(
+    actual_real, actual_imaginary = actual["real"], actual["imaginary"]
+    aligned = len(axis_a) == len(axis_b) and all(
         math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12) for a, b in zip(axis_a, axis_b)
-    ):
-        result["reason"] = "native sampling axes differ; no interpolation performed"
-        return result
+    )
+    if not aligned:
+        if not allow_resampling:
+            result["reason"] = "native sampling axes differ; no interpolation performed"
+            return result
+        sampled = _resample_series(actual, axis_a)
+        if sampled is None:
+            result["reason"] = "native sampling axes differ and actual series cannot be resampled"
+            return result
+        actual_real, actual_imaginary = sampled
+        result["comparison_basis"] = "expected native samples versus linearly resampled actual native series"
     differences = [
         math.hypot(real_b - real_a, imaginary_b - imaginary_a)
         for real_a, real_b, imaginary_a, imaginary_b in zip(
-            expected["real"], actual["real"], expected["imaginary"], actual["imaginary"]
+            expected["real"], actual_real, expected["imaginary"], actual_imaginary
         )
     ]
     maximum = max(differences)
@@ -154,7 +214,7 @@ def compare_native_series(
         status="pass" if passed else "fail", passed=passed,
         sample_count=len(differences), max_absolute_difference=maximum,
         worst_sample_index=worst, worst_axis_value=axis_a[worst],
-        reason="every native sample compared on matching axes",
+        reason=("every native sample compared on matching axes" if aligned else "actual native series resampled onto expected axis"),
     )
     return result
 

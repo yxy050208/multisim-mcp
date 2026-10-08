@@ -105,6 +105,13 @@ class NativeMultiboardAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(kind, "tran")
         self.assertEqual(options["num_samples"], 11)
+        self.assertEqual(options["series_alignment"], "strict")
+        kind, linear = _normalize_analysis_options(
+            "tran", {"duration": 0.01, "series_alignment": "linear"}
+        )
+        self.assertEqual(linear["series_alignment"], "linear")
+        with self.assertRaises(ValueError):
+            _normalize_analysis_options("tran", {"series_alignment": "cubic"})
         self.assertEqual(
             _analysis_values(
                 {"ready": True, "results": {"V(out)": {"rows": [[0.0, 0.01], [1.0, 2.5]]}}},

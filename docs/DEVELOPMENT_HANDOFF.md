@@ -181,3 +181,20 @@
 - 版本失败关闭：目标版本没有本地 manifest 时，预览返回 `unavailable` 映射并保持
   `mapping-pending`，不会回退到通用载体；只有补充该版本独立清单和实机证据后才能打开
   原生执行。
+
+## 2026-10-09 双板复杂数字回归
+
+- 已完成：新增 `split_logic_load` 双板数字案例。`logic` 板产生 `clk`/`data`，两板通过
+  已验收的 `HDR1X4` 连接器共享 `clk`、`data`、`high` 和 `0`；`io` 板通过显式电压夹具
+  复现跨板输入，经过 NOT/AND 级联并保留 `RLOAD=1 kΩ` 远端负载。这样每块板都能独立
+  打开、保存、重开和仿真，同时仍检查跨板接口与完整设计参考。
+- 新增 `multiboard_digital_regression.py`、`run_multiboard_digital_regression.py` 和
+  `MULTIBOARD_DIGITAL_REGRESSION.md`。运行器支持 COM-free 预览和 DC/TRAN/AC 原生
+  验收，预览始终标记 `logical-only/unverified`。
+- 实机证据：Windows 11、Multisim 14.3、32 位 Python 3.12、本地授权模板包上，DC、
+  TRAN、AC 均为 `accepted/native-verified`；两板生成/重开、ReportNetlist、逐针连接、
+  布局、跨板接口、完整参考和远端负载均通过。证据保存在仓库外的
+  `C:\Users\18331\Documents\multisim-evidence\multiboard-digital-20261009-*`。
+- 当前边界：该结论只覆盖 `HDR1X4`、本案例元件族和 Multisim 14.3；其他连接器、目标版本
+  和更复杂的多板拓扑仍需独立 manifest 与实机证据，不能由本案例自动外推。
+- 回归结果：全量 `931 passed, 45 skipped, 154 subtests passed`；新增定向测试 11 项。

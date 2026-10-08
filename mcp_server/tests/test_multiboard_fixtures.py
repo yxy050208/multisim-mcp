@@ -157,6 +157,35 @@ class MultiboardFixtureTest(unittest.TestCase):
         )
         self.assertEqual(failed["status"], "fail")
 
+    def test_interface_series_resampling_is_explicit_and_bounded(self):
+        artifacts = materialize_multiboard_fixture_artifacts(
+            self._divider_artifacts(), self._fixtures()
+        )
+        expected = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0],
+            "real": [5.0, 5.0, 5.0], "imaginary": [0.0, 0.0, 0.0],
+        }
+        actual = {
+            **expected,
+            "axis": [0.0, 0.5, 1.0, 1.5, 2.0],
+            "real": [5.0, 5.0, 5.0, 5.0, 5.0],
+            "imaginary": [0.0, 0.0, 0.0, 0.0, 0.0],
+        }
+        strict = compare_multiboard_interface_series(
+            artifacts, {"power": {"bus": expected}, "signal": {"bus": actual}}, nets=["bus"]
+        )
+        self.assertEqual(strict["status"], "fail")
+        self.assertEqual(
+            strict["comparisons"][0]["endpoint_comparisons"]["signal"]["status"],
+            "unverified",
+        )
+        aligned = compare_multiboard_interface_series(
+            artifacts, {"power": {"bus": expected}, "signal": {"bus": actual}},
+            nets=["bus"], allow_resampling=True,
+        )
+        self.assertEqual(aligned["status"], "pass")
+        self.assertIn("linear resampling", aligned["comparison_basis"])
+
     def test_voltage_source_can_declare_explicit_ac_model(self):
         artifacts = self._divider_artifacts()
         fixtures = self._fixtures()

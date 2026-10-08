@@ -95,3 +95,6 @@ ReportNetlist 省略 `VDD/VSS` 等隐藏端子时，回归器会读取同一次 
 同时保留原生报告对隐藏端子的限制。
 
 本地模板和实验产物只用于验证，不应提交到开源仓库。
+
+
+多板数字回归见 [MULTIBOARD_DIGITAL_REGRESSION.md](MULTIBOARD_DIGITAL_REGRESSION.md)。它补充两板 HDR1X4、边界输入夹具和 DC/TRAN/AC 原生验收，不改变本矩阵的单板案例。
