@@ -182,6 +182,13 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
         bundle_comparisons = {
             "name": (contract["bundle_package"], bundle_manifest.get("name")),
             "version": (contract["bundle_version"], bundle_manifest.get("version")),
+            # DSH 0.2.x hides plugins that do not declare the host version they
+            # support. Keep this check next to the dependency pin so a package
+            # cannot silently become installable-but-invisible again.
+            "dsh-engine": (
+                manifest["upstream"]["harness_version"],
+                bundle_manifest.get("engines", {}).get("dsh"),
+            ),
             "mcp-client": (
                 manifest["upstream"]["mcp_client_version"],
                 bundle_manifest.get("dependencies", {}).get(
@@ -305,7 +312,11 @@ def check_upstream_contract(
         "mcp-client-version": (expected["mcp_client_version"], client.get("version")),
         "mcp-sdk-range": (
             expected["mcp_sdk_range"],
-            client.get("dependencies", {}).get("@modelcontextprotocol/sdk"),
+            # DSH 0.2.x moved from the pre-2.x SDK package name to the
+            # published MCP client package. Accept the old key for historical
+            # manifests while validating the current upstream contract.
+            client.get("dependencies", {}).get("@modelcontextprotocol/client")
+            or client.get("dependencies", {}).get("@modelcontextprotocol/sdk"),
         ),
     }
     findings = []

@@ -22,14 +22,14 @@ def matching_upstream_loader(url: str, timeout: float) -> dict:
     if url.endswith("/packages/mcp/mcp-client/package.json"):
         return {
             "name": "@deepseek-ai/dsh-mcp-client",
-            "version": "0.1.1-rc.2",
-            "dependencies": {"@modelcontextprotocol/sdk": "^1.12.0"},
+            "version": "0.2.1-rc.2",
+            "dependencies": {"@modelcontextprotocol/client": "2.2.0"},
         }
     if url.endswith("/apps/cli/package.json"):
-        return {"name": "@deepseek-ai/dsh", "version": "0.1.1-rc.2"}
+        return {"name": "@deepseek-ai/dsh", "version": "0.2.1-rc.2"}
     return {
-        "version": "0.1.1-rc.2",
-        "packageManager": "pnpm@11.7.0",
+        "version": "0.2.1-rc.2",
+        "packageManager": "pnpm@11.28.5",
         "engines": {"node": "^22.19.0 || >=24.0.0"},
     }
 
