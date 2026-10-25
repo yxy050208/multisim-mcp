@@ -36,14 +36,14 @@ def _finding(level: str, check: str, message: str) -> dict[str, str]:
 
 
 _SEMVER_PATTERN = re.compile(
-    r"^(?P<op>>=|<=|>|<|=)?\\s*"
-    r"(?P<version>\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)$"
+    r"^(?P<op>>=|<=|>|<|=)?\s*"
+    r"(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$"
 )
 
 
 def _parse_version(value: str) -> tuple[int, int, int, tuple[str, ...] | None]:
     match = re.fullmatch(
-        r"(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+        r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
         r"(?:-(?P<pre>[0-9A-Za-z.-]+))?",
         value,
     )
