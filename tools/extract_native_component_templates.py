@@ -72,6 +72,45 @@ def extract_templates(
             symbol_item = item
             break
     if symbol_item is None:
+        # Designs saved by the Multisim GUI (as opposed to the shipped samples)
+        # store the placed component's drawable symbol on the animation layer
+        # as CIITAnimationSymbolComp, with no CIITSymbolComp anywhere in the
+        # file. The inner schema is identical (same pin items, connectors,
+        # transforms and text labels, linked by the same CiComponent id), so
+        # normalize the root class in place and use it: without this, any
+        # normally saved user design is rejected as a carrier source and only
+        # the shipped samples can supply templates.
+        for item in root.iter("Item"):
+            animation = item.find("./CIITAnimationSymbolComp")
+            if animation is not None and animation.get("CiComponent") == component_id:
+                symbol_item = copy.deepcopy(item)
+                wrapper = symbol_item.get("Class")
+                if wrapper == "CIITAnimationSymbolComp":
+                    symbol_item.set("Class", "CIITSymbolComp")
+                copied: ET.Element | None = None
+                for node in symbol_item.iter("CIITAnimationSymbolComp"):
+                    node.tag = "CIITSymbolComp"
+                    if node.get("Class") == "CIITAnimationSymbolComp":
+                        node.set("Class", "CIITSymbolComp")
+                    if copied is None:
+                        copied = node
+                # The animation layer carries no placement transform on its
+                # root. The extraction below rewrites the root transform to
+                # the canonical identity anyway (the builder supplies
+                # placement), so provide the attributes the orientation gate
+                # expects instead of failing a structurally valid symbol.
+                if copied is not None and copied.get("Transformer-M00") is None:
+                    for key, value in (
+                        ("Transformer-M00", "1."),
+                        ("Transformer-M01", "0."),
+                        ("Transformer-M10", "0."),
+                        ("Transformer-M11", "1."),
+                        ("Transformer-M20", "0."),
+                        ("Transformer-M21", "0."),
+                    ):
+                        copied.set(key, value)
+                break
+    if symbol_item is None:
         raise ValueError(f"No CIITSymbolComp was linked to {refdes!r}")
 
     port_items: list[ET.Element] = []
