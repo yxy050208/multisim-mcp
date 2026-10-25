@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from multisim_mcp.dsh_schema import normalize_dsh_tool_schema
 from multisim_mcp import __version__
@@ -236,6 +237,32 @@ _WORKER_EXECUTOR = ThreadPoolExecutor(
 _TOOL_PROFILE = selected_tool_profile()
 
 
+# Preserve deliberate tool errors so clients receive the actionable message
+# instead of the generic MCP ``UnexpectedToolError`` surface.
+_EXPECTED_TOOL_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    RuntimeError,
+    TimeoutError,
+    InterruptedError,
+    ValueError,
+)
+
+
+def _tool_error(exc: BaseException) -> ToolError:
+    return ToolError(str(exc) or type(exc).__name__)
+
+
+def _wrap_with_tool_error_reporting(function: Any) -> Any:
+    @functools.wraps(function)
+    def with_tool_error_reporting(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return function(*args, **kwargs)
+        except _EXPECTED_TOOL_ERRORS as exc:
+            raise _tool_error(exc) from exc
+
+    return with_tool_error_reporting
+
+
 def _invoke_tool_on_worker_thread(function: Any, args: tuple, kwargs: dict) -> Any:
     """Keep blocking, stateful worker calls off the MCP event loop."""
     return function(*args, **kwargs)
@@ -263,16 +290,17 @@ class MultisimMCPServer(MCPServer):
                 # Keep the original callable available to internal code and unit
                 # tests while omitting it from MCP tools/list for this process.
                 return function
+            reporting = _wrap_with_tool_error_reporting(function)
             if not com_serialized:
-                register(function)
+                register(reporting)
                 return function
 
-            @functools.wraps(function)
+            @functools.wraps(reporting)
             async def serialized(*args: Any, **kwargs: Any) -> Any:
                 loop = asyncio.get_running_loop()
                 invoke = functools.partial(
                     _invoke_tool_on_worker_thread,
-                    function,
+                    reporting,
                     args,
                     kwargs,
                 )

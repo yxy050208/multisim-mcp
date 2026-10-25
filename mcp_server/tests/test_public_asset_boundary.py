@@ -33,6 +33,7 @@ package_check = _load("public_boundary_package_check", "check_mcp_package.py")
 def _distributions(root: Path, *, wheel_extra: str = "", sdist_extra: str = "") -> None:
     with zipfile.ZipFile(root / "multisim_mcp-0.0.0-py3-none-any.whl", "w") as wheel:
         wheel.writestr("multisim_mcp/core.py", "# public source\n")
+        wheel.writestr("multisim_mcp/native_xml.py", "# public source\n")
         wheel.writestr("multisim_mcp-0.0.0.dist-info/licenses/LICENSE", "MIT\n")
         for index in range(5):
             wheel.writestr(f"multisim_mcp/harness_skills/skill{index}/SKILL.md", "Public skill\n")
