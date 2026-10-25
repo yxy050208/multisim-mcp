@@ -56,6 +56,49 @@ def _read_manifest(path: Path) -> dict:
     return payload
 
 
+def _identity_candidates(decoded: Path, refdes: str) -> list[str]:
+    """Return plausible identity strings declared by one placed component.
+
+    Users are asked for an exact identity token they usually cannot know up
+    front (``LM555CN`` versus ``555_TIMER_RATED`` versus a display name). When
+    the token check fails, these candidates become the error message, so the
+    next invocation is one copy-paste away instead of a decoding session.
+    """
+    from multisim_mcp.native_xml import parse_native_xml
+
+    try:
+        root = parse_native_xml(decoded).getroot()
+    except Exception:
+        return []
+    target = None
+    for item in root.iter("Item"):
+        component = item.find("./CiComponent")
+        if component is not None and component.get("LocalName") == f"&ASC{refdes}":
+            target = item
+            break
+    if target is None:
+        return []
+    candidates: list[str] = []
+    for node in target.iter():
+        value = (node.get("String") or node.get("Value") or "")
+        value = value.removeprefix("&ASC").strip()
+        if not 3 <= len(value) <= 48:
+            continue
+        if value.startswith((".", "*", ";", "+", "x", "X", "r", "e", "E")):
+            continue
+        if any(char.isspace() for char in value) and not any(
+            char.isdigit() for char in value
+        ):
+            # A multi-word display name is only useful when it names a part.
+            continue
+        if value in candidates:
+            continue
+        candidates.append(value)
+        if len(candidates) >= 10:
+            break
+    return candidates
+
+
 def overlay_component(
     pack: Path,
     source: Path,
@@ -95,8 +138,16 @@ def overlay_component(
             "utf-8", errors="ignore"
         )
         if token.casefold() not in combined.casefold():
+            candidates = _identity_candidates(decoded, normalized_refdes)
+            hint = (
+                " Re-run with one of these --identity-token values: "
+                + ", ".join(candidates)
+                if candidates
+                else ""
+            )
             raise ValueError(
-                f"identity token {token!r} was not found in extracted templates"
+                f"identity token {token!r} was not found in extracted templates."
+                f"{hint}"
             )
 
         existing = [root / path.name for path in written if (root / path.name).exists()]

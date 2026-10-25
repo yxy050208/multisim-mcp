@@ -8,6 +8,7 @@ without Multisim, COM, or the MCP runtime.  The generated XML is encoded to
 from __future__ import annotations
 
 import copy
+import html
 import itertools
 import math
 import os
@@ -527,6 +528,18 @@ NATIVE_MODEL_ALIASES: dict[str, frozenset[str]] = {
     "TIMER8": frozenset({"TIMER8", "LM555CN", "LM555", "NE555", "HE555"}),
     "DFF8": frozenset({"DFF8", "7474N", "7474", "74LS74N", "74LS74D"}),
     "CD4017": frozenset({"CD4017", "CD4017B", "4017B_5", "4017BD_5V", "4017BD_5V"}),
+}
+
+# Carrier families whose netlist X-lines the command engine cannot resolve by
+# name. prepare_simulation_netlist renders each such instance from the
+# carrier's own extracted templates (see _render_carrier_instance) so native
+# database parts simulate — and produce verifiable waveforms — like any other
+# device. Families without an extracted carrier fall back to the engine's own
+# error, which names the part instead of silently dropping it.
+_CARRIER_RENDER_ALIASES: dict[str, str] = {
+    alias: kind
+    for kind in ("TIMER8", "DFF8", "CD4017")
+    for alias in NATIVE_MODEL_ALIASES.get(kind, ())
 }
 
 
@@ -1669,6 +1682,90 @@ def _canonicalize_ground_aliases(lines: Sequence[str]) -> list[str]:
     return rendered
 
 
+def _model_body(kind: str) -> tuple[str, str]:
+    """Return ``(model_name, body)`` from a carrier's model template.
+
+    The body is a ``.subckt`` (analog macros such as TIMER8) or a ``.MODEL``
+    (XSPICE digital carriers such as DFF8) stored in a CiaCString/CiaCollString
+    slot of the extracted model template, with HTML entities from the XML.
+    """
+    model_item = _load_template(kind.lower() + "_model.xml")
+    for node in model_item.iter():
+        value = (node.get("String") or node.get("Value") or "")
+        stripped = value.removeprefix("&ASC").lstrip()
+        if re.match(r"\.subckt\b", stripped, re.I) or re.match(
+            r"\.model\b", stripped, re.I
+        ):
+            body = html.unescape(stripped).strip()
+            parts = body.split()
+            if len(parts) < 2:
+                raise ValueError(
+                    f"{kind} model template has an unnamed {parts[0] if parts else 'empty'} definition"
+                )
+            return parts[1], body
+    raise ValueError(f"{kind} model template contains no .subckt or .MODEL body")
+
+
+def _render_carrier_instance(
+    kind: str, refdes: str, nodes: list[str], embeds: dict[str, str]
+) -> tuple[str, tuple[str, str] | None]:
+    """Render one carrier instance line against its extracted templates.
+
+    Returns ``(instance_line, embed)`` where ``embed`` is an optional
+    ``(model_name, body)`` pair the caller must emit once per model name, or
+    ``None`` when the template carries its model inline (per-instance subckt).
+    Raises when the templates do not match the declared terminals, so a pack
+    defect surfaces instead of silently emitting a mis-wired instance.
+    """
+    definition = COMPONENT_DEFINITIONS[kind]
+    element_item = _load_template(definition.element_template)
+    template = element_item.find("./CiComponent//CiaSpiceTmpltExprt")
+    if template is None:
+        raise ValueError(f"{kind} element template has no SPICE template")
+    raw = (template.get("String") or "").removeprefix("&ASC")
+
+    stem = re.sub(r"[^A-Za-z0-9_]", "_", refdes) or "inst"
+    distinct_names: list[str] = []
+    # Carrier pin names may carry the active-low tilde (~1PR, ~1Q), which is
+    # part of the token: %t~1PR names the pin, and the conditional form
+    # (%t1D?%t:d%t;1D) falls back to an internal d<pin> node when unconnected.
+    for name in re.findall(r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)", raw):
+        if name not in distinct_names:
+            distinct_names.append(name)
+    if len(distinct_names) != len(nodes):
+        raise ValueError(
+            f"{kind} template declares {len(distinct_names)} terminals "
+            f"({', '.join(distinct_names)}) but the instance provides {len(nodes)}"
+        )
+    mapping = dict(zip(distinct_names, nodes))
+
+    def sub_conditional(match: re.Match[str]) -> str:
+        return mapping[match.group(1)]
+
+    def sub_plain(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in mapping:
+            raise ValueError(
+                f"{kind} template references unknown terminal {name!r}"
+            )
+        return mapping[name]
+
+    out = re.sub(
+        r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)\?%t:d%t;\1", sub_conditional, raw
+    )
+    out = re.sub(r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)", sub_plain, out)
+    out = out.replace("%p", stem)
+
+    if "%m" not in out:
+        # Inline-model style (e.g. the rated 555 carries instance + .subckt in
+        # one string, with the subckt name parametrized by %p).
+        return out, None
+
+    model_name, body = _model_body(kind)
+    out = out.replace("%m", model_name)
+    return out, (model_name, body)
+
+
 def prepare_simulation_netlist(
     text: str, *, ngspice_compatible: bool = False
 ) -> str:
@@ -1691,6 +1788,9 @@ def prepare_simulation_netlist(
 
     rendered: list[str] = []
     required_models: dict[str, str] = {}
+    # Native-carrier model bodies (.subckt/.MODEL) referenced by rendered
+    # carrier instances, emitted once per model name at .end.
+    carrier_embeds: dict[str, str] = {}
     for line in logical_lines:
         parts = line.split()
         if (
@@ -1741,6 +1841,36 @@ def prepare_simulation_netlist(
                     f"B__{stem}_N {negative} {common} V={{-({expression})}}",
                 )
             )
+            continue
+        if (
+            len(parts) >= 3
+            and not line.startswith(("*", ";"))
+            and parts[0][0].upper() == "X"
+            and parts[-1].upper() in _CARRIER_RENDER_ALIASES
+        ):
+            # Native carriers (TIMER8/DFF8/CD4017) are real Multisim database
+            # macros the command engine cannot resolve by name: an unrendered
+            # X-line makes the engine drop the instance, so a generated design
+            # simulates as if the part were absent. Render the carrier's own
+            # SPICE template instead: named tokens (%tGND ...) become the
+            # netlist nodes in terminal order, conditional tokens
+            # (%t1D?%t:d%t;1D) resolve to the connected net, %p becomes the
+            # instance stem, and the referenced model body (.subckt or .MODEL)
+            # is embedded once per model name.
+            kind = _CARRIER_RENDER_ALIASES[parts[-1].upper()]
+            nodes = parts[1:-1]
+            try:
+                instance, embed = _render_carrier_instance(
+                    kind, parts[0], nodes, carrier_embeds
+                )
+            except (FileNotFoundError, ValueError):
+                # Leave the line for the engine so the failure names the part,
+                # instead of silently emitting a different circuit.
+                rendered.append(line)
+                continue
+            if embed is not None:
+                carrier_embeds.setdefault(embed[0], embed[1])
+            rendered.append(instance)
             continue
         if (
             len(parts) == 8
@@ -1894,12 +2024,19 @@ def prepare_simulation_netlist(
                 for name, definition in sorted(required_models.items())
             )
             required_models.clear()
+            for name, body in sorted(carrier_embeds.items()):
+                rendered.append(f"* multisim-mcp: carrier model {name}")
+                rendered.append(body)
+            carrier_embeds.clear()
         rendered.append(line)
     if required_models:
         rendered.extend(
             f".model {name} {definition}"
             for name, definition in sorted(required_models.items())
         )
+    for name, body in sorted(carrier_embeds.items()):
+        rendered.append(f"* multisim-mcp: carrier model {name}")
+        rendered.append(body)
     return "\n".join(rendered).rstrip() + "\n"
 
 
@@ -4355,6 +4492,29 @@ def build_schematic(
                 model_warnings.append(
                     f"{spec.refdes}: requested timer model {spec.model!r} is represented "
                     "by the local LM555CN carrier and requires explicit compatibility review"
+                )
+            # Interactive "rated virtual" timers (the Basic group's 555) simulate
+            # through Multisim's interactive engine only: in a batch run the
+            # output flips once and then stalls, which reads as a successful but
+            # dead circuit. Warn so the user reaches for the database part.
+            try:
+                carrier_text = (
+                    _load_template("timer8_element.xml").find(
+                        "./CiComponent//CiaSpiceTmpltExprt"
+                    ).get("String")
+                    or ""
+                ) + "".join(
+                    (node.get("String") or node.get("Value") or "")
+                    for node in _load_template("timer8_model.xml").iter()
+                )
+            except FileNotFoundError:
+                carrier_text = ""
+            if "RATED" in carrier_text.upper():
+                model_warnings.append(
+                    f"{spec.refdes}: the local TIMER8 carrier is an interactive "
+                    "'rated virtual' timer; command-engine (batch) verification "
+                    "degenerates for it — place the database LM555CN (Mixed/TIMER) "
+                    "and re-extract for verifiable waveforms"
                 )
         if spec.kind == "DFF8":
             model_warnings.append(
