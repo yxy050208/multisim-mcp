@@ -35,6 +35,77 @@ def _finding(level: str, check: str, message: str) -> dict[str, str]:
     return {"level": level, "check": check, "message": message}
 
 
+_SEMVER_PATTERN = re.compile(
+    r"^(?P<op>>=|<=|>|<|=)?\s*"
+    r"(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$"
+)
+
+
+def _parse_version(value: str) -> tuple[int, int, int, tuple[str, ...] | None]:
+    match = re.fullmatch(
+        r"(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
+        r"(?:-(?P<pre>[0-9A-Za-z.-]+))?",
+        value,
+    )
+    if not match:
+        raise ValueError(f"invalid semantic version: {value!r}")
+    prerelease = match.group("pre")
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        tuple(prerelease.split(".")) if prerelease else None,
+    )
+
+
+def _compare_versions(left: str, right: str) -> int:
+    """Compare the semver forms used by the Harness release contract."""
+    left_parts = _parse_version(left)
+    right_parts = _parse_version(right)
+    if left_parts[:3] != right_parts[:3]:
+        return (left_parts[:3] > right_parts[:3]) - (left_parts[:3] < right_parts[:3])
+    left_pre, right_pre = left_parts[3], right_parts[3]
+    if left_pre is None or right_pre is None:
+        return (left_pre is None) - (right_pre is None)
+    for left_token, right_token in zip(left_pre, right_pre):
+        if left_token == right_token:
+            continue
+        left_numeric = left_token.isdigit()
+        right_numeric = right_token.isdigit()
+        if left_numeric and right_numeric:
+            return (int(left_token) > int(right_token)) - (int(left_token) < int(right_token))
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return (left_token > right_token) - (left_token < right_token)
+    return (len(left_pre) > len(right_pre)) - (len(left_pre) < len(right_pre))
+
+
+def _version_satisfies_range(version: str, requirement: str) -> bool:
+    """Return whether a version satisfies a space-separated comparator range."""
+    if not isinstance(requirement, str) or not requirement.strip():
+        return False
+    try:
+        for token in requirement.split():
+            match = _SEMVER_PATTERN.fullmatch(token)
+            if not match:
+                return False
+            comparison = _compare_versions(version, match.group("version"))
+            operator = match.group("op") or "="
+            if operator == "=" and comparison != 0:
+                return False
+            if operator == ">" and comparison <= 0:
+                return False
+            if operator == ">=" and comparison < 0:
+                return False
+            if operator == "<" and comparison >= 0:
+                return False
+            if operator == "<=" and comparison > 0:
+                return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def load_compatibility_manifest(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != SCHEMA_VERSION:
@@ -182,19 +253,6 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
         bundle_comparisons = {
             "name": (contract["bundle_package"], bundle_manifest.get("name")),
             "version": (contract["bundle_version"], bundle_manifest.get("version")),
-            # DSH 0.2.x hides plugins that do not declare the host version they
-            # support. Keep this check next to the dependency pin so a package
-            # cannot silently become installable-but-invisible again.
-            "dsh-engine": (
-                manifest["upstream"]["harness_version"],
-                bundle_manifest.get("engines", {}).get("dsh"),
-            ),
-            "mcp-client": (
-                manifest["upstream"]["mcp_client_version"],
-                bundle_manifest.get("dependencies", {}).get(
-                    manifest["upstream"]["mcp_client_package"]
-                ),
-            ),
             "patch": (
                 "./cordis.patch.yml",
                 bundle_manifest.get("dsh", {}).get("bundle", {}).get("patch"),
@@ -209,6 +267,52 @@ def check_local_contract(repo_root: Path, manifest: dict[str, Any]) -> list[dict
                         f"{field} expected {wanted!r}, found {actual!r}",
                     )
                 )
+
+        # The bundle may support a moving DSH 0.2.x line, but it must include
+        # the exact Harness version used by this repository's verification.
+        dsh_requirement = bundle_manifest.get("engines", {}).get("dsh")
+        if not _version_satisfies_range(
+            manifest["upstream"]["harness_version"], dsh_requirement
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "bundle-package",
+                    "dsh engine range does not include the verified Harness version "
+                    f"{manifest['upstream']['harness_version']!r}: {dsh_requirement!r}",
+                )
+            )
+
+        mcp_client_package = manifest["upstream"]["mcp_client_package"]
+        dependency_spec = bundle_manifest.get("dependencies", {}).get(mcp_client_package)
+        peer_spec = bundle_manifest.get("peerDependencies", {}).get(mcp_client_package)
+        if dependency_spec is not None:
+            findings.append(
+                _finding(
+                    "error",
+                    "bundle-package",
+                    f"{mcp_client_package} must not be pinned in dependencies; found {dependency_spec!r}",
+                )
+            )
+        if peer_spec is None:
+            findings.append(
+                _finding(
+                    "error",
+                    "bundle-package",
+                    f"{mcp_client_package} is missing from peerDependencies",
+                )
+            )
+        elif not _version_satisfies_range(
+            manifest["upstream"]["mcp_client_version"], peer_spec
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "bundle-package",
+                    f"peer dependency range {peer_spec!r} does not include "
+                    f"the verified client {manifest['upstream']['mcp_client_version']!r}",
+                )
+            )
         pyproject = (package_root / "pyproject.toml").read_text(encoding="utf-8")
         version_match = re.search(
             r'(?m)^version\s*=\s*"([^"]+)"\s*$', pyproject

@@ -547,6 +547,7 @@ _CARRIER_RENDER_ALIASES: dict[str, str] = {
 class ParsedNetlist:
     components: list[ComponentSpec] = field(default_factory=list)
     unsupported: list[str] = field(default_factory=list)
+    title: str | None = None
     grounded: bool = False
     subcircuits: dict[str, "SubcircuitDefinition"] = field(default_factory=dict)
     expanded_subcircuits: list[dict[str, Any]] = field(default_factory=list)
@@ -562,6 +563,16 @@ class SubcircuitDefinition:
     parameters: dict[str, str]
     text: str
 
+
+def _looks_like_spice_record(line: str) -> bool:
+    """Return whether a first non-comment line looks like a device record."""
+    parts = line.split()
+    if len(parts) < 3 or not parts[0]:
+        return False
+    return parts[0][0].upper() in {
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
+        "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+    }
 
 def _logical_netlist_lines(text: str) -> list[str]:
     """Fold SPICE `+` continuation records into their preceding logical line."""
@@ -1118,11 +1129,17 @@ def parse_netlist(text: str) -> ParsedNetlist:
             model_definitions[parts[1].lower()] = " ".join(parts[2:])
 
     in_subcircuit = 0
+    title_consumed = False
     for raw_line in parse_lines:
         line = raw_line.strip()
         if not line or line.startswith(("*", ";")):
             continue
         lower = line.lower()
+        if not title_consumed:
+            title_consumed = True
+            if not lower.startswith(".") and not _looks_like_spice_record(line):
+                parsed.title = line
+                continue
         if lower.startswith("."):
             if lower.startswith(".subckt"):
                 in_subcircuit += 1

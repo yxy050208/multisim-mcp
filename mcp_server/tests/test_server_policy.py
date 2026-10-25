@@ -265,7 +265,7 @@ class SchematicLayoutGateTest(unittest.TestCase):
             server,
             "build_schematic",
             return_value={"layout_validation": failed_layout, "nets": []},
-        ), patch.object(server.codec, "encode") as encode:
+        ), patch.object(server, "_require_schematic_prerequisites"), patch.object(server.codec, "encode") as encode:
             output = Path(tmp) / "blocked.ms14"
             result = server._create_schematic_impl(
                 netlist,
@@ -293,7 +293,7 @@ class SchematicLayoutGateTest(unittest.TestCase):
             server,
             "build_schematic",
             return_value={"layout_validation": failed_layout, "nets": []},
-        ), patch.object(server.codec, "encode", return_value={"success": True}) as encode:
+        ), patch.object(server, "_require_schematic_prerequisites"), patch.object(server.codec, "encode", return_value={"success": True}) as encode:
             result = server._create_schematic_impl(
                 netlist,
                 str(Path(tmp) / "legacy.ms14"),

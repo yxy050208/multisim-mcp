@@ -21,6 +21,9 @@ from typing import Any, Callable
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from multisim_mcp.dsh_schema import normalize_dsh_tool_schema
+from multisim_mcp.multisim_client import Ms14Codec
+
 from multisim_mcp import __version__
 from multisim_mcp.api_contract import build_capabilities
 from multisim_mcp.experiment_resources import (
@@ -258,6 +261,16 @@ def _invoke_tool_on_worker_thread(function: Any, args: tuple, kwargs: dict) -> A
 
 class MultisimMCPServer(MCPServer):
     """MCPServer that serializes calls to the isolated Multisim worker."""
+
+    async def list_tools(self) -> list[Any]:
+        """List tools with schemas normalized for the DSH registration subset."""
+        tools = await super().list_tools()
+        return [
+            tool.model_copy(
+                update={"input_schema": normalize_dsh_tool_schema(tool.input_schema)}
+            )
+            for tool in tools
+        ]
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any) -> Any:
         com_serialized = bool(decorator_kwargs.pop("com_serialized", True))
@@ -2172,6 +2185,55 @@ def run_spice_netlist(
     return result
 
 
+def _require_schematic_prerequisites(parsed: Any) -> None:
+    """Fail early with setup guidance before native schematic generation."""
+    completeness = template_completeness()
+    required = ("minimal.ms14.xml", "wire.xml")
+    missing = [
+        name
+        for name in required
+        if not any((path / name).is_file() for path in completeness["search_paths"])
+    ]
+    used_kinds = {
+        item.kind
+        for item in getattr(parsed, "components", ())
+        if item.kind in COMPONENT_DEFINITIONS
+    }
+    missing_by_kind = completeness["missing_by_kind"]
+    missing_used = sorted(
+        kind
+        for kind in used_kinds
+        if missing_by_kind.get(kind)
+    )
+    problems: list[str] = []
+    if missing:
+        problems.append("missing base templates: " + ", ".join(missing))
+    if missing_used:
+        problems.append(
+            "missing templates for requested components: "
+            + ", ".join(
+                f"{kind} ({', '.join(missing_by_kind[kind])})"
+                for kind in missing_used
+            )
+        )
+    for tool in ("ewd", "ewe"):
+        try:
+            Ms14Codec._base_cmd(tool)
+        except (OSError, RuntimeError, ValueError) as exc:
+            problems.append(f"{tool}/ewe codec unavailable: {exc}")
+            break
+    if problems:
+        raise RuntimeError(
+            "Schematic prerequisites are not ready: "
+            + "; ".join(problems)
+            + ". Generate a local component pack with "
+              "tools/bootstrap_local_component_pack.py, set "
+              "MULTISIM_MCP_TEMPLATE_DIR, and install "
+              "electronics-workbench-decoder@0.2.0 with real node.exe "
+              "(or set MULTISIM_MCP_EWD and MULTISIM_MCP_EWE to dist/*.js)."
+        )
+
+
 def _create_schematic_impl(
     netlist: str,
     output_ms14: str,
@@ -2199,6 +2261,8 @@ def _create_schematic_impl(
         )
     if not parsed.components:
         raise ValueError("The netlist contains no supported components")
+
+    _require_schematic_prerequisites(parsed)
 
     output_path = Path(output_ms14).expanduser().resolve()
     if output_path.suffix.lower() != ".ms14":
