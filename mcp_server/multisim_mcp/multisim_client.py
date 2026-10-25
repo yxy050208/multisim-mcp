@@ -304,8 +304,14 @@ class MultisimClient:
             self._connected_by_client = False
 
     def open_circuit(self, path: str) -> dict:
+        absolute = os.path.abspath(path)
+        # Multisim's OpenFile crashes the whole automation process on a missing
+        # path (hard access violation in the COM server), so existence must be
+        # checked before the COM call.
+        if not os.path.isfile(absolute):
+            raise FileNotFoundError(f"circuit file not found: {absolute}")
         self._connect_app()
-        self._circuit = self._app.OpenFile(os.path.abspath(path))
+        self._circuit = self._app.OpenFile(absolute)
         return self.circuit_info()
 
     def new_circuit(self) -> dict:
