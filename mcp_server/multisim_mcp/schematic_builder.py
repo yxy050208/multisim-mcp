@@ -571,7 +571,7 @@ def _looks_like_spice_record(line: str) -> bool:
         return False
     return parts[0][0].upper() in {
         "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
-        "L", "M", "O", "Q", "R", "S", "T", "U", "V", "W", "X", "Z",
+        "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
     }
 
 def _logical_netlist_lines(text: str) -> list[str]:
