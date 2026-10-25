@@ -41,6 +41,12 @@ class HarnessCompatibilityTest(unittest.TestCase):
         self.assertEqual(result["errors"], 0)
         self.assertIsNone(result["upstream_match"])
 
+    def test_verified_version_is_accepted_by_compatibility_ranges(self) -> None:
+        self.assertTrue(compat._version_satisfies_range("0.2.1-rc.2", ">=0.2.1-rc.2 <0.3.0"))
+        self.assertTrue(compat._version_satisfies_range("0.2.1-rc.3", ">=0.2.1-rc.2 <0.3.0"))
+        self.assertFalse(compat._version_satisfies_range("0.3.0", ">=0.2.1-rc.2 <0.3.0"))
+        self.assertFalse(compat._version_satisfies_range("0.2.1-rc.1", ">=0.2.1-rc.2 <0.3.0"))
+
     def test_matching_upstream_metadata_passes_strict_check(self) -> None:
         result = compat.run_checks(
             REPO_ROOT,
