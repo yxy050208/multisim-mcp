@@ -24,6 +24,8 @@ def verify(dist: Path, version: str) -> tuple[Path, Path]:
             raise ValueError("wheel must contain exactly five packaged Skills")
         if not any(name.endswith("licenses/LICENSE") for name in names):
             raise ValueError("wheel is missing its license")
+        if not any(name.endswith("/multisim_mcp/native_xml.py") for name in names):
+            raise ValueError("wheel is missing multisim_mcp/native_xml.py")
         if any("/templates/" in name and name.endswith(".xml") for name in names):
             raise ValueError("wheel contains a forbidden extracted XML template")
 
