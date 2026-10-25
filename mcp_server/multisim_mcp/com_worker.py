@@ -92,10 +92,12 @@ class _WorkerService:
                     "python_bits": struct.calcsize("P") * 8,
                     "stdio_encoding": getattr(sys.stdin, "encoding", ""),
                 }
-            raise PermissionError("System worker method is not allowlisted")
+            raise PermissionError(f"System worker method is not allowlisted: {method!r}")
         if target == "client":
             if method not in _CLIENT_METHODS:
-                raise PermissionError("Multisim client method is not allowlisted")
+                raise PermissionError(
+                    f"Multisim client method is not allowlisted: {method!r}"
+                )
             function = getattr(self.client, str(method))
             if method == "run_command_file":
                 if len(args) > 3:
@@ -110,7 +112,9 @@ class _WorkerService:
             return function(*args, **kwargs)
         if target == "codec":
             if method not in _CODEC_METHODS:
-                raise PermissionError("Multisim codec method is not allowlisted")
+                raise PermissionError(
+                    f"Multisim codec method is not allowlisted: {method!r}"
+                )
             return getattr(self.codec, str(method))(*args, **kwargs)
         raise ValueError("Unknown worker target")
 
@@ -127,6 +131,28 @@ def _emit(stream: TextIO, lock: threading.Lock, payload: object) -> None:
         stream.flush()
 
 
+def describe_com_error(exc: BaseException) -> str | None:
+    """Return a readable message for pywin32 ``com_error`` failures.
+
+    Raw ``str(com_error)`` is an HRESULT tuple dump that tells a client
+    nothing; the useful text lives in the embedded EXCEPINFO.
+    """
+    if type(exc).__name__ != "com_error":
+        return None
+    args = exc.args if isinstance(getattr(exc, "args", None), tuple) else ()
+    hresult = int(args[0]) if args else 0
+    detail = ""
+    if len(args) > 2 and isinstance(args[2], tuple) and len(args[2]) >= 3:
+        # EXCEPINFO layout: (wcode, source, text, helpfile, helpcontext, scode)
+        source = str(args[2][1] or "").strip()
+        text = str(args[2][2] or "").strip()
+        detail = f"{source}: {text}" if source and text else (text or source)
+    message = f"COM call failed (HRESULT 0x{hresult & 0xFFFFFFFF:08X})"
+    if detail:
+        message = f"{message}: {detail}"
+    return message
+
+
 def _error_payload(request_id: str, exc: BaseException) -> dict[str, Any]:
     return {
         "protocol_version": PROTOCOL_VERSION,
@@ -134,7 +160,7 @@ def _error_payload(request_id: str, exc: BaseException) -> dict[str, Any]:
         "ok": False,
         "error": {
             "type": type(exc).__name__,
-            "message": str(exc),
+            "message": describe_com_error(exc) or str(exc),
             "traceback": traceback.format_exc(limit=12)[-8000:],
         },
     }

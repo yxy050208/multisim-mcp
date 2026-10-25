@@ -46,8 +46,10 @@ def _python_prefix() -> list[str]:
     if launcher:
         return [launcher, "-3-32"]
     raise WorkerUnavailableError(
-        "No 32-bit Python worker was found. Install 32-bit Python or set "
-        f"{WORKER_PYTHON_ENV}."
+        "No 32-bit Python worker was found. Install 32-bit Python from "
+        "https://www.python.org/downloads/windows/ (the x86 installer), verify "
+        "it with `py -3-32 --version`, or point "
+        f"{WORKER_PYTHON_ENV} at an existing 32-bit interpreter."
     )
 
 

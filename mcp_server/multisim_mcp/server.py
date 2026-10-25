@@ -177,8 +177,10 @@ from multisim_mcp.safety import (
     UNSAFE_COMMANDS_ENV,
     unsafe_commands_enabled,
     validate_analysis_commands,
+    validate_ascii_netlist_text,
     validate_spice_netlist,
 )
+from multisim_mcp.multisim_client import decode_multisim_text
 from multisim_mcp.schematic_builder import (
     COMPONENT_DEFINITIONS,
     build_schematic,
@@ -220,6 +222,23 @@ _WORKER_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="multisim-worker",
 )
 _TOOL_PROFILE = selected_tool_profile()
+
+_RATED_NAME_PATTERN = re.compile(r"ASC([A-Za-z0-9_]+_RATED)")
+
+
+def _rated_component_names(source_file: Path) -> list[str]:
+    """Names of RATED virtual parts declared by one design file.
+
+    Multisim's netlist exporter emits nothing for RATED virtual parts, so a
+    design holding any of them silently produces no export at all.
+    """
+    with tempfile.TemporaryDirectory(prefix="multisim-mcp-rated-probe-") as temp:
+        local_source = Path(temp) / "source.ms14"
+        local_xml = Path(temp) / "source.ms14.xml"
+        shutil.copy2(source_file, local_source)
+        codec.decode(str(local_source), str(local_xml))
+        text = local_xml.read_text(encoding="utf-8", errors="replace")
+    return sorted(set(_RATED_NAME_PATTERN.findall(text)))
 
 
 def _invoke_tool_on_worker_thread(function: Any, args: tuple, kwargs: dict) -> Any:
@@ -675,13 +694,21 @@ def verify_design_requirements_prompt(
 
 @mcp.tool()
 def connect() -> dict:
-    """Connect to the local Multisim Automation API."""
+    """Connect to the local Multisim Automation API.
+
+    Launches or attaches Multisim via COM. Typical order: runtime_status ->
+    connect -> open_circuit/new_circuit -> analysis tools.
+    """
     return client.connect()
 
 
 @mcp.tool()
 def runtime_status() -> dict:
-    """Check local EDA runtime compatibility without starting Multisim."""
+    """Check local EDA runtime compatibility without starting Multisim.
+
+    Call this first: it reports Python/COM readiness, template-pack
+    completeness, and the tool profile, and requires no open circuit.
+    """
     result = worker_runtime_diagnostics(_MULTISIM_WORKER)
     completeness = template_completeness()
     paths = completeness["search_paths"]
@@ -1426,7 +1453,12 @@ def disconnect() -> dict:
 
 @mcp.tool()
 def open_circuit(path: str) -> dict:
-    """Open a Multisim design file and return circuit info."""
+    """Open a Multisim design file and return circuit info.
+
+    Requires connect() first and the file must exist. Opening a second file
+    abandons the first without saving it; the response carries a warning when
+    that happens.
+    """
     return client.open_circuit(path)
 
 
@@ -1456,7 +1488,11 @@ def enum_inputs(input_type: int = 0) -> dict:
 
 @mcp.tool()
 def enum_outputs(output_type: int = 0) -> dict:
-    """List simulation outputs. 0 returns all."""
+    """List simulation outputs. 0 returns all.
+
+    Call this before set_output_request/run_transient: output names must match
+    exactly, and unknown names are rejected before any simulation starts.
+    """
     return {"outputs": client.enum_outputs(output_type)}
 
 
@@ -1468,7 +1504,10 @@ def set_output_request(
     num_samples: int = 1_000,
     repeat_flag: bool = False,
 ) -> dict:
-    """Configure an output request before RunSimulation."""
+    """Configure an output request before RunSimulation.
+
+    output_name must match an entry from enum_outputs exactly.
+    """
     return client.set_output_request(
         output_name, method, sample_rate, num_samples, repeat_flag
     )
@@ -1490,7 +1529,11 @@ def run_transient(
     timeout: float = 30.0,
     max_points: int = 2000,
 ) -> dict:
-    """Run a transient simulation and return downsampled time/real data."""
+    """Run a transient simulation and return downsampled time/real data.
+
+    Requires an open circuit and output_name from enum_outputs; unknown names
+    are rejected up front instead of timing out.
+    """
     return client.run_transient(
         output_name,
         sample_rate,
@@ -1579,7 +1622,11 @@ def stop_simulation() -> dict:
 
 @mcp.tool()
 def save_circuit(path: str | None = None) -> dict:
-    """Save the circuit, optionally to a new path."""
+    """Save the circuit, optionally to a new path.
+
+    Requires an open circuit; without a path it saves in place, with a path it
+    performs a SaveAs.
+    """
     return {"path": client.save_circuit(path)}
 
 
@@ -1629,11 +1676,27 @@ def snapshot_open_circuit(
         raise FileExistsError("snapshot output already exists; choose a new output_dir")
     exported = client.report_netlist(str(netlist_path), probes_flag, fmt)
     if not netlist_path.is_file():
-        raise RuntimeError("Multisim did not produce the requested netlist export")
-    try:
-        netlist = netlist_path.read_text(encoding="utf-8")
-    except UnicodeError as exc:
-        raise ValueError("Multisim netlist export is not UTF-8 text") from exc
+        rated: list[str] = []
+        try:
+            source = Path(str(client.circuit_info().get("file") or ""))
+            if source.is_file():
+                rated = _rated_component_names(source)
+        except Exception:
+            rated = []
+        if rated:
+            raise RuntimeError(
+                "Multisim did not produce the requested netlist export: the "
+                f"design declares RATED virtual components ({', '.join(rated)}), "
+                "which Multisim's exporter cannot netlist. Rebuild the design "
+                "with database parts (e.g. LM555CN from the Mixed/TIMER group), "
+                "save, and retry."
+            )
+        raise RuntimeError(
+            "Multisim did not produce the requested netlist export; save the "
+            "design in Multisim and retry, and check for components without "
+            "SPICE models (RATED virtual parts export nothing)"
+        )
+    netlist = decode_multisim_text(netlist_path.read_bytes())
     snapshot = build_existing_design_snapshot(
         netlist,
         circuit_info=client.circuit_info(),
@@ -1991,6 +2054,7 @@ def _run_spice_netlist_impl(
         accepted_commands = validate_analysis_commands(commands)
     simulation_netlist = prepare_simulation_netlist(netlist)
     validate_spice_netlist(simulation_netlist)
+    validate_ascii_netlist_text(simulation_netlist)
 
     run_id = f"msre_{uuid.uuid4().hex[:16]}"
     work_root = os.environ.get("MULTISIM_MCP_WORKDIR") or r"C:\msre_exp"
@@ -2116,6 +2180,8 @@ def run_spice_netlist(
     The default path rejects scripting, shell escapes, file commands, and
     arbitrary command sourcing. Unrestricted engine commands require both the
     ``unsafe_commands`` argument and an explicit server-side environment flag.
+    Note: the Multisim backend needs a document for its command engine, so if
+    no circuit is open a blank one is created and left open afterwards.
     """
     design = circuit_design_from_spice(
         netlist,

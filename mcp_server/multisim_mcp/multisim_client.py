@@ -6,6 +6,7 @@ Python interpreter.
 
 from __future__ import annotations
 
+import locale
 import math
 import os
 import platform
@@ -202,6 +203,38 @@ def clean_error(text: str) -> str:
         return text
 
 
+def decode_multisim_text(data: bytes) -> str:
+    """Decode Multisim-produced text files: UTF-8 first, then the ANSI page.
+
+    Multisim writes logs and netlist exports in the locale code page on CJK
+    Windows; strict UTF-8 decoding would mangle or reject those files.
+    """
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return data.decode(locale.getpreferredencoding(False))
+    except (UnicodeDecodeError, LookupError):
+        return data.decode("utf-8", errors="replace")
+
+
+def describe_missing_output(output_name: str, available: list[str]) -> str:
+    """Explain an unresolvable output request and point at the real names."""
+    if not available:
+        return (
+            f"transient output {output_name!r} cannot be captured: this circuit "
+            "reports no simulation outputs - place a probe or instrument first "
+            "(see enum_outputs)"
+        )
+    preview = ", ".join(available[:8])
+    more = f" (+{len(available) - 8} more)" if len(available) > 8 else ""
+    return (
+        f"transient output {output_name!r} is not one of this circuit's "
+        f"outputs ({preview}{more}); call enum_outputs for the exact names"
+    )
+
+
 def bstr_array(values: Iterable[str]) -> Any:
     require_compatible_runtime()
     return win32_client.VARIANT(
@@ -304,9 +337,25 @@ class MultisimClient:
             self._connected_by_client = False
 
     def open_circuit(self, path: str) -> dict:
+        replaced: dict[str, str] | None = None
+        if self._circuit is not None:
+            try:
+                replaced = {
+                    "name": str(self._circuit.CircuitName),
+                    "file": str(self._circuit.FileName),
+                }
+            except Exception:
+                replaced = None
         self._connect_app()
         self._circuit = self._app.OpenFile(os.path.abspath(path))
-        return self.circuit_info()
+        info = self.circuit_info()
+        if replaced is not None:
+            info["warning"] = (
+                f"replaced previously open design {replaced['name']!r} "
+                f"({replaced['file']!r}); any unsaved changes in it are not "
+                "saved - save the previous design first if needed"
+            )
+        return info
 
     def new_circuit(self) -> dict:
         self._connect_app()
@@ -497,10 +546,22 @@ class MultisimClient:
                 stop_succeeded = True
             except Exception:
                 pass
+            try:
+                available = [
+                    str(name) for name in (self.circuit.EnumOutputs(0) or ())
+                ][:20]
+            except Exception:
+                available = []
             result["missing_outputs"] = pending
             result["timed_out"] = True
             result["stop_succeeded"] = stop_succeeded
             result["last_error"] = original_error
+            result["available_outputs"] = available
+            result["hint"] = (
+                "requested outputs never became ready; compare names against "
+                "available_outputs (probe-based) or use netlist variable names "
+                "for dc/ac analyses"
+            )
             return result
 
         output_results = {
@@ -523,6 +584,15 @@ class MultisimClient:
         max_points: int = 2000,
     ) -> dict:
         circuit = self.circuit
+        try:
+            available = [str(name) for name in (circuit.EnumOutputs(0) or ())]
+        except Exception:
+            available = []
+        if available and str(output_name) not in available:
+            # SetOutputRequest accepts any string, but OutputReady only ever
+            # fires for names the circuit actually exposes, so an unknown name
+            # would silently burn the whole timeout.
+            raise ValueError(describe_missing_output(str(output_name), available))
         self.clear_output_request(output_name)
         try:
             circuit.StopSimulation()
@@ -848,8 +918,8 @@ class MultisimClient:
             "log_exists": os.path.exists(log_file),
         }
         if os.path.exists(log_file):
-            with open(log_file, "r", encoding="utf-8", errors="replace") as fh:
-                result["log"] = fh.read()
+            with open(log_file, "rb") as fh:
+                result["log"] = decode_multisim_text(fh.read())
         return result
 
     def get_rlc_value(self, component_name: str) -> dict:

@@ -186,11 +186,36 @@ def validate_spice_netlist(netlist: str) -> None:
         raise ValueError("Unclosed .if block")
 
 
+def validate_ascii_netlist_text(netlist: str) -> None:
+    """Reject non-ASCII identifiers before a netlist reaches Multisim.
+
+    Multisim's command engine reads netlist files in the ANSI code page, so
+    non-ASCII net or component names are decoded as different bytes and
+    silently misalign the circuit. Comment lines (``*``, ``;``, ``#``) are
+    exempt: they never participate in the simulation.
+    """
+    for line_number, raw_line in enumerate(netlist.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith(("*", ";", "#")):
+            continue
+        try:
+            line.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError(
+                f"Non-ASCII text on netlist line {line_number} "
+                f"({line[:60]!r}): Multisim's command engine reads netlists "
+                "in ANSI, so non-ASCII net or component names misalign the "
+                "circuit - rename identifiers to ASCII (comments may stay "
+                "non-ASCII)"
+            ) from exc
+
+
 __all__ = [
     "NPX_DOWNLOAD_ENV",
     "UNSAFE_COMMANDS_ENV",
     "env_flag",
     "unsafe_commands_enabled",
     "validate_analysis_commands",
+    "validate_ascii_netlist_text",
     "validate_spice_netlist",
 ]

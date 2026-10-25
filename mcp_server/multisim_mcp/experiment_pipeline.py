@@ -24,7 +24,12 @@ from .design_verification import DesignRequirement, verify_requirements
 from .experiment_resources import experiment_id_for_output_dir, register_experiment
 from .formal_report import export_formal_reports
 from .job_engine import output_lease
-from .safety import validate_analysis_commands, validate_spice_netlist
+from .multisim_client import decode_multisim_text
+from .safety import (
+    validate_analysis_commands,
+    validate_ascii_netlist_text,
+    validate_spice_netlist,
+)
 from .spice_raw import parse_raw, plot_svg
 from .spice_provenance import audit_spice_compatibility
 from .simulation_approvals import validate_experiment_approval_provenance
@@ -414,7 +419,9 @@ class MultisimExperimentPipeline:
         notify("preflight", 3, "Validating netlist, commands, and output destinations")
         accepted = validate_analysis_commands(commands)
         validate_spice_netlist(netlist)
-        validate_spice_netlist(expand_component_adapters(netlist))
+        expanded_netlist = expand_component_adapters(netlist)
+        validate_spice_netlist(expanded_netlist)
+        validate_ascii_netlist_text(expanded_netlist)
         root.mkdir(parents=True, exist_ok=True)
         manifest_names = (
             *self._schematic_artifact_names,
@@ -565,14 +572,12 @@ class MultisimExperimentPipeline:
             solver_output = ""
             solver_log = stage / "run.log"
             if solver_log.is_file() and solver_log.stat().st_size <= 262_144:
-                solver_output = solver_log.read_text(
-                    encoding="utf-8", errors="replace"
-                )
+                solver_output = decode_multisim_text(solver_log.read_bytes())
             executed_netlist = netlist
             executed_netlist_path = stage / "circuit.cir"
             if executed_netlist_path.is_file() and executed_netlist_path.stat().st_size <= 4_000_000:
-                executed_netlist = executed_netlist_path.read_text(
-                    encoding="utf-8", errors="replace"
+                executed_netlist = decode_multisim_text(
+                    executed_netlist_path.read_bytes()
                 )
             compatibility = audit_spice_compatibility(
                 netlist,
