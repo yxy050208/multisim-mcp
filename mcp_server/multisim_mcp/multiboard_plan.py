@@ -200,7 +200,9 @@ def _normalize_connector_contract(
                 if text_field in raw_pin:
                     pin[text_field] = _text(raw_pin[text_field], f"connectors[{index}].pins[{pin_index}].{text_field}", required=False)
             pins.append(pin)
-            if net in seen_nets:
+            # Two separate physical return pins may share the same ground net.
+            # Keep every pin in the contract and native named-pin readback.
+            if net in seen_nets and net.casefold() not in _GROUND_NETS:
                 violations.append({"connector": connector_id, "pin": number, "constraint": "duplicate_net", "message": f"net {net!r} is assigned to more than one connector pin"})
             seen_nets.add(net)
             expected_boards = expected_by_net.get(net)
@@ -895,8 +897,6 @@ def rank_partition_candidates(
     if any(not board_id for board_id in board_ids) or len(set(board_ids)) != len(board_ids):
         raise ValueError("boards require unique non-empty ids")
     refs = [str(item["refdes"]) for item in components]
-    if len(refs) > 10:
-        raise ValueError("enumeration is limited to 10 components; use a solver for larger designs")
     fixed_boards: dict[int, str] = {}
     for index, component in enumerate(components):
         if not isinstance(component, Mapping):
@@ -907,6 +907,8 @@ def rank_partition_candidates(
                 raise ValueError(f"component {refs[index]!r} has invalid fixed board {board_id!r}")
             fixed_boards[index] = board_id
     variable_indices = [index for index in range(len(refs)) if index not in fixed_boards]
+    if len(refs) > 10 and variable_indices:
+        raise ValueError("enumeration is limited to 10 components; larger designs require fully fixed assignments")
     candidates: list[dict[str, Any]] = []
     for variable_assignment in product(board_ids, repeat=len(variable_indices)):
         selected = dict(zip(variable_indices, variable_assignment))

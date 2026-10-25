@@ -147,6 +147,18 @@ class ReadOnlyEdaToolsTest(unittest.TestCase):
             _invoke(binding, {}, event)
 
 
+    def test_license_placeholder_stays_a_gap_without_exposing_private_source(self) -> None:
+        for license_value in ("pending", "NOASSERTION", "待核对"):
+            with self.subTest(license=license_value):
+                design = CircuitDesign(
+                    design_id="local-model", title="Model reference", source_netlist="R1 a 0 1k\n.end\n",
+                    model_references=(ModelReference("MODEL", "private-library", "a" * 64, license_value),),
+                )
+                result = _invoke(_binding_map(design)["eda_run_structural_checks"], {})
+                self.assertIn("model-license-absent", result["code_counts"])
+                self.assertNotIn("private-library", json.dumps(result))
+
+
 class _ScriptedProvider:
     provider_id = "fixture"
     model = "fixture-model"

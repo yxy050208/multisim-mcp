@@ -52,3 +52,10 @@ Multisim 的瞬态求解器会为独立板选择不同的自适应采样轴。�
 第二个案例的证据位于 `C:\path\to\multisim-evidence\multiboard-digital-20261009-mixed-v2`。该案例最初暴露出完整参考工程中的 `clk` 探针落在 `data` 线的交点，Multisim 重开后丢弃探针；生成器现已在选点阶段排除其他网络线段，修复后再次通过三种原生分析。
 
 这些结果只证明该案例在 Multisim 14.3 上的闭环，不外推到其他连接器、元件型号或 Multisim 版本。目标版本没有独立 manifest 或实机验收时，运行器仍会失败关闭。
+
+2026-10-16 在同一台 Windows 11/Multisim 14.3 环境重新执行两个案例的完整 DC、TRAN、
+AC 矩阵，共 `6/6` 次 `accepted/native-verified`。两块板的生成、保存重开、拓扑、布局、
+原生分析、HDR1X4 接口值/序列和完整参考比较均通过；远端 `io_out` 负载保留。新证据目录
+为本机 `release/multiboard-digital-native-matrix-20261016-pack`，模板包、`.ms14`、XML、
+波形和报告均未提交仓库。该结果仍只覆盖这两个固定合同，不代表任意双板数字电路或
+跨版本 Multisim 兼容。

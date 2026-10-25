@@ -20,8 +20,10 @@ from multisim_mcp.experiment_resources import (
     read_binary_artifact,
     read_text_artifact,
     register_experiment,
+    summarize_experiment,
 )
 from multisim_mcp.job_engine import ExperimentJobManager
+from multisim_mcp.model_provenance import build_model_provenance
 from multisim_mcp.server import mcp
 
 TEXT_ARTIFACTS = {
@@ -151,8 +153,57 @@ class ExperimentResourceRegistryTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     read_binary_artifact(experiment_id, "schematic")
 
+    def test_summary_exposes_bounded_model_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_experiment(root)
+            provenance = build_model_provenance(
+                [{
+                    "name": "model:DMOD",
+                    "source": "models/dmod.lib",
+                    "sha256": "a" * 64,
+                    "license": "MIT",
+                }]
+            )
+            (root / "spice-compatibility.json").write_text(
+                json.dumps({
+                    "dialect": {"name": "SPICE3", "source": "explicit-input"},
+                    "backend": {"backend_id": "ngspice", "compatibility_status": "portable-static-subset", "solver_version": "45"},
+                    "summary": {"risk_level": "low", "provenance_complete": True, "model_count": 1, "unknown_license_count": 0},
+                    "netlist": {"sha256": "b" * 64},
+                    "model_fingerprint_sha256": "c" * 64,
+                    "model_provenance": provenance,
+                }),
+                encoding="utf-8",
+            )
+            experiment_id = register_experiment(str(root))["experiment_id"]
+            summary = summarize_experiment(experiment_id)
+            model_provenance = summary["spice_compatibility"]["model_provenance"]
+            self.assertEqual(model_provenance["provenance_sha256"], provenance["provenance_sha256"])
+            self.assertEqual(model_provenance["models"][0]["name"], "model:DMOD")
+
 
 class McpExperimentResourceTest(unittest.IsolatedAsyncioTestCase):
+    async def test_capability_contract_and_component_catalog_share_exact_mappings(self) -> None:
+        from multisim_mcp import __version__, server
+        from multisim_mcp.api_contract import build_capabilities
+
+        with patch.object(server, "worker_runtime_diagnostics", return_value={"runtime_compatible": True}):
+            async with Client(mcp) as client:
+                result = await client.call_tool("runtime_status", {"target_version": "14.3"})
+                catalog = await client.call_tool("schematic_component_catalog", {"target_version": "14.3"})
+        self.assertFalse(result.is_error)
+        self.assertFalse(catalog.is_error)
+        runtime = json.loads(result.content[0].text)
+        catalog_payload = json.loads(catalog.content[0].text)
+        expected = build_capabilities(server_version=__version__, tool_profile=runtime["tool_profile"], target_version="14.3")
+        self.assertEqual(runtime["api_contract"], expected)
+        self.assertEqual(catalog_payload["versioned_components"], expected["engineering"]["component_mappings"])
+        native = {item["kind"]: item for item in catalog_payload["native"]}
+        self.assertEqual(native["R"]["versioned_mapping_status"], "recorded-native-verified")
+        self.assertEqual(native["H"]["versioned_mapping_status"], "not-listed")
+        self.assertFalse(runtime["engineering_runtime"]["current_machine_native_verified"])
+
     async def test_text_and_binary_resources_are_protocol_readable(self) -> None:
         clear_experiment_registry()
         try:

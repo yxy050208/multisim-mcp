@@ -12,8 +12,8 @@ from typing import Any
 
 from .preferred_values import parse_spice_scalar
 from .schematic_builder import parse_netlist
+from .ideal_models import OPEN_LOOP_GAIN
 
-OPEN_LOOP_GAIN = 100000.0
 
 
 def scalar(value: str) -> float:

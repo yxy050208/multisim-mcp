@@ -19,6 +19,46 @@ volatile diagnostics stay outside the contract. The existing MCP tool and resour
 counts are unchanged. The loopback Workbench API exposes the same object through
 the read-only `GET /api/capabilities` route for an early UI handshake.
 
+新增 `api_contract.engineering`，区分旧目录标签、受限工作流、统一编译支持、精确版本
+元件清单和有范围的历史原生案例。MCP `runtime_status` 和元件目录支持可选
+`target_version`；本机 API 支持 `?target_version=14.3`；CLI 使用
+`multisim-mcp capabilities --target-version 14.3 --json`。同一 profile 与目标版本共用
+同一契约。实时依赖说明保留在 `runtime_status.engineering_runtime`，不会混入可缓存
+契约；请求版本不是检测版本，记录成功也不是当前机器认证。
+字段说明和示例见 [工程能力发现](ENGINEERING_CAPABILITIES.md)。
+统一编译矩阵包含无源方案与显式 `ideal-opamp5` 有源调理预览；后者的模型、输入/输出、
+源阻抗、负载及数值范围合同见 [有源编译合同](ACTIVE_SIGNAL_COMPILER.md)，新模板的
+基础无激励预览仍为 `unverified-for-this-template`；显式 DC/AC 夹具、独立审阅与
+`run_generated_analog_project` 的精确网表绑定已增加。能力发现用独立的
+`fixture_support` 和 `ideal-signal-fixture` 案例记录说明该路径的 Multisim 14.3 验收范围，
+见 [原生夹具合同](ACTIVE_SIGNAL_NATIVE_ACCEPTANCE_20261011.md)。
+
+## Agent 工作流合同 / Agent workflow contract
+
+`api_contract.agent_workflow` 描述 ARTEX 风格工程工作台可以复用的传输无关合同，当前
+schema 为 `1`，包含 `AgentTask`、`TaskChain`、`ArtifactRef`、`ApprovalGate` 和
+`TaskEvent` 五类对象。它只描述需求规划、成图、实验、优化和报告之间的依赖与状态，
+不会授予模型直接写文件、访问任意路径或绕过审批的能力。
+
+`TaskChain` 是经过 DAG 校验的有向任务图；`AgentTask` 的输入是有限 JSON，输出只能引用
+不含主机绝对路径的 `ArtifactRef`；`ApprovalGate` 只暴露审批 ID 和摘要，不携带 bearer
+token；`TaskEvent.event_id` 根据事件内容确定性生成，便于 Workbench/SSE 去重。现有
+durable job 的 `queued/running/succeeded/...` 状态和存储格式保持不变，后续编排器可以把
+它们映射为任务链节点而无需迁移历史作业。
+
+当前合同已经进入能力发现，尚未把任何模型自动绑定到真实 Multisim 执行。下一步会将
+现有方案规划、网表编译、布局验证、原生实验、参数优化和报告服务逐个接入节点执行器，
+并为前端提供只读任务链和审批状态。
+
+Loopback Workbench 现在提供只读 `POST /api/agent-workflow/plan`，接收需求文本、可选
+`model_profiles` 和 `include_optimization`，返回同一版 `TaskChain`。它只生成审阅图，
+`execution_started=false`，不会调用模型、写文件或启动 Multisim。
+
+后端的 `AgentWorkflowExecutor` 是独立的节点状态机：调用方注入任务类型处理器，执行器
+负责依赖顺序、审批暂停、有限重试、失败关闭和 `TaskEvent` 事件。当前默认处理器只连接
+需求审查和 `plan_design_options`，用于验证任务链交接；网表编译、布局、原生实验、优化
+和报告处理器会分别绑定到已有应用服务，并继续沿用各自的审批和原生验收门禁。
+
 ## 统一错误 / Structured errors
 
 CLI 的 `--json` 错误以及后续适配器应使用同一嵌套错误对象：
@@ -111,6 +151,25 @@ Agent 应先调用 `plan_*` 查看结构化合同，再调用对应的 RC、RLC 
 `unverified`、`target-not-met` 和 `failed` 都必须展示为未通过，不能仅凭生成了 `.ms14`
 就宣称电路正确。
 
+参数优化完成后，可调用 `evaluate_optimization_layout`，传入优化目录和基线元件坐标。
+该工具会重放每个候选 patch，执行有界单板布局/布线预检，并返回电气与几何联合排名；
+`materialize=true` 只表示已生成候选工程，返回的 `native_acceptance=pending` 仍需在
+目标 Multisim 版本中保存重开、回读拓扑并完成仿真验收。
+
+### 模型来源合同 / Model provenance contract
+
+实验的 `spice-compatibility.json` 现在包含统一的 `model_provenance` 对象。它把
+`CircuitDesign.model_references` 的 `source` 形状和元件选择的 `model_source.uri`
+形状归一为同一组有界声明，并记录 `name`、`source`、`sha256`、`license`、各自的
+`sha256_status`/`license_status`、`model_count` 和确定性的 `provenance_sha256`。
+该对象只记录调用方声明，不读取或下载模型，也不授予模型再分发权。
+
+同一对象（或其完整等价副本）会写入实验目录 manifest 的 `metadata.model_provenance`；
+Markdown/HTML 报告展示 digest，`get_experiment_summary` 返回最多 64 个模型声明并以
+`models_truncated` 标明截断。缺少 SHA-256 或许可证不会被静默补全，而是保持
+`missing`/`unknown`，因此 `summary.provenance_complete=false` 时只能声明为待审计。
+客户端应优先使用 digest 比较不同候选的模型来源，不要把 `source` 当作可执行路径。
+
 当显式连接器合同与目标版本 manifest 匹配时，原生多板阶段会把每块板的物理实例加入
 结构化设计，并输出与 pin 顺序一致的 `XJ<n> ... <native_name>` 记录；14.3 的
 `HDR1X4` 已完成这一闭环。目标版本缺少 `verified` 映射时，物化结果保持
@@ -173,6 +232,14 @@ DC operating point，并支持显式 `analysis=tran` 或 `analysis=ac`。验收�
 
 ## 模型工程后端入口 / Model engineering handoff
 
+已有多板 MCP 工具额外接受成对的 `executable_netlist` / `netlist_approval`，用于已审核
+`signal-active` 显式夹具的固定传感器/调理双板合同。规划时可省略 `request`，执行时传
+`request: null` 自动推导；若提供请求，板归属、元件、引脚、源与夹具必须完全一致。
+此分支只支持 Multisim 14.3、DC/AC、严格相同采样轴、最多 2000 点及显式理想模型。
+返回 `signal-acceptance.json` 为最终判定，并导出独立板图/组件清单与带夹具实验工程。
+它不会增加 MCP 工具数、替换既有通用多板接口或提供联合优化。示例、产物与适用范围见
+[`SIGNAL_MULTIBOARD_NATIVE_ACCEPTANCE_20261011.md`](SIGNAL_MULTIBOARD_NATIVE_ACCEPTANCE_20261011.md)。
+
 未来独立软件可调用以下 loopback 后端入口；两者复用 MCP/CLI 的同一审计服务：
 
 ```text
@@ -183,6 +250,59 @@ POST /api/model-engineering/run
 请求至少包含 `text`；执行请求还必须提供新的 `output_dir`，并显式设置 `execute: true`
 才会写入工程、启动原生仿真或导出报告。`execute: false` 只返回模型提案和一致性结果。
 该入口当前继承自然语言 RC 合同范围，不能宣称支持任意电路生成。
+
+## 补丁候选对比 / DesignPatch comparison
+
+`compare_design_variants` 除了接收完整 `design` 候选，还可以接收同一份
+`base_design` 下的 `{variant_id, patch}` 候选。服务会先用 compare-and-swap 的
+`DesignPatch` 合同在内存中校验并生成候选，再对基线和候选执行同一实验规格、硬约束
+和实测排名。候选目录会同时保存 `variants/<id>.json` 与
+`variants/<id>.patch.json`，目录 manifest 会把后者标为 `variant-patch`。
+这只是只读评估；即使候选通过，也需要单独的补丁审批和采纳步骤，源工程不会被自动修改。
+
+补丁的持久化应用、回滚和崩溃恢复由 `DesignPatchApplicationService` 统一编排；CLI
+只是参数/令牌适配层，底层仍使用一次性审批、目标锁、事务回执和 journal。已验证的
+“先实验、后提交”流程也通过同一服务入口，只有全部硬约束通过才会提交候选。MCP 或
+Workbench 适配器应复用该应用服务，不应直接操作 `DesignPatch` 文件或复制事务逻辑。
+
+Workbench 的写入适配默认关闭；启动 `workbench-api` 或 `workbench` 时显式加入
+`--enable-writes` 才会开放以下 loopback 路由：
+
+```text
+POST /api/design-patch/approve
+POST /api/design-patch/apply
+POST /api/design-patch/revert
+POST /api/design-patch/recover
+POST /api/design-patch/verified-approve
+POST /api/design-patch/verified-apply
+POST /api/design-patch/verified-recover
+```
+
+这些路由只接受项目根目录内的设计、补丁、回执、journal 和令牌文件；审批路由把一次性
+令牌直接写入调用方指定的本地文件，HTTP 响应永远不返回 bearer token。默认模式仍返回
+`403 permission_denied`，不会因为浏览器能访问 Workbench 就获得写入能力。
+验证后提交路由还要求验证计划、实验目录和 workflow manifest 位于项目根目录内；
+只有真实实验返回全部硬约束通过才会提交，失败候选会保留为失败状态而不写回源设计。
+
+MCP `full` profile 现在也提供同一应用服务的写入适配器：
+
+```text
+approve_design_patch
+apply_design_patch
+revert_design_patch
+recover_design_patch
+approve_verified_design_patch
+apply_verified_design_patch
+recover_verified_design_patch
+```
+
+`approve_*` 工具必须接收调用方指定的 `token_output`，只把一次性令牌写入本地
+ASCII 文件，响应不含 `approval_token`。`apply_*` / `revert_*` 只接收
+`approval_token_file` 并在服务层读取令牌；MCP 不接受模型直接传 bearer token。
+基础执行返回是否写入、是否提交、是否执行仿真和审批是否消费；验证后执行还返回
+实验状态、workflow manifest、回执入口以及失败候选是否保持未提交。`recover_*` 会继续
+执行 PID、journal、摘要和回执校验，不能绕过恢复安全门禁。新工具只加入 `full`，
+`core`、`experiment` 和 `optimization` profile 的既有发现集合保持不变。
 
 ## 兼容策略 / Compatibility
 

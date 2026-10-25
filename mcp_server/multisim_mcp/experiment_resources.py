@@ -15,6 +15,7 @@ from typing import Any, Final
 from typing_extensions import TypedDict
 
 from multisim_mcp.spice_raw import parse_raw, summarize_columns
+from multisim_mcp.model_provenance import validate_model_provenance
 
 
 class ArtifactDescriptor(TypedDict):
@@ -579,6 +580,25 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
             dialect = parsed_compatibility.get("dialect")
             backend = parsed_compatibility.get("backend")
             summary = parsed_compatibility.get("summary")
+            raw_model_provenance = parsed_compatibility.get("model_provenance")
+            model_provenance: dict[str, Any] | None = None
+            if raw_model_provenance is not None:
+                validated_model_provenance = validate_model_provenance(
+                    raw_model_provenance
+                )
+                model_provenance = {
+                    "schema_version": validated_model_provenance["schema_version"],
+                    "kind": validated_model_provenance["kind"],
+                    "model_count": validated_model_provenance["model_count"],
+                    "provenance_complete": validated_model_provenance[
+                        "provenance_complete"
+                    ],
+                    "provenance_sha256": validated_model_provenance[
+                        "provenance_sha256"
+                    ],
+                    "models": validated_model_provenance["models"][:64],
+                    "models_truncated": len(validated_model_provenance["models"]) > 64,
+                }
             compatibility = {
                 "available": True,
                 "valid_json": True,
@@ -625,6 +645,7 @@ def summarize_experiment(experiment_id: str) -> dict[str, Any]:
                 "model_fingerprint_sha256": parsed_compatibility.get(
                     "model_fingerprint_sha256"
                 ),
+                "model_provenance": model_provenance,
             }
         except (json.JSONDecodeError, OSError, UnicodeError, ValueError) as exc:
             compatibility = {

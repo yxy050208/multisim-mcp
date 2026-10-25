@@ -22,6 +22,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
+from .model_provenance import validated_model_source
+from .ideal_models import IDEAL_OPAMP5_SHA256, IDEAL_OPAMP5_SOURCE, ideal_opamp5_contract
+
 
 COMPONENT_RESOLUTION_SCHEMA_VERSION: Final = 1
 COMPONENT_RESOLUTION_GENERATOR_VERSION: Final = "0.1.0"
@@ -85,6 +88,7 @@ _NATIVE_KIND_BY_FAMILY: Final[dict[str, str]] = {
     # part and versioned pin mapping are supplied.
     "connector:hdr1x4": "HDR1X4",
     "op-amp-integrator": "OPAMP5",
+    "ideal-opamp5": "OPAMP5",
     "rail-to-rail-op-amp": "OPAMP5",
     "instrumentation-amplifier": "OPAMP5",
     "op-amp-buffer": "OPAMP5",
@@ -216,6 +220,7 @@ _FAMILY_LABELS: Final[dict[str, tuple[str, str]]] = {
     "transistor-buffer": ("晶体管缓冲", "Transistor buffer"),
     "potentiometer": ("电位器", "Potentiometer"),
     "rail-to-rail-op-amp": ("轨到轨运放", "Rail-to-rail op-amp"),
+    "ideal-opamp5": ("理想五引脚运放（非实物器件）", "Ideal five-pin op-amp (not a physical device)"),
     "op-amp-integrator": ("运放积分器", "Op-amp integrator"),
     "instrumentation-amplifier": ("仪表放大器", "Instrumentation amplifier"),
     "op-amp-buffer": ("运放缓冲", "Op-amp buffer"),
@@ -395,6 +400,8 @@ def _derived_value(draft: Mapping[str, Any], constraint_id: str) -> float | None
 
 
 def _rating_requirements(family: str, context: Mapping[str, Any], draft: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if family == "ideal-opamp5":
+        return []
     voltage_values = [
         abs(context[key]) for key in (
             "supply_voltage_v", "dc_bus_voltage_v", "motor_rated_voltage_v", "input_min_v", "input_max_v", "output_min_v", "output_max_v"
@@ -466,6 +473,11 @@ def _catalog_candidate(requirement_id: str, family: str, context: Mapping[str, A
         model_requirement = "not-required"
         model_status = "not-applicable"
         confidence = "high"
+    elif family == "ideal-opamp5":
+        implementation = "built-in-ideal-model"
+        model_requirement = "explicit-ideal-model-review"
+        model_status = "built-in-ideal-model"
+        confidence = "high"
     elif adapter_kind:
         implementation = "portable-adapter"
         model_requirement = "portable-adapter"
@@ -477,7 +489,7 @@ def _catalog_candidate(requirement_id: str, family: str, context: Mapping[str, A
         model_status = "pending-model-source"
         confidence = "low"
     label_zh, label_en = _FAMILY_LABELS[family]
-    return {
+    candidate = {
         "candidate_id": f"cand-{requirement_id}-{family}",
         "family": family,
         "label_zh": label_zh,
@@ -498,6 +510,16 @@ def _catalog_candidate(requirement_id: str, family: str, context: Mapping[str, A
         "part_number": None,
         "notes": "候选族仅用于审阅；尚未锁定具体型号。",
     }
+    if family == "ideal-opamp5":
+        candidate["provenance"] = {
+            "source": IDEAL_OPAMP5_SOURCE,
+            "source_status": "built-in-ideal-model",
+            "model_sha256": IDEAL_OPAMP5_SHA256,
+            "license_status": "MIT",
+        }
+        candidate["model_contract"] = ideal_opamp5_contract()
+        candidate["notes"] = "显式理想 VCVS 模型；不声明轨到轨、带宽、限流或实物器件额定值。"
+    return candidate
 
 
 def _selection(value: Any, candidate_list: Sequence[Mapping[str, Any]], requirement_id: str) -> dict[str, Any]:
@@ -529,6 +551,13 @@ def _selection(value: Any, candidate_list: Sequence[Mapping[str, Any]], requirem
     candidate_id = candidate["candidate_id"]
     if payload.get("candidate_id") is not None and payload.get("candidate_id") != candidate_id:
         raise ValueError(f"selection {requirement_id}.candidate_id does not match family")
+    if chosen_family == "ideal-opamp5" and any(
+        payload.get(key) is not None for key in (
+            "part_number", "model_source", "voltage_rating_v", "current_rating_a",
+            "frequency_rating_hz", "temperature_rating_c",
+        )
+    ):
+        raise ValueError(f"selection {requirement_id}: ideal-opamp5 cannot declare a vendor part, external model or physical ratings")
     part_number = payload.get("part_number")
     if part_number is not None:
         if not isinstance(part_number, str) or not part_number.strip() or len(part_number) > 160 or "\x00" in part_number:
@@ -538,21 +567,16 @@ def _selection(value: Any, candidate_list: Sequence[Mapping[str, Any]], requirem
     if model_source is not None:
         if not isinstance(model_source, Mapping):
             raise ValueError(f"selection {requirement_id}.model_source must be an object")
-        allowed_source = {"name", "uri", "sha256", "license"}
-        unknown_source = set(model_source) - allowed_source
-        if unknown_source:
-            raise ValueError(f"selection {requirement_id}.model_source contains unknown fields: {sorted(unknown_source)}")
-        if not isinstance(model_source.get("name"), str) or not model_source["name"].strip():
-            raise ValueError(f"selection {requirement_id}.model_source.name is required")
-        sha256 = model_source.get("sha256")
-        if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", sha256):
-            raise ValueError(f"selection {requirement_id}.model_source.sha256 must be a SHA-256 digest")
+        try:
+            model_source = validated_model_source(model_source)
+        except ValueError as exc:
+            raise ValueError(f"selection {requirement_id}.{exc}") from exc
         candidate["provenance"] = {
-            "source": model_source["name"].strip()[:160],
+            "source": model_source["name"],
             "source_status": "provided-not-verified",
-            "model_sha256": sha256.lower(),
-            "license_status": str(model_source.get("license", "pending"))[:80],
-            "uri": str(model_source.get("uri", ""))[:300],
+            "model_sha256": model_source["sha256"],
+            "license_status": model_source["license"],
+            "uri": model_source["uri"],
         }
         candidate["model_status"] = "provided-not-verified"
     rating_values: dict[str, float] = {}
@@ -711,7 +735,7 @@ def resolve_component_requirements(
     all_ratings_passed = all(item["rating_status"] in {"passed", "not-required"} for item in resolved_requirements)
     models_ready = all(
         item["model_status"]
-        in {"not-applicable", "portable-adapter-available", "provided-not-verified"}
+        in {"not-applicable", "portable-adapter-available", "provided-not-verified", "built-in-ideal-model"}
         for item in resolved_requirements
     )
     if not all_selected:

@@ -4,6 +4,10 @@ import hashlib
 import unittest
 
 from multisim_mcp.component_adapters import expand_component_adapters
+from multisim_mcp.model_provenance import (
+    build_model_provenance,
+    validate_model_provenance,
+)
 from multisim_mcp.spice_provenance import (
     audit_spice_compatibility,
     compare_spice_compatibility_audits,
@@ -11,6 +15,52 @@ from multisim_mcp.spice_provenance import (
 
 
 class SpiceProvenanceTest(unittest.TestCase):
+    def test_model_provenance_normalizes_design_and_component_shapes(self) -> None:
+        digest = "a" * 64
+        result = build_model_provenance(
+            [
+                {
+                    "name": "model:B",
+                    "source": "models/b.lib",
+                    "sha256": digest,
+                    "license": "MIT",
+                },
+                {
+                    "name": "model:A",
+                    "uri": "models/a.lib",
+                    "sha256": digest,
+                    "license": "BSD-3-Clause",
+                },
+            ]
+        )
+        self.assertEqual([item["name"] for item in result["models"]], ["model:A", "model:B"])
+        self.assertTrue(result["provenance_complete"])
+        self.assertEqual(validate_model_provenance(result), result)
+
+    def test_model_provenance_keeps_missing_declarations_explicit(self) -> None:
+        result = build_model_provenance(
+            [{"name": "external-model", "source": "vendor-library"}]
+        )
+        self.assertFalse(result["provenance_complete"])
+        self.assertEqual(result["models"][0]["sha256_status"], "missing")
+        self.assertEqual(result["models"][0]["license_status"], "unknown")
+
+    def test_unreviewed_license_is_unknown_for_embedded_and_external_references(self) -> None:
+        for license_value in ("pending", "unreviewed", "NOASSERTION", "待核对", "unknown"):
+            for name in ("model:DMOD", "external-model"):
+                with self.subTest(license=license_value, name=name):
+                    definition = ".model DMOD D"
+                    result = audit_spice_compatibility(
+                        f"D1 in 0 DMOD\n{definition}\n.end\n",
+                        backend_id="ngspice", declared_dialect="SPICE3", solver_output="ngspice-45",
+                        model_references=[{
+                            "name": name, "source": "local", "license": license_value,
+                            "sha256": hashlib.sha256(definition.encode()).hexdigest(),
+                        }],
+                    )
+                    self.assertFalse(result["summary"]["provenance_complete"])
+                    self.assertTrue(all(item["license_status"] == "unknown" for item in result["models"]))
+
     def test_verifies_inline_model_hash_license_dialect_and_solver(self) -> None:
         definition = ".model DMOD D(IS=1e-14)"
         netlist = f"V1 in 0 5\nD1 in 0 DMOD\n{definition}\n.end\n"
@@ -34,6 +84,7 @@ class SpiceProvenanceTest(unittest.TestCase):
         self.assertEqual(result["models"][0]["hash_status"], "verified")
         self.assertEqual(result["models"][0]["license_status"], "declared")
         self.assertTrue(result["summary"]["provenance_complete"])
+        self.assertEqual(validate_model_provenance(result["model_provenance"]), result["model_provenance"])
 
     def test_hash_mismatch_and_unresolved_model_fail_closed_as_evidence(self) -> None:
         mismatched = audit_spice_compatibility(

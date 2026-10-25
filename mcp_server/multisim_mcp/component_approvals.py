@@ -20,12 +20,12 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from .component_resolution import resolve_component_requirements
+from .model_provenance import has_declared_model_license
 
 
 COMPONENT_APPROVAL_SCHEMA_VERSION: Final = 1
 COMPONENT_APPROVAL_GENERATOR_VERSION: Final = "0.1.0"
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
-_UNREVIEWED_LICENSES = frozenset({"", "pending", "unknown", "unreviewed", "none"})
 
 
 def _digest(value: object) -> str:
@@ -119,6 +119,8 @@ def _approval_payload(approval: Mapping[str, Any], resolution: Mapping[str, Any]
 
 def _model_provenance_status(candidate: Mapping[str, Any]) -> str:
     status = candidate.get("model_status")
+    if status == "built-in-ideal-model":
+        return "built-in-ideal-model-reviewed"
     if status in {"not-applicable", "portable-adapter-available"}:
         return "not-required" if status == "not-applicable" else "portable-adapter-reviewed"
     if status != "provided-not-verified":
@@ -132,8 +134,7 @@ def _model_provenance_status(candidate: Mapping[str, Any]) -> str:
     source = provenance.get("source")
     if not isinstance(source, str) or not source.strip():
         return "missing-source"
-    license_status = str(provenance.get("license_status", "")).strip()
-    if license_status.casefold() in _UNREVIEWED_LICENSES:
+    if not has_declared_model_license(provenance.get("license_status")):
         return "unreviewed-license"
     return "human-reviewed-provenance"
 

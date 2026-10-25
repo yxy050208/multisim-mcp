@@ -25,9 +25,11 @@ be running, and the source file is only replaced when the caller asks for it.
 """
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 import xml.etree.ElementTree as ET
@@ -41,6 +43,9 @@ __all__ = [
     "set_component_positions",
     "collect_placement",
     "set_sheet_size",
+    "optimize_layout_positions",
+    "materialize_layout_positions",
+    "apply_optimized_layout_candidate",
 ]
 
 # Extra clearance around a component's pin hull so pin-escape segments and
@@ -171,6 +176,38 @@ def _wire_table(root: ET.Element) -> list[tuple[ET.Element, ET.Element, str, str
                 link.get("Node", ""),
             ))
     return wires
+
+
+def _auxiliary_endpoint_owners(root: ET.Element) -> dict[str, str]:
+    """Return endpoint owners for probe symbols excluded from component placement.
+
+    Output probes are represented by ``CiProbeExtComp`` rather than a normal
+    ``CiComponent``.  Their wire endpoints still need an owner during reroute;
+    otherwise the router treats the probe pin as an endpoint inside an unknown
+    obstacle and falls back to a plain elbow.
+    """
+    parent = _parent_map(root)
+    symbol_by_id = {
+        item.get("ID", ""): item
+        for item in root.iter("Item")
+        if item.find("./CIITSymbolComp") is not None
+    }
+    owners: dict[str, str] = {}
+    for probe in root.iter("CiProbeExtComp"):
+        local = probe.get("LocalName", "")
+        symbol_item = symbol_by_id.get(probe.get("SymCompID", ""))
+        if not local or symbol_item is None:
+            continue
+        refdes = local[4:] if local.startswith("&ASC") else local
+        symbol = symbol_item.find("./CIITSymbolComp")
+        if symbol is None:
+            continue
+        for connector in symbol.iter("CIITPinConnectorComp"):
+            wrapper = parent.get(connector)
+            link = connector.find("./ConnectList/Item")
+            if wrapper is not None and wrapper.get("ID") and link is not None and link.get("ID"):
+                owners[link.get("ID", "")] = refdes
+    return owners
 
 
 def _wire_segments(link: ET.Element) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -396,6 +433,7 @@ def set_component_positions(
             for refdes, record in placement.items()
             for endpoint_id in record["endpoint_ids"]
         }
+        endpoint_owner.update(_auxiliary_endpoint_owners(root))
 
         # --- re-route every wire that touches a moved endpoint -------------
         # `occupied` only covers wires that will NOT move, so the reroutes are
@@ -707,6 +745,26 @@ def validate_layout_positions(
         p["refdes"]: {"x": p["x"], "y": p["y"]}
         for p in geometry.get("placements", [])
     }
+    if placements:
+        xs = [float(item["x"]) for item in placements.values()]
+        ys = [float(item["y"]) for item in placements.values()]
+        placement_span = round((max(xs) - min(xs)) + (max(ys) - min(ys)), 3)
+    else:
+        placement_span = 0.0
+    wire_length = 0.0
+    wire_segments = 0
+    wire_bends = 0
+    for paths in geometry.get("wires", {}).values():
+        for path in paths:
+            if not isinstance(path, (list, tuple)):
+                continue
+            wire_segments += max(0, len(path) - 1)
+            wire_bends += max(0, len(path) - 2)
+            for start, end in zip(path, path[1:]):
+                try:
+                    wire_length += abs(float(end[0]) - float(start[0])) + abs(float(end[1]) - float(start[1]))
+                except (IndexError, TypeError, ValueError):
+                    continue
 
     return {
         "netlist_bytes": len(netlist),
@@ -716,6 +774,10 @@ def validate_layout_positions(
         "different_net_crossings": lv.get("different_net_crossings"),
         "crossings_per_wire": lv.get("crossings_per_wire"),
         "crossings_limit_per_wire": lv.get("crossings_limit_per_wire"),
+        "wire_length": round(wire_length, 3),
+        "wire_segments": wire_segments,
+        "wire_bends": wire_bends,
+        "placement_span": placement_span,
         "findings": lv.get("findings", []),
         "error_count": sum(
             1 for f in lv.get("findings", []) if f.get("severity") == "error"
@@ -725,4 +787,218 @@ def validate_layout_positions(
         "wire_fallbacks": len(result.get("wire_fallbacks", [])),
         "note": "dry-run: built into a scratch directory, nothing was kept; "
                 "callers must require status=pass before delivery",
+    }
+
+
+def optimize_layout_positions(
+    netlist: str,
+    base_positions: dict[str, Any],
+    *,
+    probe_nets: list[str] | None = None,
+    step: float = 270.0,
+    moves: int = 1,
+    max_candidates: int = 32,
+    fixed_refdes: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Run a bounded single-board layout search through the real dry-run builder.
+
+    The source netlist and electrical connections remain unchanged.  Each
+    candidate is scored by ``validate_layout_positions``; callers must still
+    run the selected result through native save/reopen, topology and simulation
+    acceptance before applying it to a project.
+    """
+    from .layout_optimization import optimize_single_board_layout
+
+    return optimize_single_board_layout(
+        base_positions,
+        lambda positions: validate_layout_positions(
+            netlist, dict(positions), probe_nets=list(probe_nets or ())
+        ),
+        step=step,
+        moves=moves,
+        max_candidates=max_candidates,
+        fixed_refdes=fixed_refdes,
+    )
+
+
+def _normalise_selected_positions(
+    optimization: Mapping[str, Any],
+) -> tuple[str | None, dict[str, list[float]]]:
+    if not isinstance(optimization, Mapping) or optimization.get("status") != "pass":
+        raise ValueError("optimization has no feasible selected candidate")
+    selected = optimization.get("selected")
+    if not isinstance(selected, Mapping):
+        raise ValueError("optimization.selected must be an object")
+    quality = selected.get("quality")
+    if isinstance(quality, Mapping) and quality.get("hard_pass") is False:
+        raise ValueError("selected candidate failed the layout hard gate")
+    positions = selected.get("positions")
+    if not isinstance(positions, Mapping) or not positions:
+        raise ValueError("optimization.selected.positions must be a non-empty mapping")
+    normalized: dict[str, list[float]] = {}
+    for refdes, value in positions.items():
+        if isinstance(value, Mapping):
+            value = (value.get("x"), value.get("y"))
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError(f"selected position for {refdes!r} must be [x, y] or {{x, y}}")
+        try:
+            x, y = float(value[0]), float(value[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"selected position for {refdes!r} must contain numbers") from exc
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ValueError(f"selected position for {refdes!r} must contain finite numbers")
+        normalized[str(refdes)] = [x, y]
+    candidate_id = selected.get("candidate_id")
+    return (str(candidate_id) if candidate_id is not None else None), normalized
+
+
+def materialize_layout_positions(
+    netlist: str,
+    optimization: Mapping[str, Any],
+    output_ms14: str | Path,
+    *,
+    probe_nets: list[str] | None = None,
+    include_experimental_probes: bool = False,
+    sheet_size: tuple[float, float] | None = None,
+    overwrite: bool = False,
+    codec: Any = None,
+) -> dict[str, Any]:
+    """Regenerate a fresh .ms14 from a selected layout candidate.
+
+    Rebuilding from the source netlist keeps probe symbols and builder-owned
+    wire topology in the same transaction.  This is the safe hand-off for
+    optimized candidates; the in-place writer remains available for explicit
+    legacy-file edits and still rejects fallback routes.
+    """
+    candidate_id, positions = _normalise_selected_positions(optimization)
+    output_path = Path(output_ms14).expanduser().resolve()
+    if output_path.suffix.lower() != ".ms14":
+        raise ValueError("output_ms14 must end with .ms14")
+    if output_path == Path(output_path.anchor):
+        raise ValueError("output_ms14 must be a file path")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    xml_path = Path(str(output_path) + ".xml")
+    layout_report_path = output_path.with_name(output_path.stem + ".layout-validation.json")
+    if not overwrite and any(path.exists() for path in (output_path, xml_path, layout_report_path)):
+        raise FileExistsError(f"refusing to overwrite materialized layout near {output_path}")
+
+    from .schematic_builder import build_schematic
+
+    selected_probes = list(probe_nets or ()) if include_experimental_probes else []
+    build_result = build_schematic(
+        netlist,
+        xml_path,
+        probe_nets=selected_probes,
+        component_positions=positions,
+        min_sheet_size=sheet_size,
+    )
+    layout_validation = build_result.get("layout_validation", {})
+    layout_report_path.write_text(
+        json.dumps(layout_validation, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if layout_validation.get("status") != "pass":
+        return {
+            "success": False,
+            "state": "rejected-geometry",
+            "candidate_id": candidate_id,
+            "positions": positions,
+            "layout_validation": layout_validation,
+            "layout_validation_path": str(layout_report_path),
+            "native_acceptance": "pending",
+        }
+    codec = codec or _codec()
+    encode_result = codec.encode(str(xml_path), str(output_path))
+    return {
+        "success": True,
+        "state": "materialized",
+        "candidate_id": candidate_id,
+        "positions": positions,
+        "ms14": str(output_path),
+        "xml": str(xml_path),
+        "layout_validation": layout_validation,
+        "layout_validation_path": str(layout_report_path),
+        "build": build_result,
+        "encode": encode_result,
+        "materialization": "builder-regenerated",
+        "native_acceptance": "pending",
+    }
+
+
+def apply_optimized_layout_candidate(
+    ms14_path: str | Path,
+    optimization: Mapping[str, Any],
+    output_ms14: str | Path | None = None,
+    overwrite: bool = False,
+    codec: Any = None,
+    *,
+    snap: float = 0,
+) -> dict[str, Any]:
+    """Apply a selected optimizer result and verify the coordinate readback.
+
+    This is the file-level hand-off between the dry-run candidate layer and
+    the existing ``set_component_positions`` writer.  It intentionally does
+    not claim native Multisim acceptance: callers must still save/reopen the
+    resulting design in Multisim and run topology, parameter and simulation
+    checks before delivery.
+    """
+    candidate_id, normalized = _normalise_selected_positions(optimization)
+
+    apply_result = set_component_positions(
+        ms14_path,
+        normalized,
+        output_ms14=output_ms14,
+        overwrite=overwrite,
+        codec=codec,
+        snap=snap,
+    )
+    fallback_count = int(apply_result.get("fallback_shifted_wires", 0) or 0)
+    overlaps_after = apply_result.get("overlaps_after") or []
+    geometry_blockers: list[dict[str, Any]] = []
+    if fallback_count:
+        geometry_blockers.append({
+            "code": "wire-fallback",
+            "count": fallback_count,
+            "message": "the obstacle-aware router used fallback wire paths",
+        })
+    if overlaps_after:
+        geometry_blockers.append({
+            "code": "component-overlap",
+            "pairs": overlaps_after,
+            "message": "the applied layout contains overlapping component bodies",
+        })
+    applied_path = apply_result.get("ms14")
+    if not isinstance(applied_path, str) or not applied_path:
+        raise RuntimeError("position writer returned no output path")
+    readback = list_component_positions(applied_path, codec=codec)
+    components = readback.get("components", {})
+    mismatches: list[dict[str, Any]] = []
+    for refdes, expected in normalized.items():
+        actual = components.get(refdes) if isinstance(components, Mapping) else None
+        if not isinstance(actual, Mapping):
+            mismatches.append({"refdes": refdes, "expected": expected, "actual": None})
+            continue
+        try:
+            actual_xy = [float(actual["x"]), float(actual["y"])]
+        except (KeyError, TypeError, ValueError):
+            actual_xy = None
+        if actual_xy is None or any(abs(a - b) > 1e-3 for a, b in zip(actual_xy, expected)):
+            mismatches.append({"refdes": refdes, "expected": expected, "actual": actual_xy})
+    readback_match = not mismatches
+    safe_to_deliver = readback_match and not geometry_blockers
+    return {
+        "success": bool(apply_result.get("success")) and safe_to_deliver,
+        "state": (
+            "applied" if safe_to_deliver
+            else "readback-mismatch" if not readback_match
+            else "rejected-geometry"
+        ),
+        "candidate_id": candidate_id,
+        "positions": normalized,
+        "apply": apply_result,
+        "readback": readback,
+        "readback_match": readback_match,
+        "readback_mismatches": mismatches,
+        "geometry_blockers": geometry_blockers,
+        "native_acceptance": "pending",
     }

@@ -5,6 +5,11 @@ NI 样例、解码设计、许可材料、个人路径和来源未确认的 XML 
 
 ## 1. 发布内容边界
 
+后续开发范围和商业产品隔离规则见 [`OPEN_SOURCE_SCOPE.md`](OPEN_SOURCE_SCOPE.md)。
+基本多板联调和可验证的前沿工程能力继续开源；商业版重点做安装和使用体验，后续专有
+多板优化、跨板整体优化及高级布局/排线优化在独立私有产品中开发。已有公开实现保留原许可。
+商业目录与商品归档包不得进入公开 Git 候选或 Python/npm 工件。
+
 公开仓库可以包含：
 
 - MCP server、COM 适配层、SPICE 解析和报告代码；
@@ -18,6 +23,7 @@ NI 样例、解码设计、许可材料、个人路径和来源未确认的 XML 
 - `.ms14`、解码 `.ms14.xml`、类型库转储、NI 示例电路；
 - `mcp_server/multisim_mcp/templates/*.xml`；
 - wheel、嵌入式 Python、npm 缓存、截图和包含个人绝对路径的结果。
+- 商业源码/提示词/评测集、客户数据、商品安装包和 ZIP/7z/RAR/tar 归档。
 
 English: publish the engine, tests, docs, manifest, and local extractor. Exclude
 installed samples, decoded files, extracted XML packs, binaries, and local output.
@@ -58,6 +64,16 @@ C:\path\to\python32\python.exe -m unittest discover `
 python -m build .\mcp_server
 ```
 
+在中文 Windows 上，如果 `build` 隔离环境把 pip 的本地化错误输出误解码为
+UTF-8，可以先在用于打包的 64 位 Python 中安装 `build`/`setuptools`，再使用：
+
+```powershell
+D:\python.exe -m build --no-isolation .\mcp_server
+```
+
+这只是构建工具的本地编码规避；它不改变包内容，也不替代 32 位 COM worker
+的运行验证。公开 CI 仍在干净的 Linux/Windows 环境中使用隔离构建。
+
 真实 Multisim 回归需要 32 位 Python、本机授权的 Multisim 和本地模板包，不放入
 公共 CI。CI 只运行无 COM 测试和代码/资源审计。
 
@@ -84,7 +100,22 @@ English: an annotated tag pins reviewed source but does not publish anything.
 Manually dispatch `publish-pypi.yml` at that tag and verify the run SHA; never
 attach the local template wheel.
 
-## 6. v1.2.0 发布顺序
+## 6. v1.3.0 发布顺序
+
+1. 推送审核后的 `release/v1.3.0` 提交并等待 CI 全部通过。
+2. 创建并推送签注标签 `v1.3.0`，确认标签解引用到已通过 CI 的提交。
+3. 在标签引用上手动运行 `publish-pypi.yml` 和 `publish-mcp-registry.yml`，并核对
+   PyPI/MCP Registry 的版本、文件名、SHA-256 与 package metadata。
+4. 使用 `publish-dsh-plugin.yml` 的 `verify` 模式核对 npm 包边界，再在受保护的
+   `npm` Environment 中选择 `stage-existing`，完成维护者复核和 npm 2FA 审批。
+5. 发布后分别核对 `multisim-mcp==1.3.0`、`multisim-mcp-dsh-plugin@1.3.0`、
+   Registry 条目和 GitHub Release；任何一个发布物失败都不能被其他发布物的状态替代。
+
+English: release the reviewed commit, wait for green CI, tag `v1.3.0`, publish
+PyPI and MCP Registry at that tag, then verify and stage the independent npm
+bundle with the protected environment and maintainer approval.
+
+## 7. v1.2.0 发布顺序
 
 1. 推送发布提交并等待 `CI` 全部通过。
 2. 创建并推送签注标签 `v1.2.0`，确认远端标签解引用到已通过 CI 的
@@ -114,7 +145,7 @@ English: publish in order—green CI, annotated tag, manual PyPI dispatch at the
 tag, verified GitHub Release, manual MCP Registry dispatch, then community
 directory metadata.
 
-## 7. DeepSeek Harness npm bundle
+## 8. DeepSeek Harness npm bundle
 
 `integrations/deepseek-harness` 是独立 npm 发布物。首次发布不能使用 npm staged
 publishing，必须由维护者本地登录并通过 2FA 发布。包存在后，在 npm 中把

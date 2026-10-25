@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 from pathlib import Path
+import hashlib
 import json
 
 from .multisim_compat import parse_multisim_version
@@ -23,12 +24,22 @@ def validate_component_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         for field in ("logical_family", "native_name", "model_source", "pin_signature"):
             if field not in item:
                 raise ValueError(f"component manifest entry requires {field}")
+        for field in ("logical_family", "native_name", "model_source"):
+            value = item[field]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"component manifest {field} must be a non-empty string")
         pins = item["pin_signature"]
         if not isinstance(pins, Sequence) or isinstance(pins, (str, bytes)) or not pins:
             raise ValueError("pin_signature must be a non-empty list")
+        if any(not isinstance(pin, str) or not pin.strip() for pin in pins):
+            raise ValueError("pin_signature entries must be non-empty strings")
         versions = item.get("supported_versions")
         if versions is not None and (not isinstance(versions, Sequence) or isinstance(versions, (str, bytes))):
             raise ValueError("supported_versions must be a list when provided")
+        if versions is not None and any(not isinstance(version, str) or not version.strip() for version in versions):
+            raise ValueError("supported_versions entries must be non-empty strings")
+        if "verified" in item and not isinstance(item["verified"], bool):
+            raise ValueError("verified must be a boolean when provided")
         normalized.append(dict(item))
     return {"schema_version": 1, "multisim_version": str(manifest.get("multisim_version", "")), "components": normalized}
 
@@ -46,10 +57,10 @@ def resolve_component_mapping(
         item for item in checked["components"]
         if str(item["logical_family"]).casefold() == logical_family.casefold()
     ]
-    target = parse_multisim_version(requested_version)
     candidates = [
         item for item in candidates
-        if not item.get("supported_versions") or any(parse_multisim_version(str(v)) == target for v in item["supported_versions"])
+        if not item.get("supported_versions")
+        or any(parse_multisim_version(str(v)) == target for v in item["supported_versions"])
     ]
     if expected_pins is not None:
         wanted = [str(pin).casefold() for pin in expected_pins]
@@ -165,6 +176,117 @@ def load_manifest_for_version(directory: str | Path, version: str) -> dict[str, 
     raise ValueError(f"no component manifest is available for Multisim {version}")
 
 
+def build_component_mapping_matrix(
+    directory: str | Path, target_versions: Sequence[str],
+) -> dict[str, Any]:
+    """Build an exact-version component mapping matrix without fallbacks.
+
+    A matrix entry records the manifest and each declared logical mapping when
+    an exact manifest exists.  A known version without its own manifest stays
+    ``manifest-unavailable``; an unparseable version is ``unsupported``.  No
+    neighboring manifest is copied into either case.
+    """
+    if (
+        not isinstance(target_versions, Sequence)
+        or isinstance(target_versions, (str, bytes))
+    ):
+        raise ValueError("target_versions must be a non-empty list")
+    targets = [str(item).strip() for item in target_versions if str(item).strip()]
+    if not targets:
+        raise ValueError("target_versions must be a non-empty list")
+    root = Path(directory).expanduser().resolve()
+    manifest_files: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(root.glob("components-*.json")):
+        try:
+            manifest_files.append((path, load_component_manifest(path)))
+        except ValueError:
+            continue
+    available_versions = sorted({
+        str(manifest.get("multisim_version", ""))
+        for _, manifest in manifest_files
+        if str(manifest.get("multisim_version", "")).strip()
+    })
+    entries: list[dict[str, Any]] = []
+    for requested in dict.fromkeys(targets):
+        target_tuple = parse_multisim_version(requested)
+        if target_tuple == (0, 0, 0):
+            entries.append({
+                "requested_version": requested,
+                "requested_version_tuple": list(target_tuple),
+                "status": "unsupported",
+                "verification_scope": None,
+                "reason": "version string is not recognized",
+                "manifest": None,
+                "mappings": [],
+            })
+            continue
+        selected: tuple[Path, dict[str, Any]] | None = next(
+            (
+                (path, manifest)
+                for path, manifest in manifest_files
+                if parse_multisim_version(str(manifest.get("multisim_version", ""))) == target_tuple
+            ),
+            None,
+        )
+        if selected is None:
+            entries.append({
+                "requested_version": requested,
+                "requested_version_tuple": list(target_tuple),
+                "status": "manifest-unavailable",
+                "verification_scope": None,
+                "reason": "no exact component manifest is available",
+                "manifest": None,
+                "mappings": [],
+            })
+            continue
+        path, manifest = selected
+        raw_mappings = []
+        for item in manifest["components"]:
+            versions = list(item.get("supported_versions") or [manifest.get("multisim_version", "")])
+            raw_mappings.append({
+                "logical_family": item["logical_family"],
+                "native_name": item["native_name"],
+                "model_source": item["model_source"],
+                "pin_signature": list(item["pin_signature"]),
+                "supported_versions": versions,
+                "verified": item.get("verified") is True,
+                "status": "native-verified" if item.get("verified") is True else "native-unverified",
+                "template": item.get("template"),
+            })
+        content = path.read_bytes()
+        entries.append({
+            "requested_version": requested,
+            "requested_version_tuple": list(target_tuple),
+            "status": "exact-manifest",
+            "verification_scope": "component-manifest-only",
+            "reason": "exact component manifest loaded; native execution remains separate",
+            "manifest": {
+                "file": path.name,
+                "multisim_version": manifest.get("multisim_version"),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "component_count": len(raw_mappings),
+                "verified_component_count": sum(item["verified"] for item in raw_mappings),
+            },
+            "mappings": raw_mappings,
+        })
+    return {
+        "schema_version": 1,
+        "kind": "multisim-component-mapping-matrix",
+        "available_manifest_versions": available_versions,
+        "entries": entries,
+        "exact_manifest_versions": [
+            item["requested_version"] for item in entries if item["status"] == "exact-manifest"
+        ],
+        "manifest_unavailable_versions": [
+            item["requested_version"] for item in entries if item["status"] == "manifest-unavailable"
+        ],
+        "unsupported_versions": [
+            item["requested_version"] for item in entries if item["status"] == "unsupported"
+        ],
+        "scope": "Exact versioned mappings only; no neighboring-version fallback or native execution claim.",
+    }
+
+
 def detect_multisim_version() -> str:
     """Read the installed Multisim version through a short-lived Worker."""
     from .com_worker_client import MultisimWorkerProcess, WorkerMultisimClient
@@ -179,4 +301,13 @@ def detect_multisim_version() -> str:
         worker.close()
 
 
-__all__ = ["resolve_component_mapping", "resolve_connector_mapping", "validate_component_manifest", "require_verified_mappings", "load_component_manifest", "load_manifest_for_version", "detect_multisim_version"]
+__all__ = [
+    "build_component_mapping_matrix",
+    "resolve_component_mapping",
+    "resolve_connector_mapping",
+    "validate_component_manifest",
+    "require_verified_mappings",
+    "load_component_manifest",
+    "load_manifest_for_version",
+    "detect_multisim_version",
+]

@@ -50,6 +50,22 @@ release/
 multisim-mcp-jobs/
 *.multisim-mcp.lock
 
+# Reserved product assets are maintained in a separate private checkout.
+**/commercial/
+**/commercial_assets/
+**/private/
+**/proprietary/
+**/paid/
+**/agensi-products/
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tar.xz
+*.7z
+
 # Editors / OS
 .idea/
 .vscode/

@@ -16,6 +16,7 @@ from multisim_mcp.model_provider import ModelMessage, ModelResponse
 from multisim_mcp.workbench_artifacts import entry_handle
 from multisim_mcp.provider_config import write_provider_config
 from multisim_mcp.job_engine import ExperimentJobManager
+from multisim_mcp.experiment_service import ExperimentApplicationService
 from multisim_mcp.workspace_manifest import write_directory_manifest
 
 
@@ -30,6 +31,52 @@ class WorkbenchApiTest(unittest.TestCase):
             state="active",
             artifacts={"design.json": "design"},
         )
+
+    def _patch_documents(self, root: Path) -> tuple[Path, Path]:
+        design = root / "design.json"
+        patch = root / "patch.json"
+        design.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "design_id": "workbench-filter",
+                    "title": "Workbench filter",
+                    "revision": 1,
+                    "components": [
+                        {"refdes": "R1", "kind": "R", "nodes": ["in", "out"], "value": "1k", "model": None, "parameters": {}},
+                    ],
+                    "nets": ["in", "out"],
+                    "parameters": {},
+                    "model_references": [],
+                    "annotations": {},
+                    "source_netlist": "R1 in out 1k\n.end\n",
+                }
+            ),
+            encoding="utf-8",
+        )
+        patch.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "patch_id": "workbench-patch",
+                    "design_id": "workbench-filter",
+                    "base_revision": 1,
+                    "description": "Use a stocked value",
+                    "operations": [
+                        {
+                            "operation": "set_component_value",
+                            "target": "R1.value",
+                            "before": "1k",
+                            "after": "2k",
+                            "reason": "test approval route",
+                        }
+                    ],
+                    "metadata": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return design, patch
 
     def _experiment(self, root: Path) -> Path:
         experiment = root / "experiments" / "fixture-run"
@@ -609,6 +656,216 @@ class WorkbenchApiTest(unittest.TestCase):
                 thread.join(timeout=3)
                 server.server_close()
 
+    def test_explicit_write_mode_routes_through_patch_application_service(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._project(root)
+            design, patch_file = self._patch_documents(root)
+            server = create_workbench_server(str(root), port=0, enable_writes=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+
+                def post(route: str, payload: dict[str, object]) -> dict[str, object]:
+                    request = Request(
+                        f"{base}{route}",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=3) as response:
+                        return json.loads(response.read())
+
+                approved = post(
+                    "/api/design-patch/approve",
+                    {
+                        "design_path": str(design),
+                        "patch_path": str(patch_file),
+                        "in_place": True,
+                        "receipt_path": str(root / "apply-receipt.json"),
+                        "token_output": str(root / "apply.token"),
+                        "regenerate_source_netlist": True,
+                    },
+                )
+                self.assertTrue(approved["success"])
+                self.assertFalse(approved["read_only"])
+                self.assertFalse(approved["approval_token_exposed"])
+                self.assertNotIn("approval_token", approved)
+                self.assertTrue((root / "apply.token").is_file())
+
+                applied = post(
+                    "/api/design-patch/apply",
+                    {
+                        "design_path": str(design),
+                        "patch_path": str(patch_file),
+                        "in_place": True,
+                        "receipt_path": str(root / "apply-receipt.json"),
+                        "approval_token_file": str(root / "apply.token"),
+                        "regenerate_source_netlist": True,
+                    },
+                )
+                self.assertTrue(applied["success"])
+                self.assertFalse(applied["read_only"])
+                self.assertEqual(json.loads(design.read_text(encoding="utf-8"))["revision"], 2)
+
+                reverted_approval = post(
+                    "/api/design-patch/approve",
+                    {
+                        "design_path": str(design),
+                        "revert_transaction": str(root / "apply-receipt.json"),
+                        "in_place": True,
+                        "receipt_path": str(root / "revert-receipt.json"),
+                        "token_output": str(root / "revert.token"),
+                        "regenerate_source_netlist": True,
+                    },
+                )
+                self.assertTrue(reverted_approval["success"])
+                reverted = post(
+                    "/api/design-patch/revert",
+                    {
+                        "design_path": str(design),
+                        "transaction_path": str(root / "apply-receipt.json"),
+                        "in_place": True,
+                        "receipt_path": str(root / "revert-receipt.json"),
+                        "approval_token_file": str(root / "revert.token"),
+                        "regenerate_source_netlist": True,
+                    },
+                )
+                self.assertTrue(reverted["success"])
+                self.assertEqual(json.loads(design.read_text(encoding="utf-8"))["revision"], 3)
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
+
+    def test_patch_write_routes_are_disabled_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._project(root)
+            server = create_workbench_server(str(root), port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/design-patch/recover",
+                    data=json.dumps({"target_path": str(root / "design.json")}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(HTTPError) as raised:
+                    urlopen(request, timeout=3)
+                self.assertEqual(raised.exception.code, 403)
+                payload = json.loads(raised.exception.read())
+                self.assertEqual(payload["error"]["code"], "permission_denied")
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
+
+    def test_verified_patch_routes_execute_and_commit_only_after_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._project(root)
+            design, patch_file = self._patch_documents(root)
+            plan = root / "verification-plan.json"
+            plan.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "title": "Workbench verified patch",
+                        "commands": "op",
+                        "requirements": [
+                            {
+                                "id": "r1",
+                                "metric": "mean",
+                                "signal": "V(out)",
+                                "operator": "approximately",
+                                "target": 1.0,
+                                "tolerance_percent": 5.0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def runner(**kwargs: object) -> dict[str, object]:
+                output = Path(str(kwargs["output_dir"]))
+                output.mkdir(parents=True)
+                verification = {
+                    "schema_version": 1,
+                    "overall_status": "pass",
+                    "counts": {"pass": 1, "fail": 0, "unverified": 0},
+                    "requirements": [{"id": "r1", "status": "pass"}],
+                }
+                verification_path = output / "verification.json"
+                verification_path.write_text(json.dumps(verification), encoding="utf-8")
+                write_directory_manifest(
+                    output,
+                    directory_kind="experiment",
+                    entity_id="exp-workbench-verified",
+                    state="succeeded",
+                    artifacts={"verification.json": "verification"},
+                )
+                return {
+                    "success": True,
+                    "experiment_id": "exp-workbench-verified",
+                    "resources": {},
+                    "schematic": {},
+                    "simulation": {},
+                    "report": str(output / "report.md"),
+                    "plot": str(output / "plot.svg"),
+                    "output_dir": str(output),
+                    "verification": verification,
+                    "verification_path": str(verification_path),
+                }
+
+            fake_service = ExperimentApplicationService(runner)
+            server = create_workbench_server(str(root), port=0, enable_writes=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+
+                def post(route: str, payload: dict[str, object]) -> dict[str, object]:
+                    request = Request(
+                        f"{base}{route}",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urlopen(request, timeout=3) as response:
+                        return json.loads(response.read())
+
+                common = {
+                    "design_path": str(design),
+                    "patch_path": str(patch_file),
+                    "in_place": True,
+                    "receipt_path": str(root / "verified-receipt.json"),
+                    "verification_plan_path": str(plan),
+                    "experiment_output": str(root / "verified-experiment"),
+                    "workflow_manifest": str(root / "verified-workflow.json"),
+                    "regenerate_source_netlist": True,
+                }
+                with patch("multisim_mcp.server._experiment_application_service", return_value=fake_service):
+                    approved = post(
+                        "/api/design-patch/verified-approve",
+                        {**common, "token_output": str(root / "verified.token")},
+                    )
+                    self.assertTrue(approved["success"])
+                    applied = post(
+                        "/api/design-patch/verified-apply",
+                        {**common, "approval_token_file": str(root / "verified.token")},
+                    )
+                self.assertTrue(applied["success"])
+                self.assertEqual(applied["state"], "committed")
+                self.assertEqual(json.loads(design.read_text(encoding="utf-8"))["revision"], 2)
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
+
     def test_planning_endpoint_returns_read_only_options_without_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -642,6 +899,40 @@ class WorkbenchApiTest(unittest.TestCase):
                     payload["recommended_option_id"],
                     {item["option_id"] for item in payload["options"]},
                 )
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
+
+    def test_agent_workflow_plan_endpoint_returns_read_only_task_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._project(root)
+            server = create_workbench_server(str(root), host="127.0.0.1", port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = Request(
+                    f"http://127.0.0.1:{server.server_port}/api/agent-workflow/plan",
+                    data=json.dumps(
+                        {
+                            "requirements": "设计一个 5V 传感器低通前端，截止频率 1kHz",
+                            "model_profiles": {"design": "qwen-planner"},
+                            "include_optimization": False,
+                        },
+                        ensure_ascii=False,
+                    ).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(request, timeout=3) as response:
+                    payload = json.loads(response.read())
+                self.assertTrue(payload["success"])
+                self.assertTrue(payload["read_only"])
+                self.assertFalse(payload["execution_started"])
+                self.assertEqual(payload["chain"]["metadata"]["execution_enabled"], False)
+                self.assertEqual(payload["chain"]["tasks"][-1]["task_id"], "report")
+                self.assertEqual(payload["chain"]["tasks"][-1]["depends_on"], ["native-experiment"])
             finally:
                 server.shutdown()
                 thread.join(timeout=3)
@@ -1028,6 +1319,75 @@ class WorkbenchApiTest(unittest.TestCase):
                 error_payload = json.loads(context.exception.read())
                 self.assertEqual(error_payload["error"]["code"], "invalid_input")
                 self.assertEqual(error_payload["error"]["command"], "/api/provider-probe")
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
+
+    def test_active_compiler_and_approval_http_flow_preserve_ideal_scope(self) -> None:
+        from tests.test_active_signal_compiler import active_draft, active_selections, netlist_review
+        from tests.test_experiment_fixtures import fixture_contract, fixture_review
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._project(root)
+            files_before = set(root.rglob("*"))
+            server = create_workbench_server(str(root), port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = f"http://127.0.0.1:{server.server_port}"
+
+                def post(route, payload):
+                    request = Request(base + route, data=json.dumps(payload).encode("utf-8"),
+                                      headers={"Content-Type": "application/json"}, method="POST")
+                    with urlopen(request, timeout=3) as response:
+                        return json.loads(response.read())
+
+                draft = active_draft()
+                resolution = post("/api/component-resolution", {"draft": draft, "selections": active_selections()})
+                approved = post("/api/component-resolution/approve", {
+                    "draft": draft, "resolution": resolution, "approval": {
+                        "approved": True, "resolution_id": resolution["resolution_id"],
+                        "resolution_digest": resolution["resolution_digest"], "confirm_topology": True,
+                        "confirm_ratings": True, "confirm_model_provenance": True,
+                    },
+                })
+                preview = post("/api/executable-netlist/compile", {"draft": draft, "component_approval": approved})
+                self.assertTrue(preview["success"])
+                self.assertEqual(preview["selected_option_id"], "signal-active")
+                self.assertEqual(preview["support"]["model_scope"], "explicit-ideal-vcvs-only")
+                self.assertEqual(preview["support"]["native_validation_status"], "unverified-for-this-template")
+                artifact = post("/api/executable-netlist/approve", {
+                    "executable_netlist": preview, "approval": netlist_review(preview),
+                })
+                self.assertTrue(artifact["success"])
+                self.assertTrue(artifact["ready_for_schematic"])
+                self.assertFalse(artifact["ready_for_simulation"])
+                fixture_preview = post("/api/executable-netlist/compile", {
+                    "draft": draft, "component_approval": approved, "experiment_fixture": fixture_contract(),
+                })
+                self.assertNotEqual(fixture_preview["compiled_digest"], preview["compiled_digest"])
+                self.assertIn("VINPUT fixture_source 0 DC 2.5 AC 1 0", fixture_preview["spice_netlist"])
+                fixture_approval = post("/api/executable-netlist/approve", {
+                    "executable_netlist": fixture_preview, "approval": fixture_review(fixture_preview),
+                })
+                self.assertEqual(fixture_approval["experiment_fixture"]["contract_sha256"],
+                                 fixture_preview["experiment_fixture"]["contract_sha256"])
+                with self.assertRaises(HTTPError) as context:
+                    post("/api/executable-netlist/compile", {
+                        "draft": draft, "component_approval": approved,
+                        "experiment_fixture": {**fixture_contract(), "included_load_ohm": 1},
+                    })
+                self.assertEqual(context.exception.code, 422)
+                self.assertEqual(set(root.rglob("*")), files_before)
+                with urlopen(base + "/api/capabilities?target_version=14.3", timeout=3) as response:
+                    capabilities = json.loads(response.read())
+                self.assertEqual(capabilities["engineering"]["generic_compiler"]["supported_options"]["signal-active"], preview["support"])
+                preview["circuit_design"]["components"][3]["nodes"].reverse()
+                with self.assertRaises(HTTPError) as context:
+                    post("/api/executable-netlist/approve", {"executable_netlist": preview, "approval": netlist_review(preview)})
+                self.assertEqual(context.exception.code, 422)
             finally:
                 server.shutdown()
                 thread.join(timeout=3)
@@ -1451,6 +1811,41 @@ class WorkbenchApiTest(unittest.TestCase):
                     server.shutdown()
                     thread.join(timeout=3)
                     server.server_close()
+
+
+class CapabilityDiscoveryApiTest(unittest.TestCase):
+    def test_http_uses_the_shared_profile_and_exact_version_contract(self) -> None:
+        from multisim_mcp import __version__
+        from multisim_mcp.api_contract import build_capabilities
+        from multisim_mcp.tool_profiles import tool_profile_status
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"MULTISIM_MCP_TOOL_PROFILE": "core"},
+        ):
+            server = create_workbench_server(tmp, host="127.0.0.1", port=0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_port}/api/capabilities"
+                for target in ("14.3", "14.2"):
+                    with urlopen(f"{url}?target_version={target}", timeout=3) as response:
+                        actual = json.loads(response.read())
+                    self.assertEqual(actual, build_capabilities(
+                        server_version=__version__, tool_profile=tool_profile_status("core"), target_version=target,
+                    ))
+                for query in ("target_version=banana", "target_version=", "target_version=14.3&target_version=14.2"):
+                    with self.subTest(query=query), self.assertRaises(HTTPError) as caught:
+                        urlopen(f"{url}?{query}", timeout=3)
+                    error = caught.exception
+                    try:
+                        self.assertEqual(error.code, 400)
+                        self.assertEqual(json.loads(error.read())["error"]["code"], "invalid_input")
+                    finally:
+                        error.close()
+            finally:
+                server.shutdown()
+                thread.join(timeout=3)
+                server.server_close()
 
 
 if __name__ == "__main__":

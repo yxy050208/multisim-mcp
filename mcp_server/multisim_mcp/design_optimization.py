@@ -58,6 +58,9 @@ VERIFICATION_PLAN_NAME: Final = "verification-plan.json"
 BASELINE_DESIGN_NAME: Final = "baseline-design.json"
 BEST_PATCH_NAME: Final = "best-patch.json"
 OPTIMIZATION_DATA_NAME: Final = "candidates.csv"
+LAYOUT_PLAN_NAME: Final = "layout-plan.json"
+LAYOUT_RESULTS_NAME: Final = "layout-results.json"
+COMBINED_RANKING_NAME: Final = "combined-ranking.json"
 
 _REFDES_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 _SCALAR_VALUE_RE = re.compile(
@@ -114,6 +117,17 @@ def _atomic_json(path: Path, value: object) -> None:
 
 def _plain_json(value: object) -> Any:
     return json.loads(_canonical_bytes(value).decode("utf-8"))
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert non-finite diagnostic metrics to JSON ``null`` for persistence."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def _strict_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1364,6 +1378,249 @@ def read_design_optimization(output_directory: str, *, verify: bool = True) -> d
     return _plain_json(value)
 
 
+def evaluate_optimization_layout(
+    optimization_output_dir: str | Path,
+    base_positions: Mapping[str, Any],
+    *,
+    probe_nets: list[str] | tuple[str, ...] = (),
+    step: float = 270.0,
+    moves: int = 1,
+    max_candidates: int = 32,
+    fixed_refdes: list[str] | tuple[str, ...] = (),
+    layout_evaluator: Callable[[str, Mapping[str, Any], str], Mapping[str, Any]] | None = None,
+    materialize: bool = False,
+    materialize_directory: str | Path | None = None,
+    materializer: Callable[[str, Mapping[str, Any], str], Mapping[str, Any]] | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Attach a bounded layout pass to a completed parameter optimization.
+
+    The optimization directory remains the source of truth for electrical
+    evidence.  Each persisted patch is replayed against ``baseline-design``
+    to recover the candidate netlist, then the same base positions are passed
+    through the single-board layout search.  Layout artifacts are written
+    separately and the final selection is produced by the fail-closed
+    electrical/layout bridge.  This function does not claim native Multisim
+    acceptance; a supplied ``materializer`` may create an ``.ms14`` artifact,
+    whose native status is retained in its returned evidence.
+    """
+    if not isinstance(materialize, bool):
+        raise ValueError("materialize must be a boolean")
+    if not isinstance(overwrite, bool):
+        raise ValueError("overwrite must be a boolean")
+    if layout_evaluator is not None and not callable(layout_evaluator):
+        raise ValueError("layout_evaluator must be callable")
+    if materializer is not None and not callable(materializer):
+        raise ValueError("materializer must be callable")
+    if not isinstance(probe_nets, (list, tuple)):
+        raise ValueError("probe_nets must be a list or tuple")
+    if any(not isinstance(item, str) or not item.strip() for item in probe_nets):
+        raise ValueError("probe_nets must contain non-empty strings")
+    if not isinstance(fixed_refdes, (list, tuple)):
+        raise ValueError("fixed_refdes must be a list or tuple")
+    if any(not isinstance(item, str) or not item.strip() for item in fixed_refdes):
+        raise ValueError("fixed_refdes must contain non-empty strings")
+    unresolved_root = Path(optimization_output_dir).expanduser()
+    if unresolved_root.is_symlink():
+        raise ValueError("optimization directory must not be a symbolic link")
+    root = unresolved_root.resolve()
+    if not root.is_dir():
+        raise ValueError(f"optimization directory does not exist: {root}")
+    state = read_design_optimization(root, verify=True)
+    if not isinstance(state.get("evaluations"), list):
+        raise ValueError("optimization evaluations are invalid")
+    baseline_path = root / BASELINE_DESIGN_NAME
+    baseline = CircuitDesign.from_dict(_read_json_object(baseline_path, "baseline design"))
+
+    # Import lazily to keep the parameter optimizer transport-neutral and to
+    # avoid importing codec/native helpers for callers that only rank results.
+    from .component_placement import materialize_layout_positions, optimize_layout_positions
+    from .layout_optimization import (
+        optimize_single_board_layout,
+        rank_optimization_directory_candidates,
+    )
+
+    # Validate and canonicalize the position input through the same generator
+    # used by the single-board optimizer.  The baseline-only call also keeps
+    # malformed coordinates from reaching a custom evaluator.
+    from .layout_optimization import generate_local_layout_candidates
+
+    normalized_positions = generate_local_layout_candidates(
+        base_positions,
+        step=step,
+        moves=moves,
+        max_candidates=1,
+        fixed_refdes=fixed_refdes,
+    )[0]["positions"]
+    normalized_probe_nets = [item.strip() for item in probe_nets]
+    if materialize and materializer is None:
+        def materializer(
+            netlist: str,
+            optimization: Mapping[str, Any],
+            output_ms14: str,
+        ) -> Mapping[str, Any]:
+            return materialize_layout_positions(
+                netlist,
+                optimization,
+                output_ms14,
+                probe_nets=normalized_probe_nets,
+                include_experimental_probes=bool(normalized_probe_nets),
+                overwrite=overwrite,
+            )
+    plan = {
+        "schema_version": 1,
+        "optimization_id": state.get("optimization_id"),
+        "base_positions": normalized_positions,
+        "probe_nets": normalized_probe_nets,
+        "step": float(step),
+        "moves": int(moves),
+        "max_candidates": int(max_candidates),
+        "fixed_refdes": [item.strip() for item in fixed_refdes],
+        "materialize": materialize,
+    }
+    plan_path = root / LAYOUT_PLAN_NAME
+    results_path = root / LAYOUT_RESULTS_NAME
+    ranking_path = root / COMBINED_RANKING_NAME
+    if not overwrite and any(path.exists() for path in (plan_path, results_path, ranking_path)):
+        raise FileExistsError("layout evidence already exists; pass overwrite=true to replace it")
+    _atomic_json(plan_path, plan)
+
+    def _candidate_design(evaluation: Mapping[str, Any]) -> CircuitDesign:
+        if evaluation.get("kind") == "baseline":
+            return baseline
+        patch_path = evaluation.get("patch_path")
+        if not isinstance(patch_path, str) or not patch_path:
+            raise ValueError("candidate evaluation is missing patch_path")
+        patch_file = (root / patch_path).resolve()
+        try:
+            patch_file.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("candidate patch escapes optimization directory") from exc
+        patch = DesignPatch.from_dict(_read_json_object(patch_file, "candidate patch"))
+        prepared = prepare_design_patch(
+            baseline,
+            patch,
+            regenerate_source_netlist=baseline.source_netlist is not None,
+        )
+        return prepared.candidate
+
+    layout_results: dict[str, dict[str, Any]] = {}
+    for raw_evaluation in state.get("evaluations", []):
+        if not isinstance(raw_evaluation, Mapping):
+            raise ValueError("optimization evaluation must be an object")
+        evaluation_id = raw_evaluation.get("evaluation_id")
+        if not isinstance(evaluation_id, str) or not evaluation_id.strip():
+            raise ValueError("optimization evaluation_id is invalid")
+        try:
+            candidate = _candidate_design(raw_evaluation)
+            netlist = candidate.source_netlist or circuit_design_to_spice(candidate)
+
+            if layout_evaluator is None:
+                optimization = optimize_layout_positions(
+                    netlist,
+                    normalized_positions,
+                    probe_nets=normalized_probe_nets,
+                    step=step,
+                    moves=moves,
+                    max_candidates=max_candidates,
+                    fixed_refdes=list(fixed_refdes),
+                )
+            else:
+                optimization = optimize_single_board_layout(
+                    normalized_positions,
+                    lambda positions: layout_evaluator(netlist, positions, evaluation_id),
+                    step=step,
+                    moves=moves,
+                    max_candidates=max_candidates,
+                    fixed_refdes=list(fixed_refdes),
+                )
+            selected = optimization.get("selected")
+            if not isinstance(selected, Mapping):
+                layout_result: dict[str, Any] = {
+                    "layout_validation": {
+                        "status": "fail",
+                        "findings": [{
+                            "severity": "error",
+                            "code": "no-feasible-layout",
+                            "message": "no layout candidate passed the geometry gate",
+                        }],
+                    },
+                    "layout_optimization": optimization,
+                }
+            else:
+                selected_result = selected.get("result")
+                layout_result = dict(selected_result) if isinstance(selected_result, Mapping) else {}
+                layout_result["positions"] = selected.get("positions", {})
+                layout_result["layout_optimization"] = optimization
+                if materialize:
+                    target_dir = (
+                        root / "layouts"
+                        if materialize_directory is None
+                        else Path(materialize_directory).expanduser().resolve()
+                    )
+                    try:
+                        target_dir.relative_to(root)
+                    except ValueError as exc:
+                        raise ValueError("materialize_directory must be inside optimization directory") from exc
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    output_ms14 = target_dir / f"{evaluation_id}.ms14"
+                    layout_result["materialized"] = materializer(
+                        netlist,
+                        {"status": "pass", "selected": selected},
+                        str(output_ms14),
+                    )
+                    if not isinstance(layout_result["materialized"], Mapping):
+                        raise ValueError("materializer must return an object")
+            layout_results[evaluation_id] = layout_result
+        except Exception as exc:  # preserve per-candidate evidence and continue
+            layout_results[evaluation_id] = {
+                "layout_validation": {
+                    "status": "fail",
+                    "findings": [{
+                        "severity": "error",
+                        "code": "layout-evaluator-error",
+                        "message": str(exc)[:1000],
+                    }],
+                },
+                "error": {"type": type(exc).__name__, "message": str(exc)[:1000]},
+            }
+
+    _atomic_json(results_path, _json_safe(layout_results))
+    ranking = rank_optimization_directory_candidates(root, layout_results)
+    _atomic_json(ranking_path, _json_safe(ranking))
+    manifest = write_directory_manifest(
+        root,
+        directory_kind="optimization",
+        entity_id=str(state["optimization_id"]),
+        state=str(state["state"]),
+        artifacts=_artifact_allowlist(root),
+        metadata={
+            "operation": "evaluate-optimization-layout",
+            "layout_attached": True,
+            "layout_candidate_count": len(layout_results),
+            "combined_status": ranking.get("status"),
+            "combined_selected_id": (
+                ranking.get("selected", {}).get("candidate_id")
+                if isinstance(ranking.get("selected"), Mapping)
+                else None
+            ),
+        },
+    )
+    return {
+        "success": ranking.get("status") == "pass",
+        "status": ranking.get("status"),
+        "optimization_output_dir": str(root),
+        "layout_plan": str(plan_path),
+        "layout_results": str(results_path),
+        "combined_ranking": str(ranking_path),
+        "directory_manifest": str(root / DIRECTORY_MANIFEST_NAME),
+        "directory_manifest_revision": manifest.revision,
+        "evaluated_count": len(layout_results),
+        "selected": ranking.get("selected"),
+        "ranking": ranking,
+    }
+
+
 __all__ = [
     "BASELINE_DESIGN_NAME",
     "BEST_PATCH_NAME",
@@ -1371,11 +1628,15 @@ __all__ = [
     "MAX_OPTIMIZATION_EXPERIMENTS",
     "MAX_OPTIMIZATION_SPEC_BYTES",
     "OPTIMIZATION_DATA_NAME",
+    "LAYOUT_PLAN_NAME",
+    "LAYOUT_RESULTS_NAME",
+    "COMBINED_RANKING_NAME",
     "OPTIMIZATION_SCHEMA_VERSION",
     "OPTIMIZATION_SPEC_NAME",
     "OPTIMIZATION_STATE_NAME",
     "VERIFICATION_PLAN_NAME",
     "read_design_optimization",
+    "evaluate_optimization_layout",
     "read_optimization_spec",
     "validate_optimization_spec",
 ]

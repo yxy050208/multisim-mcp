@@ -13,6 +13,8 @@ from multisim_mcp.native_multiboard_acceptance import (
     _write_native_op_csv,
     run_native_multiboard_acceptance,
 )
+from multisim_mcp.native_analysis_series import ContinuousResponseContract
+from multisim_mcp.native_multiboard_acceptance import _compare_reference_continuous_response_series
 
 
 class NativeMultiboardAcceptanceTest(unittest.TestCase):
@@ -75,6 +77,47 @@ class NativeMultiboardAcceptanceTest(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(result["prepared_artifacts"]["fixture_contract"]["coverage_status"], "complete")
 
+    def test_preview_records_and_validates_comparison_tolerance(self):
+        design = CircuitDesign(
+            design_id="native-tolerance-preview",
+            title="Native tolerance preview",
+            components=(
+                CircuitComponent("V1", "V", ("bus", "0"), value="5"),
+                CircuitComponent("R1", "R", ("bus", "sense"), value="1k"),
+                CircuitComponent("R2", "R", ("sense", "0"), value="1k"),
+            ),
+        )
+        partition = plan_multiboard_partition(
+            [
+                {"refdes": "V1", "board": "power", "nodes": ["bus", "0"]},
+                {"refdes": "R1", "board": "signal", "nodes": ["bus", "sense"]},
+                {"refdes": "R2", "board": "signal", "nodes": ["sense", "0"]},
+            ],
+            [{"id": "power"}, {"id": "signal"}],
+        )
+        fixtures = [
+            {"id": "power-observe", "board_id": "power", "kind": "observation", "net": "bus"},
+            {"id": "power-anchor", "board_id": "power", "kind": "resistor_termination", "net": "bus", "reference_net": "0", "refdes": "RFIX1", "value": "1G"},
+            {"id": "power-ground", "board_id": "power", "kind": "ground_reference", "net": "0"},
+            {"id": "signal-drive", "board_id": "signal", "kind": "voltage_source", "net": "bus", "reference_net": "0", "refdes": "VFIX1", "value": "5"},
+            {"id": "signal-observe-bus", "board_id": "signal", "kind": "observation", "net": "bus"},
+            {"id": "signal-ground", "board_id": "signal", "kind": "ground_reference", "net": "0"},
+            {"id": "signal-observe-sense", "board_id": "signal", "kind": "observation", "net": "sense"},
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "tolerance-preview"
+            result = run_native_multiboard_acceptance(
+                design, partition, fixtures, output, execute=False,
+                comparison_tolerance=1e-7,
+            )
+            self.assertEqual(result["comparison_tolerance"], 1e-7)
+            self.assertFalse(output.exists())
+            with self.assertRaises(ValueError):
+                run_native_multiboard_acceptance(
+                    design, partition, fixtures, output, execute=False,
+                    comparison_tolerance=float("nan"),
+                )
+
     def test_evidence_helpers_export_machine_and_human_readable_outputs(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -132,6 +175,25 @@ class NativeMultiboardAcceptanceTest(unittest.TestCase):
             _normalize_analysis_options("ac", {"stop_frequency": 10.0, "start_frequency": 10.0})
         self.assertFalse(_analysis_informative("ac", {"V(bus)": 0.0, "V(sense)": 0.0}))
         self.assertTrue(_analysis_informative("ac", {"V(sense)": 0.5}))
+
+    def test_continuous_response_contract_is_reference_gated(self):
+        series = {
+            "filt": {
+                "status": "pass", "analysis": "tran",
+                "axis": [0.0, 1.0, 2.0, 3.0],
+                "real": [0.0, 1.0, 2.0, 1.0],
+                "imaginary": [0.0] * 4,
+            }
+        }
+        records = [{"board_id": "dac", "probe_map": {"filt": "V(filt)"},
+                    "native_analysis_series": {"V(filt)": series["filt"]}}]
+        result = _compare_reference_continuous_response_series(
+            records,
+            series,
+            {"filt": ContinuousResponseContract(time_tolerance=0.0)},
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["comparisons"][0]["status"], "pass")
 
 
 if __name__ == "__main__":

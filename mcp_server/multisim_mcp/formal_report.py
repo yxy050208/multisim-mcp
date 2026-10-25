@@ -131,6 +131,8 @@ def _html_report(root: Path, language: str, summaries: list[dict[str, Any]], ver
     compatibility_summary = compatibility_summary if isinstance(compatibility_summary, dict) else {}
     compatibility_dialect = compatibility_dialect if isinstance(compatibility_dialect, dict) else {}
     compatibility_backend = compatibility_backend if isinstance(compatibility_backend, dict) else {}
+    model_provenance = compatibility.get("model_provenance", {})
+    model_provenance = model_provenance if isinstance(model_provenance, dict) else {}
     compatibility_rows = "".join(
         f"<tr><td>{html.escape(label)}</td><td>{html.escape(str(value))}</td></tr>"
         for label, value in (
@@ -142,6 +144,8 @@ def _html_report(root: Path, language: str, summaries: list[dict[str, Any]], ver
             ("Models", compatibility_summary.get("model_count", 0)),
             ("Unknown licenses", compatibility_summary.get("unknown_license_count", 0)),
             ("Provenance complete", compatibility_summary.get("provenance_complete", False)),
+            ("Declared model references", model_provenance.get("model_count", 0)),
+            ("Model provenance SHA-256", model_provenance.get("provenance_sha256", "not recorded")),
         )
     )
     observation_rows = "".join(
@@ -306,6 +310,8 @@ def _pdf_lines(root: Path, language: str, summaries: list[dict[str, Any]], verif
     compatibility_summary = compatibility_summary if isinstance(compatibility_summary, dict) else {}
     compatibility_dialect = compatibility_dialect if isinstance(compatibility_dialect, dict) else {}
     compatibility_backend = compatibility_backend if isinstance(compatibility_backend, dict) else {}
+    model_provenance = compatibility.get("model_provenance", {})
+    model_provenance = model_provenance if isinstance(model_provenance, dict) else {}
     lines.extend(["", "SPICE 兼容性与模型来源" if zh else "SPICE compatibility and model provenance"])
     lines.extend(
         _wrap_text(
@@ -315,7 +321,9 @@ def _pdf_lines(root: Path, language: str, summaries: list[dict[str, Any]], verif
                 f"solver_version={compatibility_backend.get('solver_version') or 'not captured'}; "
                 f"models={compatibility_summary.get('model_count', 0)}; "
                 f"unknown_licenses={compatibility_summary.get('unknown_license_count', 0)}; "
-                f"provenance_complete={compatibility_summary.get('provenance_complete', False)}"
+                f"provenance_complete={compatibility_summary.get('provenance_complete', False)}; "
+                f"declared_model_references={model_provenance.get('model_count', 0)}; "
+                f"model_provenance_sha256={model_provenance.get('provenance_sha256', 'not recorded')}"
             ),
             82 if zh else 92,
         )

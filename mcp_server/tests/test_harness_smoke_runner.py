@@ -25,7 +25,7 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
             command = smoke._pnpm_command("@deepseek-ai/dsh", "0.2.1-rc.2", "--version")
         self.assertEqual(
             command,
-            ["pnpm", "dlx", "@deepseek-ai/dsh@0.2.1-rc.2", "--version"],
+                ["pnpm", "dlx", "@deepseek-ai/dsh@0.2.1-rc.2", "--version"],
         )
 
     def test_pnpm_command_fails_when_pnpm_is_missing(self) -> None:

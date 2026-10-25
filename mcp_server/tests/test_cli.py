@@ -1425,6 +1425,7 @@ class ProjectInspectionCliTest(unittest.TestCase):
             verify=False,
             max_entries=12,
             max_depth=2,
+            enable_writes=False,
         )
 
 

@@ -8,14 +8,14 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前公开稳定版仍为 `v1.2.0`；`1.3.0rc3` 已创建 Git 标签并发布到 PyPI 与官方 MCP Registry，作为预发布候选版提供。项目非 NI 官方产品，需要本机安装并授权
+> 当前 `release/v1.3.0` 分支正在完成稳定版发布门禁；在线 PyPI、MCP Registry 和 DSH 状态会在发布后分别核对。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
 > **当前 `main` 主干状态（2026-10-09）**：已完成双板复杂数字回归的
 > Multisim 14.3 原生验收，覆盖 `split_logic_load`、`split_mixed_logic`、HDR1X4
-> 逐针连接、跨板接口、远端 1 kΩ 负载以及 DC/TRAN/AC。该能力属于源码候选版，
-> 详细门禁和边界见[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)；稳定包仍为 `v1.2.0`，预发布包为 `1.3.0rc3`。
+> 逐针连接、跨板接口、远端 1 kΩ 负载以及 DC/TRAN/AC。该能力属于发布分支的受限能力，
+> 详细门禁和边界见[双板复杂数字回归](docs/MULTIBOARD_DIGITAL_REGRESSION.md)；该能力必须按记录的版本、模板和夹具解释。
 
 开发分支已加入[组合模拟电路原生工作流](docs/COMPOSED_ANALOG_WORKFLOW.md)：宿主 AI
 可通过 `run_generated_analog_project` 提交组合网表与采样指标，完成原生连接核对、
@@ -30,15 +30,15 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 脉冲响应。图纸使用真实直流/脉冲源、共射布局和隐藏测量面板。要求重建本地模板包，
 当前仅实测 Multisim 14.3；新工程仍需图面复核，不代表第二阶段全部完成。
 
-当前源码候选版的准确变更、验证结果和发布边界见
-[`1.3.0rc3 发布说明`](docs/RELEASE_NOTES_v1.3.0rc3.md)；已发布的 rc1 仍保留在
+当前发布分支的准确变更、验证结果和发布边界见
+[`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md)；已发布的 rc1 仍保留在
 [`rc1 发布说明`](docs/RELEASE_NOTES_v1.3.0rc1.md)。
 
 后续源码开发新增 [桥式整流原生插件工作流](docs/RECTIFIER_NATIVE_ACCEPTANCE.md)：
 `run_natural_rectifier` 从低压交流输入、负载电流和纹波要求生成 1N4001GP 桥式电路，
 核对原生模型、引脚及保存参数，运行 OP/TRAN 并导出图纸、波形与报告。
 已完成默认工况、4V/5mA、18V/60Hz/200mA 和更严格纹波工况的本机实测。
-这些新增能力属于源码候选版，尚未进入公开发行包；不包含稳压电源或实物设计认证。
+这些新增能力已纳入发布分支的验证材料，公开发行仍须通过本次发布门禁；不包含稳压电源或实物设计认证。
 
 进一步新增 [原生整流电容优化闭环](docs/RECTIFIER_OPTIMIZATION.md)：
 `optimize_natural_rectifier` 固定负载比较九个电容候选，检查输入/负载/电容变化及启动，
@@ -53,22 +53,21 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 逐针连接、布局、接口比较和报告导出。该证据只覆盖当前案例、元件族和 Multisim 14.3；
 其他连接器、版本或更复杂的多板拓扑仍需独立 manifest 与实机验收。
 
-> `v1.2.0` 是**不含 React 前端的 MCP Core 正式版**：包含 Python MCP 服务、CLI、EDA
-> 核心、模型/DeepSeek 适配、测试、文档及可选 loopback 桥接 API；不包含仍在独立
-> 开发的 React Workbench 前端。GitHub、PyPI 与 MCP Registry 均已发布 `v1.2.0`。
+> `v1.3.0` 仍是发布分支中的 MCP Core 版本：包含 Python MCP 服务、CLI、EDA 核心、
+> 模型适配、测试和文档；React Workbench 仍是独立的可选本地工作台。发布前不把
+> 本地模板、Multisim 工程或实验输出放入公开工件。
 
 四个开发阶段和 1.0 发布门禁见 [`1.0 路线图`](docs/ROADMAP_TO_1.0.md)。
 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [DeepSeek Harness npm 插件](https://www.npmjs.com/package/multisim-mcp-dsh-plugin) ·
-[GitHub 稳定版 Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.2.0) ·
-[1.3.0rc3 预发布 Release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.3.0rc3)
+[`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md)
 
 ## 开源发布状态
 
-`1.2.0` 已同步发布到 GitHub Release、PyPI 与
-`io.github.yxy050208/multisim-mcp` 官方 MCP Registry 条目。由本地 NI
+`v1.2.0` 的历史发布说明仍保留用于迁移参考；`v1.3.0` 的 PyPI、MCP Registry、GitHub
+Release 和 npm bundle 必须在各自工作流完成后独立核对。由本地 NI
 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
 `tools/bootstrap_local_component_pack.py`，从自己已授权的 Multisim 安装生成本地模板包。
@@ -76,21 +75,20 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 请不要上传 `analysis/`、`.ms14`、解码 XML、类型库转储、实验输出或当前包含 142 个
 本地模板的开发 wheel。完整发布步骤见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
-`1.3.0rc3` 已通过 GitHub Actions 的 Windows 32 位协议、Linux ngspice、公开工件边界和
-DeepSeek Harness 兼容性检查，并已同步到 PyPI 与官方 MCP Registry。它是预发布候选版，
-不会替代 `v1.2.0` 的稳定安装指引；npm 插件的 `next` 标签继续指向已存在的
-`1.3.0-rc.3`，`latest` 仍保持 `1.1.0`。
+`1.3.0` 发布分支已经通过当前本地的公开工件和目标兼容性检查；完整 GitHub Actions、PyPI、
+MCP Registry 和 npm 发布仍是待执行门禁。
+发布流程仍将 npm bundle、PyPI 核心和 MCP Registry 作为三个独立发布物；npm 的
+`latest`/`next` 标签必须在 Trusted Publishing 完成后再核对，不由源码提交自动宣称。
 
-`1.2.0` 正式核心将公共面扩展为 78 个工具、20 个资源模板和 5 个双语提示词，新增
-审批式设计规划、诊断/补丁评估、全局优化、自主纠错、Multisim/ngspice 差分验证与
-可恢复作业。详情见 [`v1.2.0 发布说明`](docs/RELEASE_NOTES_v1.2.0.md)。
+历史 `v1.2.0` 的 78 工具兼容面仍受支持；`1.3.0` 将在同一安全边界内加入已验证的
+布局、双板、模型来源和 Agent 工作流能力，具体以 [`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md) 为准。
 
 开发分支新增只读的 `review_design_requirements` 需求契约审查：在基线实验前区分硬约束、
 软目标、偏好和假设，并拦截同一信号上的明显冲突。接口说明见
 [`需求契约审查`](docs/REQUIREMENT_ENGINEERING.md)。
 开发分支还新增 `bind_requirement_review_to_design`，把契约绑定到已有设计快照并报告
 缺失信号与可优化参数，以及 `snapshot_open_circuit` 的 COM 导入快照入口；已发布的
-`v1.2.0` 仍保持 78 个工具，当前源码候选版的 `full` profile 为 115 个工具。
+`v1.2.0` 仍保持 78 个工具，当前 `1.3.0` 发布分支的 `full` profile 为 123 个工具。
 
 开发分支已提供 [自然语言 RC/RLC/OPAMP 工程入口](docs/NATURAL_ENGINEERING.md)：从明确的中文/英文需求生成
 可编辑 Multisim 工程，原生仿真并比较 E24 候选，导出带验收状态的报告。当前为有限规则解析，
@@ -331,7 +329,7 @@ C:\path\to\python32\Scripts\multisim-mcp.exe model-diagnose `
 DeepSeek 模型与官方 Harness 的分层、凭据边界和版本兼容性见
 [`DeepSeek / Harness 适配说明`](docs/DEEPSEEK_HARNESS.md)。
 `--tool-profile core|experiment|optimization|full` 可限制客户端发现的工具；
-省略时保持 115 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
+省略时保持 122 个工具全部可用的 `full` 兼容模式。产物导出只有在设置
 `--artifact-export-dir` 后可用，并且只能写入该目录之下。
 Harness Skill 安装默认不覆盖现有文件；需要恢复打包版本时显式增加 `--force`。
 模型 Provider 自助配置支持 DeepSeek、OpenAI、Ollama 和任意

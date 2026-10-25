@@ -17,6 +17,7 @@ from multisim_mcp.design_comparison import (
 from multisim_mcp.eda_core import CircuitDesign
 from multisim_mcp.experiment_service import ExperimentApplicationService
 from multisim_mcp.workspace_manifest import write_directory_manifest
+from multisim_mcp.workspace_manifest import DIRECTORY_MANIFEST_NAME
 
 
 def _design(variant: str, r2: str) -> CircuitDesign:
@@ -257,6 +258,44 @@ class DesignComparisonTest(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "mismatch|integrity"):
                 read_design_comparison(str(output))
+
+    def test_patch_metadata_is_persisted_and_manifested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "run"
+            patch_payload = {
+                "schema_version": 1,
+                "patch_id": "patch-target-r2",
+                "design_id": "divider-target",
+                "base_revision": 1,
+                "operations": [],
+            }
+            # The comparison service records the already validated patch; its
+            # in-memory application is owned by the MCP adapter.
+            DesignVariantComparisonService(_service()).run(
+                _variants(),
+                _spec(),
+                str(output),
+                variant_metadata={"target": {"patch": patch_payload}},
+            )
+            patch_path = output / "variants" / "target.patch.json"
+            self.assertEqual(
+                json.loads(patch_path.read_text(encoding="utf-8")), patch_payload
+            )
+            manifest = json.loads(
+                (output / DIRECTORY_MANIFEST_NAME).read_text(encoding="utf-8")
+            )
+            self.assertTrue(
+                any(
+                    item["path"] == "variants/target.patch.json"
+                    and item["role"] == "variant-patch"
+                    for item in manifest["artifacts"]
+                )
+            )
+            stored = read_design_comparison(str(output), verify=True)
+            target = next(
+                item for item in stored["variants"] if item["variant_id"] == "target"
+            )
+            self.assertEqual(target["patch_path"], "variants/target.patch.json")
 
     def test_invalid_objective_and_variant_identifier_are_rejected(self) -> None:
         invalid = _spec()

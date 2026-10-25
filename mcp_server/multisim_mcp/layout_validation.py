@@ -44,6 +44,10 @@ def validate_schematic_geometry(
         raise ValueError("max_crossings_per_wire must be a finite non-negative number")
     if max_crossings_per_wire < 0 or not math.isfinite(float(max_crossings_per_wire)):
         raise ValueError("max_crossings_per_wire must be a finite non-negative number")
+    if not isinstance(clearance, (int, float)) or isinstance(clearance, bool):
+        raise ValueError("clearance must be a finite non-negative number")
+    if clearance < 0 or not math.isfinite(float(clearance)):
+        raise ValueError("clearance must be a finite non-negative number")
 
     placements = []
     for item in components:
@@ -51,10 +55,19 @@ def validate_schematic_geometry(
         try:
             x = float(item["x"])
             y = float(item["y"])
+            width = float(item.get("width", component_width))
+            height = float(item.get("height", component_height))
         except (KeyError, TypeError, ValueError):
             placements.append({"refdes": refdes, "code": "invalid-placement"})
             continue
-        placements.append({"refdes": refdes, "x": x, "y": y, "width": float(item.get("width", component_width)), "height": float(item.get("height", component_height))})
+        if (
+            not all(math.isfinite(value) for value in (x, y, width, height))
+            or width <= 0
+            or height <= 0
+        ):
+            placements.append({"refdes": refdes, "code": "invalid-placement"})
+            continue
+        placements.append({"refdes": refdes, "x": x, "y": y, "width": width, "height": height})
 
     findings: list[dict[str, Any]] = []
     for index, current in enumerate(placements):
@@ -72,12 +85,33 @@ def validate_schematic_geometry(
     pin_points = pin_points or {}
     for net, paths in wires.items():
         for path in paths:
-            if len(path) < 2:
-                findings.append({"severity": "error", "code": "degenerate-wire", "net": str(net)})
-                continue
-            if any(len(point) != 2 for point in path):
+            try:
+                path_length = len(path)
+            except TypeError:
                 findings.append({"severity": "error", "code": "invalid-wire-point", "net": str(net)})
                 continue
+            if path_length < 2:
+                findings.append({"severity": "error", "code": "degenerate-wire", "net": str(net)})
+                continue
+            try:
+                invalid_point_shape = any(len(point) != 2 for point in path)
+            except TypeError:
+                invalid_point_shape = True
+            if invalid_point_shape:
+                findings.append({"severity": "error", "code": "invalid-wire-point", "net": str(net)})
+                continue
+            try:
+                normalized_path = [(float(point[0]), float(point[1])) for point in path]
+            except (TypeError, ValueError):
+                findings.append({"severity": "error", "code": "invalid-wire-point", "net": str(net)})
+                continue
+            if any(not math.isfinite(x) or not math.isfinite(y) for x, y in normalized_path):
+                findings.append({"severity": "error", "code": "invalid-wire-point", "net": str(net)})
+                continue
+            if any(start == end for start, end in zip(normalized_path, normalized_path[1:])):
+                findings.append({"severity": "error", "code": "degenerate-wire", "net": str(net)})
+                continue
+            path = normalized_path
             expected = pin_points.get(str(net), ())
             if expected:
                 # A multi-drop net may terminate at a junction, so only flag
@@ -160,8 +194,20 @@ def validate_schematic_geometry(
                     if crosses and not allowed_pin_exit and not legacy_anchor:
                         findings.append({"severity": "error", "code": "wire-crosses-component", "net": str(net), "refdes": component["refdes"]})
 
-    segments = [(str(net), a, b) for net, paths in wires.items() for path in paths
-                for a,b in zip(path,path[1:]) if a[0] == b[0] or a[1] == b[1]]
+    segments: list[tuple[str, tuple[float, float], tuple[float, float]]] = []
+    for net, paths in wires.items():
+        for path in paths:
+            try:
+                normalized_path = [(float(point[0]), float(point[1])) for point in path]
+            except (TypeError, ValueError, IndexError):
+                continue
+            if any(not math.isfinite(x) or not math.isfinite(y) for x, y in normalized_path):
+                continue
+            segments.extend(
+                (str(net), start, end)
+                for start, end in zip(normalized_path, normalized_path[1:])
+                if start[0] == end[0] or start[1] == end[1]
+            )
     crossing_count = 0
     for index, (net, a, b) in enumerate(segments):
         for other, c, d in segments[index+1:]:

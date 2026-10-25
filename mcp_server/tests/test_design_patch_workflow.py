@@ -8,7 +8,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from multisim_mcp.design_patch_transactions import PatchApprovalStore
+from multisim_mcp.design_patch_transactions import (
+    PatchApprovalStore,
+    find_patch_transaction_journals,
+)
 from multisim_mcp.design_patch_workflow import (
     approve_verified_patch_application,
     execute_verified_patch_application,
@@ -304,7 +307,13 @@ class VerifiedPatchWorkflowTest(unittest.TestCase):
                         approval_store=str(root / "approvals"),
                         **paths,
                     )
-            recovered = recover_verified_patch_workflow(paths["workflow_manifest"])
+            with self.assertRaisesRegex(RuntimeError, "still running"):
+                recover_verified_patch_workflow(paths["workflow_manifest"])
+            with patch(
+                "multisim_mcp.design_patch_workflow._pid_alive",
+                return_value=False,
+            ):
+                recovered = recover_verified_patch_workflow(paths["workflow_manifest"])
             self.assertEqual(recovered["state"], "aborted")
             self.assertEqual(design.read_bytes(), original)
             self.assertFalse(Path(paths["receipt_path"]).exists())
@@ -337,11 +346,56 @@ class VerifiedPatchWorkflowTest(unittest.TestCase):
                     )
             _, before = read_verified_patch_workflow(paths["workflow_manifest"])
             self.assertEqual(before["state"], "verification_passed")
-            recovered = recover_verified_patch_workflow(paths["workflow_manifest"])
+            with patch(
+                "multisim_mcp.design_patch_workflow._pid_alive",
+                return_value=False,
+            ):
+                recovered = recover_verified_patch_workflow(paths["workflow_manifest"])
             _, after = read_verified_patch_workflow(paths["workflow_manifest"])
             self.assertEqual(recovered["action"], "finalized-committed")
             self.assertEqual(after["state"], "committed")
             self.assertTrue(Path(paths["receipt_path"]).is_file())
+
+    def test_recovery_rolls_back_a_prepublication_patch_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design, patch_file, _ = _documents(root)
+            original = design.read_bytes()
+            approval, paths = self._approve(root, design, patch_file)
+
+            def crash(stage: str) -> None:
+                if stage == "prepared":
+                    raise SimulatedWorkflowCrash(stage)
+
+            with patch(
+                "multisim_mcp.design_patch_transactions._patch_crash_point",
+                side_effect=crash,
+            ):
+                with self.assertRaises(SimulatedWorkflowCrash):
+                    execute_verified_patch_application(
+                        _experiment_service("pass"),
+                        str(design),
+                        str(patch_file),
+                        output_path=None,
+                        in_place=True,
+                        regenerate_source_netlist=True,
+                        approval_token=str(approval["approval_token"]),
+                        approval_store=str(root / "approvals"),
+                        **paths,
+                    )
+            self.assertTrue(find_patch_transaction_journals(str(design)))
+            with patch(
+                "multisim_mcp.design_patch_workflow._pid_alive",
+                return_value=False,
+            ), patch(
+                "multisim_mcp.design_patch_transactions._pid_alive",
+                return_value=False,
+            ):
+                recovered = recover_verified_patch_workflow(paths["workflow_manifest"])
+            self.assertEqual(recovered["action"], "confirmed-no-commit")
+            self.assertFalse(find_patch_transaction_journals(str(design)))
+            self.assertEqual(design.read_bytes(), original)
+            self.assertFalse(Path(paths["receipt_path"]).exists())
 
     def test_recovery_rejects_tampered_passing_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -372,8 +426,39 @@ class VerifiedPatchWorkflowTest(unittest.TestCase):
             (Path(paths["experiment_output"]) / "verification.json").write_text(
                 '{"overall_status":"fail"}\n', encoding="utf-8"
             )
-            with self.assertRaisesRegex(ValueError, "verification_sha256"):
-                recover_verified_patch_workflow(paths["workflow_manifest"])
+            with patch(
+                "multisim_mcp.design_patch_workflow._pid_alive",
+                return_value=False,
+            ):
+                with self.assertRaisesRegex(ValueError, "verification_sha256"):
+                    recover_verified_patch_workflow(paths["workflow_manifest"])
+
+    def test_legacy_workflow_manifest_is_readable_but_recovery_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            design, patch_file, _ = _documents(root)
+            approval, paths = self._approve(root, design, patch_file)
+            result = execute_verified_patch_application(
+                _experiment_service("fail"),
+                str(design),
+                str(patch_file),
+                output_path=None,
+                in_place=True,
+                regenerate_source_netlist=True,
+                approval_token=str(approval["approval_token"]),
+                approval_store=str(root / "approvals"),
+                **paths,
+            )
+            self.assertEqual(result["state"], "rejected")
+            manifest_path = Path(paths["workflow_manifest"])
+            legacy = json.loads(manifest_path.read_text(encoding="utf-8"))
+            legacy["schema_version"] = 1
+            legacy.pop("owner_pid")
+            manifest_path.write_text(json.dumps(legacy), encoding="utf-8")
+            _, readable = read_verified_patch_workflow(str(manifest_path))
+            self.assertEqual(readable["schema_version"], 1)
+            with self.assertRaisesRegex(RuntimeError, "owner PID safety"):
+                recover_verified_patch_workflow(str(manifest_path))
 
 
 if __name__ == "__main__":

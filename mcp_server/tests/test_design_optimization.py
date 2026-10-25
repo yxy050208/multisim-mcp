@@ -10,6 +10,7 @@ from pathlib import Path
 
 from multisim_mcp.design_optimization import (
     DesignOptimizationService,
+    evaluate_optimization_layout,
     read_design_optimization,
     validate_optimization_spec,
 )
@@ -394,6 +395,106 @@ class DesignOptimizationTest(unittest.TestCase):
             self.assertEqual(stored["evaluations"][2]["status"], "procurement_fail")
             header = (output / "candidates.csv").read_text(encoding="utf-8").splitlines()[0]
             self.assertIn("part_numbers", header)
+
+    def test_layout_pass_replays_each_parameter_candidate_and_combines_ranking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "optimization"
+            DesignOptimizationService(_service()).run(
+                _design(),
+                _spec(["500", "2k", "4k"], budget=4),
+                str(output),
+            )
+            seen: list[tuple[str, str]] = []
+
+            def evaluator(netlist: str, positions: object, evaluation_id: str):
+                del positions
+                match = re.search(r"(?mi)^R2\s+out\s+0\s+(\S+)\s*$", netlist)
+                assert match is not None
+                seen.append((evaluation_id, match.group(1)))
+                return {
+                    "layout_validation": {
+                        "status": "pass",
+                        "crossings_per_wire": 0.0,
+                        "findings": [],
+                    },
+                    "wire_fallbacks": 0,
+                }
+
+            result = evaluate_optimization_layout(
+                output,
+                {"V1": [0, 100], "R1": [100, 100], "R2": [300, 100]},
+                max_candidates=2,
+                layout_evaluator=evaluator,
+            )
+            self.assertTrue(result["success"])
+            self.assertEqual(result["status"], "pass")
+            self.assertEqual(result["evaluated_count"], 4)
+            self.assertEqual(result["selected"]["candidate_id"], "candidate-002")
+            self.assertEqual(
+                list(dict.fromkeys(item[0] for item in seen)),
+                ["baseline", "candidate-001", "candidate-002", "candidate-003"],
+            )
+            self.assertEqual(
+                {item[0]: item[1] for item in seen},
+                {
+                    "baseline": "1k",
+                    "candidate-001": "500",
+                    "candidate-002": "2k",
+                    "candidate-003": "4k",
+                },
+            )
+            self.assertTrue((output / "layout-plan.json").is_file())
+            self.assertTrue((output / "layout-results.json").is_file())
+            self.assertTrue((output / "combined-ranking.json").is_file())
+            read_design_optimization(output, verify=True)
+
+    def test_layout_materialization_is_explicit_and_keeps_native_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "optimization"
+            DesignOptimizationService(_service()).run(
+                _design(), _spec(["2k"], budget=2), str(output)
+            )
+            materialized: list[str] = []
+
+            def evaluator(netlist: str, positions: object, evaluation_id: str):
+                del netlist, positions, evaluation_id
+                return {
+                    "layout_validation": {
+                        "status": "pass",
+                        "crossings_per_wire": 0.0,
+                        "findings": [],
+                    },
+                    "wire_fallbacks": 0,
+                }
+
+            def materializer(netlist: str, optimization: object, output_ms14: str):
+                del netlist, optimization
+                Path(output_ms14).write_bytes(b"ms14")
+                materialized.append(output_ms14)
+                return {
+                    "success": True,
+                    "state": "materialized",
+                    "native_acceptance": "pending",
+                    "ms14": output_ms14,
+                }
+
+            result = evaluate_optimization_layout(
+                output,
+                {"V1": [0, 100], "R1": [100, 100], "R2": [300, 100]},
+                max_candidates=1,
+                layout_evaluator=evaluator,
+                materialize=True,
+                materializer=materializer,
+            )
+            self.assertTrue(result["success"])
+            self.assertEqual(len(materialized), 2)
+            self.assertTrue(all(Path(path).is_file() for path in materialized))
+            self.assertTrue(
+                all(
+                    item["materialized"]["native_acceptance"] == "pending"
+                    for item in json.loads((output / "layout-results.json").read_text(encoding="utf-8")).values()
+                )
+            )
 
     def test_lower_cost_breaks_an_equal_measured_objective_tie(self) -> None:
         inventory = [

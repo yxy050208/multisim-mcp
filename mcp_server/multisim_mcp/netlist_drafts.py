@@ -173,10 +173,11 @@ _COMPONENT_REQUIREMENTS: Final[
     ),
     "signal-active": (
         (0, "input protection", ("series-resistor", "clamp-diode")),
-        (1, "active filter", ("rail-to-rail-op-amp", "instrumentation-amplifier")),
+        (1, "active filter", ("rail-to-rail-op-amp", "instrumentation-amplifier", "ideal-opamp5")),
         (2, "gain and level shift network", ("precision-resistor-network", "voltage-reference")),
-        (3, "ADC driver and charge bucket", ("op-amp-buffer", "rc-network")),
+        (3, "ADC driver and charge bucket", ("op-amp-buffer", "rc-network", "ideal-opamp5")),
         (1, "supply decoupling", ("ceramic-capacitor",)),
+        (0, "input low-pass capacitance", ("capacitor", "ceramic-capacitor")),
     ),
     "signal-digital": (
         (0, "input protection", ("series-resistor", "clamp-diode")),

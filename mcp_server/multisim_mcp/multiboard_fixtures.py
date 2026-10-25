@@ -29,7 +29,7 @@ from .spice_adapter import circuit_design_to_spice
 
 FIXTURE_SCHEMA_VERSION = 1
 FIXTURE_KINDS = frozenset(
-    {"voltage_source", "resistor_termination", "ground_reference", "observation"}
+    {"voltage_source", "resistor_termination", "ground_reference", "observation", "circuit_fragment"}
 )
 GROUND_NET_ALIASES = frozenset({"0", "gnd", "ground"})
 _TOKEN = re.compile(r"^[^\s\x00]+$")
@@ -72,6 +72,10 @@ def _fixture_object(raw: object, index: int) -> dict[str, Any]:
         "quantity",
         "label",
         "notes",
+        "components",
+        "ports",
+        "source_compiled_digest",
+        "model_scope",
     }
     unknown = set(raw) - allowed
     if unknown:
@@ -92,7 +96,14 @@ def _fixture_object(raw: object, index: int) -> dict[str, Any]:
         "kind": kind,
         "net": net,
     }
-    if kind in {"voltage_source", "resistor_termination"}:
+    if kind == "circuit_fragment":
+        if set(raw) & {"refdes", "value", "model", "reference_net", "quantity", "label"}:
+            raise ValueError("circuit_fragment uses explicit components and ports only")
+        from .linear_fixture_fragments import normalize_linear_fragment
+        normalized.update(normalize_linear_fragment(raw, net))
+    elif set(raw) & {"components", "ports", "source_compiled_digest", "model_scope"}:
+        raise ValueError("fragment fields require kind=circuit_fragment")
+    elif kind in {"voltage_source", "resistor_termination"}:
         reference_net = _token(raw.get("reference_net"), f"fixtures[{index}].reference_net")
         refdes = _text(raw.get("refdes"), f"fixtures[{index}].refdes")
         if not _REFDES.fullmatch(refdes):
@@ -194,7 +205,11 @@ def validate_multiboard_fixture_contract(
         }
         for board_id, board in board_by_id.items()
     }
-    seen_driver_nets: set[tuple[str, str]] = set()
+    from .linear_fixture_fragments import driven_nets
+    seen_driver_nets: set[tuple[str, str]] = {
+        (board_id, net) for board_id, board in board_by_id.items()
+        for net in driven_nets(list(_board_components(board)))
+    }
     seen_observation_nets: set[tuple[str, str]] = set()
     declared_terminal_counts: dict[tuple[str, str], int] = defaultdict(int)
     for board_id, board in board_by_id.items():
@@ -225,7 +240,25 @@ def validate_multiboard_fixture_contract(
         nets = _board_nets(board)
         if net not in nets:
             violations.append({"fixture": fixture_id, "constraint": "net", "message": f"net {net!r} is absent from board {board_id!r}"})
-        if fixture["kind"] in {"voltage_source", "resistor_termination"}:
+        if fixture["kind"] == "circuit_fragment":
+            fragment = fixture["components"]
+            port_set = set(fixture["ports"])
+            fragment_nodes = {n for p in fragment for n in p["nodes"]}
+            if not port_set <= nets or (fragment_nodes & nets) - port_set:
+                violations.append({"fixture": fixture_id, "constraint": "fragment_ports", "message": "fragment must declare every board attachment and valid board ports"})
+            for part in fragment:
+                ref = part["refdes"].casefold()
+                if ref in seen_refs[board_id]:
+                    violations.append({"fixture": fixture_id, "constraint": "refdes", "message": f"fragment refdes {ref!r} collides on {board_id!r}"})
+                seen_refs[board_id].add(ref)
+                for node in part["nodes"]:
+                    declared_terminal_counts[(board_id, node.casefold())] += 1
+            for driven in driven_nets(fragment):
+                key = (board_id, driven)
+                if key in seen_driver_nets:
+                    violations.append({"fixture": fixture_id, "constraint": "multiple_drivers", "message": f"fragment directly drives occupied source net {driven!r}"})
+                seen_driver_nets.add(key)
+        elif fixture["kind"] in {"voltage_source", "resistor_termination"}:
             reference_net = fixture["reference_net"]
             if reference_net not in nets:
                 violations.append({"fixture": fixture_id, "constraint": "reference_net", "message": f"reference net {reference_net!r} is absent from board {board_id!r}"})
@@ -274,7 +307,8 @@ def validate_multiboard_fixture_contract(
                 net = str(interface.get("net", "")).strip()
                 if net:
                     interface_keys.add((board_id, net.casefold()))
-    covered = {(item["board_id"], item["net"].casefold()) for item in normalized}
+    covered = {(item["board_id"], n.casefold()) for item in normalized
+               for n in (item["ports"] if item["kind"] == "circuit_fragment" else [item["net"]])}
     uncovered = [
         {"board_id": board_id, "net": net}
         for board_id, net in sorted(interface_keys)
@@ -332,7 +366,14 @@ def materialize_multiboard_fixture_artifacts(
         comments: list[str] = []
         for fixture in board_fixtures:
             kind = fixture["kind"]
-            if kind == "voltage_source":
+            if kind == "circuit_fragment":
+                fixture_components.extend(
+                    CircuitComponent.from_dict({**p, "annotations": {**p["annotations"],
+                        "role": "explicit multiboard circuit fixture", "fixture_id": fixture["id"],
+                        "source_compiled_digest": fixture["source_compiled_digest"]}})
+                    for p in fixture["components"]
+                )
+            elif kind == "voltage_source":
                 fixture_components.append(CircuitComponent(
                     refdes=fixture["refdes"], kind="V",
                     nodes=(fixture["net"], fixture["reference_net"]),
@@ -355,7 +396,7 @@ def materialize_multiboard_fixture_artifacts(
             design_id=f"{design.design_id}.fixture-{hashlib.sha256(board_id.encode('utf-8')).hexdigest()[:10]}",
             title=f"{design.title} [explicit test fixtures]",
             components=all_components,
-            nets=design.nets,
+            nets=tuple(dict.fromkeys(n for p in all_components for n in p.nodes)),
             parameters=design.parameters,
             model_references=design.model_references,
             annotations={

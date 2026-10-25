@@ -3,7 +3,8 @@
 The regular ``workbench-api`` command intentionally exposes only JSON routes.
 This module adds a small static-file layer around the same loopback server so a
 local user can start the browser workbench and its API with one command.  It
-does not add remote hosting, file browsing, or execution endpoints.
+does not add remote hosting or file browsing; optional DesignPatch writes stay
+behind the parent server's explicit ``enable_writes`` switch.
 """
 
 from __future__ import annotations
@@ -129,6 +130,7 @@ class WorkbenchAppHTTPServer(WorkbenchHTTPServer):
         verify: bool,
         max_entries: int,
         max_depth: int,
+        enable_writes: bool,
     ) -> None:
         # WorkbenchHTTPServer currently fixes its handler class to the API-only
         # handler, so initialise the stdlib base directly for this variant.
@@ -140,6 +142,7 @@ class WorkbenchAppHTTPServer(WorkbenchHTTPServer):
         self.verify = verify
         self.max_entries = max_entries
         self.max_depth = max_depth
+        self.enable_writes = enable_writes
 
 
 class IPv6WorkbenchAppHTTPServer(WorkbenchAppHTTPServer):
@@ -155,10 +158,13 @@ def create_workbench_app_server(
     verify: bool = True,
     max_entries: int = 256,
     max_depth: int = 5,
+    enable_writes: bool = False,
 ) -> WorkbenchAppHTTPServer:
     """Create, but do not start, the combined local application server."""
     normalized_host = _loopback_host(host)
     _port(port)
+    if not isinstance(enable_writes, bool):
+        raise ValueError("enable_writes must be a boolean")
     # Reuse the API constructor's strict project validation and limits.
     from .project_inspection import inspect_project
 
@@ -175,6 +181,7 @@ def create_workbench_app_server(
         verify=verify,
         max_entries=max_entries,
         max_depth=max_depth,
+        enable_writes=enable_writes,
     )
 
 
@@ -187,6 +194,7 @@ def serve_workbench_app(
     verify: bool = True,
     max_entries: int = 256,
     max_depth: int = 5,
+    enable_writes: bool = False,
     ready=None,
 ) -> None:
     """Serve the combined local app until interrupted."""
@@ -198,6 +206,7 @@ def serve_workbench_app(
         verify=verify,
         max_entries=max_entries,
         max_depth=max_depth,
+        enable_writes=enable_writes,
     )
     if ready is not None:
         ready(server)

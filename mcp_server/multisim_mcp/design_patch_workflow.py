@@ -17,8 +17,11 @@ from typing import Any, Final, Mapping
 from .design_patch_service import PreparedDesignPatch, prepare_design_patch
 from .design_patch_transactions import (
     DEFAULT_APPROVAL_TTL_SECONDS,
+    _pid_alive,
     apply_patch_transaction,
     approve_patch_apply,
+    find_patch_transaction_journals,
+    recover_patch_transaction,
     read_design_document,
     read_patch_document,
     read_transaction_receipt,
@@ -31,7 +34,8 @@ from .spice_adapter import circuit_design_to_spice
 from .workspace_manifest import DIRECTORY_MANIFEST_NAME, read_directory_manifest
 
 
-PATCH_WORKFLOW_SCHEMA_VERSION: Final = 1
+PATCH_WORKFLOW_SCHEMA_VERSION: Final = 2
+LEGACY_PATCH_WORKFLOW_SCHEMA_VERSION: Final = 1
 MAX_VERIFICATION_PLAN_BYTES: Final = 1024 * 1024
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _APPROVAL_ID_RE = re.compile(r"^approval-[0-9a-f]{32}$")
@@ -402,6 +406,7 @@ def _initial_manifest(
         "created_at": now,
         "updated_at": now,
         "approval_id": approval_id,
+        "owner_pid": os.getpid(),
         "authorization_context_digest": contract.authorization_context_digest,
         "design_path": str(contract.design_source),
         "patch_path": str(contract.patch_source),
@@ -436,6 +441,14 @@ def _updated(
     value = dict(manifest)
     value["state"] = state
     value["updated_at"] = _timestamp()
+    if state in {
+        "rejected",
+        "experiment_error",
+        "commit_failed",
+        "committed",
+        "aborted",
+    }:
+        value["owner_pid"] = None
     if experiment is not None:
         value["experiment"] = dict(experiment)
     if transaction is not None:
@@ -446,7 +459,7 @@ def _updated(
 
 
 def _validate_workflow_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
-    allowed = {
+    common_allowed = {
         "schema_version",
         "kind",
         "workflow_id",
@@ -473,9 +486,18 @@ def _validate_workflow_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
         "transaction",
         "failure",
     }
+    schema_version = value.get("schema_version")
+    allowed = common_allowed | (
+        {"owner_pid"}
+        if schema_version == PATCH_WORKFLOW_SCHEMA_VERSION
+        else set()
+    )
     if set(value) != allowed:
         raise ValueError("workflow manifest fields are invalid")
-    if value.get("schema_version") != PATCH_WORKFLOW_SCHEMA_VERSION:
+    if schema_version not in {
+        LEGACY_PATCH_WORKFLOW_SCHEMA_VERSION,
+        PATCH_WORKFLOW_SCHEMA_VERSION,
+    }:
         raise ValueError("workflow manifest schema_version is invalid")
     if value.get("kind") != "multisim-mcp-verified-patch-workflow":
         raise ValueError("workflow manifest kind is invalid")
@@ -489,6 +511,14 @@ def _validate_workflow_manifest(value: Mapping[str, Any]) -> dict[str, Any]:
         value["approval_id"]
     ):
         raise ValueError("workflow manifest approval_id is invalid")
+    if schema_version == PATCH_WORKFLOW_SCHEMA_VERSION:
+        owner_pid = value.get("owner_pid")
+        if owner_pid is not None and (
+            isinstance(owner_pid, bool)
+            or not isinstance(owner_pid, int)
+            or owner_pid <= 0
+        ):
+            raise ValueError("workflow manifest owner_pid is invalid")
     for key in (
         "authorization_context_digest",
         "input_design_digest",
@@ -819,9 +849,36 @@ def execute_verified_patch_application(
 def recover_verified_patch_workflow(workflow_manifest: str) -> dict[str, Any]:
     """Finalize audit state or safely abort a crash-interrupted workflow."""
     path, manifest = read_verified_patch_workflow(workflow_manifest)
+    if manifest["schema_version"] != PATCH_WORKFLOW_SCHEMA_VERSION:
+        raise RuntimeError(
+            "legacy verified patch workflow lacks owner PID safety metadata; "
+            "manual patch journal recovery is required"
+        )
+    owner_pid = manifest.get("owner_pid")
+    if owner_pid is not None and _pid_alive(owner_pid):
+        raise RuntimeError(
+            f"verified patch workflow owner PID {owner_pid} is still running; "
+            "recovery refused"
+        )
     receipt_path = Path(manifest["receipt_path"]).resolve()
     target_path = Path(manifest["target_path"]).resolve()
     design_path = Path(manifest["design_path"]).resolve()
+    journals = find_patch_transaction_journals(str(target_path))
+    if journals:
+        recovery = recover_patch_transaction(
+            target_path=str(target_path),
+            action="auto",
+        )
+        expected_action = "commit" if receipt_path.is_file() else "rollback"
+        if recovery.get("action") != expected_action:
+            raise RuntimeError(
+                "verified workflow patch journal recovery did not reach the "
+                f"expected {expected_action} state"
+            )
+        if find_patch_transaction_journals(str(target_path)):
+            raise RuntimeError(
+                "verified workflow patch journal remains after recovery"
+            )
     if receipt_path.is_file():
         _, receipt = read_transaction_receipt(str(receipt_path))
         if receipt["approval_id"] != manifest["approval_id"]:

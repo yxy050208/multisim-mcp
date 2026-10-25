@@ -65,3 +65,43 @@ The 2026-10-03 local probe detected Multisim 14.3. The 14.3 entry is
 `api-verified`; 14.2 remains `unverified` until that version is installed and probed.
 The evidence is retained locally and does not include NI templates or installation
 files.
+
+## 2026-10-16 version gate refresh
+
+The local 32-bit worker detected `Multisim 14.3`. The refreshed matrix requested
+three exact targets:
+
+| Requested version | Status | Meaning |
+| --- | --- | --- |
+| `Multisim 14.3` | `api-verified` | Native Automation API probe matched the installed version |
+| `Multisim 14.2` | `unverified` | No 14.2 probe or component manifest is available |
+| `Multisim 14.3.1` | `unverified` | Patch-level drift is not borrowed from 14.3 |
+
+The machine reported 32-bit Python and Multisim 14.3. The evidence directory is
+`release/multisim-compatibility-20261016-v2`; its `matrix.json`, `native-api.json`,
+and `runtime.json` are bound by a SHA-256 `manifest.json`. This proves the API
+surface probe only. It does not certify component mappings, schematic round-trip,
+or transient behavior for 14.2 or 14.3.1. Those versions require their own
+licensed installation, extracted templates, exact manifest, and native regression
+before being marked verified.
+
+## Component mapping matrix
+
+The component layer now exposes a separate exact-version mapping matrix. It records
+the manifest SHA-256, logical family, native name, pin signature, model source and
+per-entry `native-verified`/`native-unverified` status. It never copies a mapping from
+a neighboring version:
+
+```powershell
+$env:PYTHONPATH = '.;mcp_server'
+python tools/build_component_mapping_matrix.py `
+  --target-version 14.3 `
+  --target-version 14.2 `
+  --target-version 14.3.1 `
+  --output C:\Temp\component-mapping-matrix.json
+```
+
+The current source matrix contains an exact `14.3` manifest with 15 component
+entries, 14 marked `native-verified`; `14.2` and `14.3.1` remain
+`manifest-unavailable` with empty mappings. This is a manifest evidence report,
+not a claim that the current machine can execute every listed component.

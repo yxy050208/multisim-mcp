@@ -16,6 +16,7 @@ from typing import Any, Final
 
 from .agent_runtime import ToolBinding
 from .eda_core import CircuitComponent, CircuitDesign
+from .model_provenance import has_declared_model_license
 from .model_provider import ModelCancelled, ToolDefinition
 
 
@@ -415,11 +416,11 @@ class ReadOnlyEdaTools:
                     "A model reference has no SHA-256 traceability digest.",
                     {"model": model.name},
                 )
-            if model.license is None:
+            if not has_declared_model_license(model.license):
                 add(
                     "info",
                     "model-license-absent",
-                    "A model reference has no recorded license metadata.",
+                    "A model reference has no usable license declaration.",
                     {"model": model.name},
                 )
         result = self._base_result()

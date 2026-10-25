@@ -246,6 +246,14 @@ def _write_experiment_report(
                 "- Machine-readable evidence: `spice-compatibility.json`",
             ]
         )
+        declared_provenance = compatibility.get("model_provenance")
+        if isinstance(declared_provenance, Mapping):
+            lines.extend(
+                [
+                    f"- Declared model provenance digest: `{_markdown_text(declared_provenance.get('provenance_sha256', 'not recorded'))}`",
+                    f"- Declared model references: `{int(declared_provenance.get('model_count', 0))}`",
+                ]
+            )
     observation = simulation.get("digital_observation")
     if isinstance(observation, Mapping) and observation.get("overall_status") != "not-applicable":
         lines.extend(
@@ -619,6 +627,7 @@ class MultisimExperimentPipeline:
                 "model_fingerprint_sha256": compatibility[
                     "model_fingerprint_sha256"
                 ],
+                "model_provenance": compatibility.get("model_provenance"),
             }
             if approval_provenance is not None:
                 manifest_metadata["approval_provenance"] = (

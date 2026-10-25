@@ -6,6 +6,246 @@
 
 ### 中文
 
+- 后续变更将在下一版本记录；发布分支中的 1.3.0 内容已冻结，等待 CI、标签和在线发布物核验。
+
+### English
+
+- Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
+
+## [1.3.0] - 2026-10-25
+
+### 中文
+
+- 修复 DeepSeek Harness 0.2.1-rc.2 将插件隐藏为不兼容的问题：发布候选
+  `multisim-mcp-dsh-plugin@1.3.0-rc.4` 固定使用 `@deepseek-ai/dsh-mcp-client@0.2.1-rc.2`，
+  并声明 `engines.dsh`；兼容性门禁现在会检查该声明及新版 MCP Client 依赖。
+
+- 新增 ARTEX 风格工程 Agent 工作流合同：`AgentTask`、`TaskChain`、`ArtifactRef`、
+  `ApprovalGate` 和 `TaskEvent`。任务链进行 DAG 依赖校验，事件 ID 可确定性去重，产物
+  只允许相对定位器或不透明 URI，审批对象不携带 bearer token；合同已进入
+  `api_contract.agent_workflow` 能力发现，尚未改变现有 durable job 存储或自动执行边界。
+- 新增只读 Workbench `POST /api/agent-workflow/plan`：根据自然语言需求生成方案、网表、
+  布局、原生实验、优化和报告任务链；该入口只返回审阅图，`execution_started=false`，
+  不调用模型、不写文件、不启动 Multisim。
+- 新增传输无关 `AgentWorkflowExecutor`：按任务依赖执行注入的处理器，在审批门暂停，
+  对可重试节点进行有界重试，并在处理器缺失或失败时失败关闭；默认仅接入需求审查和
+  `plan_design_options`，不会自动调用 Multisim。
+- 新增目录级参数-布局联调入口 `evaluate_optimization_layout`：从已完成的
+  `optimization.json` 恢复每个可逆参数候选网表，逐个执行有界单板布局搜索，保存
+  `layout-plan.json`、`layout-results.json` 和 `combined-ranking.json`，并按电气硬约束
+  与几何硬门禁联合选出候选；可选材料化仍明确返回 `native_acceptance=pending`，不把
+  构建器预检冒充 Multisim 原生验收。
+- `evaluate_optimization_layout` 已接入 MCP 的 `optimization` profile；传入优化目录、
+  基线元件坐标和可选探针即可由 Agent 直接启动该联调，工具总数更新为 full=123、
+  optimization=71，旧 profile 的其他工具集合保持不变。
+- 新增单板有界布局优化层 `optimize_layout_positions`：以真实 dry-run 几何门禁评估基线和
+  局部移动候选，优先选择无错误、无回退导线、低交叉率、少弯折和短导线的方案；不会
+  修改网表或 `.ms14`，仍需后续保存重开、拓扑和仿真验收。
+- 收紧版本化元件清单校验：元件族、原生名、模型来源和引脚必须为非空字符串，版本列表
+  必须是非空字符串，`verified` 必须是真布尔值；错误清单会在映射选择前失败关闭。
+- 几何预检现在对非有限或非正的元件坐标/尺寸、非有限导线点和零长度导线段失败关闭，
+  并将 `clearance` 校验为有限非负数，避免异常几何进入原生工程生成或被误判为可交付。
+- 新增 `ContinuousResponseContract` 与 `compare_continuous_response_series`，对原生瞬态
+  自适应采样轴上的 RC 输出做失败关闭的特征验收：初值、最终值、峰值、谷值、响应范围、
+  分析端点和极值时间；不重采样整条波形，缺失/非有限/不完整数据不会通过。`adc4_dac4_transfer_split`
+  现同时纳入 ADC/DAC 16 级转换合同和 `filt` 连续响应合同。
+- 重新完成 ADC4/DAC4 transfer 的 Multisim 14.3 原生闭环：42 个归档文件、878 个采样值，
+  `accepted/native-verified`；故障矩阵扩展为 10 类并全部拒绝。证据目录为
+  `release/hybrid-multiboard-native-20261016-adc4-dac4-transfer-r3c`，不进入公开发布包。
+- `adc4_dac4_edge_split` 进一步在四路数字边沿合同之外加入 `filt` 连续响应合同；Multisim
+  14.3 原生归档 `release/hybrid-multiboard-native-20261016-adc4-dac4-edge-r2` 通过，离线
+  复核检查 42 个文件、696 个采样值，连续响应和数字边沿故障矩阵 9/9 全部拒绝。
+- 新增 `build_component_mapping_matrix` 与 `tools/build_component_mapping_matrix.py`，输出
+  精确版本 manifest 的 SHA-256、元件族、原生名、引脚签名、模型来源和逐项验证状态。
+  当前 14.3 清单为 15 项（14 项 `native-verified`），14.2 与 14.3.1 明确保持
+  `manifest-unavailable`，不会跨版本回退。
+- `dnot4_rc_split` 复用 `ContinuousResponseContract` 验证普通数字源到 RC 负载的完整参考
+  一致性；Multisim 14.3 归档检查 42 个文件、1,090 个请求电压采样值，`filt` 最终值 `4.6656276 V`，
+  故障矩阵 8/8 全部拒绝。
+- 新增 `vcvs_rc_split` 与 `vccs_rc_split` 受控源双板案例。VCVS 跨板传递 `raw` 并验证
+  接收端 RC；VCCS 采用 `ctrl` 控制信号跨板、接收板保留真实 G 源，避免无负载电流源
+  输出电压的错误比较。两例均在 Multisim 14.3 原生通过，分别以 522/392 个请求电压
+  采样值和 8/8 故障拒绝完成证据闭环。
+- 新增受控源参数角落矩阵：VCVS 增益 `0.5/2`、VCCS 跨导 `0.5mS/2mS`。四个 Multisim
+  14.3 原生角落均通过接口、完整参考和连续响应门禁，各自故障矩阵 8/8 拒绝；VCVS
+  接收夹具高电平按声明增益生成，VCCS 继续采用 `ctrl` 跨板边界。
+- 新增受控源负载变化角落：VCVS 串联电阻 `500Ω`、滤波电容 `2µF`，VCCS 串联电阻 `2kΩ`、
+  并联负载 `50kΩ`。四个 Multisim 14.3 原生角落均通过，分别完成 8/8 故障拒绝。
+- 新增受控源组合角落回归：`vcvs_rc_split_combo_low` 同时覆盖增益 `0.5`、串联电阻 `500Ω`、
+  滤波电容 `2µF`；`vccs_rc_split_combo_high` 同时覆盖跨导 `2mS`、串联电阻 `2kΩ`、
+  并联负载 `50kΩ`。两个 Multisim 14.3 原生归档均为 `accepted/native-verified`，各自
+  故障矩阵 8/8 拒绝；结果限定于声明的离散参数点、模型、夹具和版本。
+- `run_hybrid_multiboard_regression.py` 新增无 COM 的 `--list`，输出全部已登记案例及其
+  合同摘要，便于后续按 Multisim 版本批量准备和核对独立验收任务。
+
+- 增加 `adc1_dac1_split` 受限单比特 ADC→DAC 双板回归：两板通过 Multisim 14.3
+  `HDR1X4` 交换 `digital`、`high` 和双地，接收端使用显式 BV 数字夹具与独立 5 V
+  电源夹具，RC 输出完成保存重开、拓扑、布局、探针、瞬态、跨板和完整参考验收，状态为
+  `accepted/native-verified`。案例输入固定为 `DC 5`，只证明稳定阈值基线，不外推跳变输入
+  的边沿动态；对应归档复核检查 42 个文件、348 个采样值，7/7 故障注入全部拒绝。
+- `explicit-digital-fixture` 现在允许受限的 `BV` 行为适配器，同时继续拒绝未知器件、缺少
+  数字适配器或不完整端口合同；混合多板离线复核器和故障矩阵会根据归档中的 `case_id`
+  选择正确的板、探针和完整参考合同，并兼容旧 DNOT4 归档。
+- 增加 `adc4_dac4_split` 四位混合双板基线：使用两个已验证 `HDR1X4`，分别承载四位数据
+  与电源/地；结构化模型字段扩展到有界 4 KiB 以容纳 ADC4 的嵌套行为表达式。稳定 `DC 5`
+  输入下，8 个跨板连接器引脚、逐板保存重开、瞬态、完整参考和 7/7 故障拒绝均通过；这
+  仍是声明的便携 BV 模型合同，不等同于真实芯片精度或动态性能认证。
+- 新增 `DigitalEdgeComparisonContract` 与 `tools/compare_digital_edge_series.py`，用于对
+  自适应瞬态轴上的数字边沿做失败关闭的事件比较。它只比较初末电平、边沿方向/数量和
+  阈值穿越时刻，不插值整条波形；在 ADC1 跳变失败归档上识别 5 个边沿，最大时刻差
+  `1.064e-10 s`，作为动态证据层保留，不能替代模拟波形或器件动态验收。
+- 新增 `adc1_dac1_edge_split` 原生动态案例：数字接口和完整参考使用事件合同，模拟/供电
+  网络继续使用完整采样门禁；Multisim 14.3 保存重开、拓扑、布局、瞬态和边沿比较全部
+  `accepted/native-verified`。动态归档故障矩阵覆盖 8 类篡改，缺失事件、方向、数量或
+  时刻证据均失败关闭。
+- 增加 `adc4_dac4_edge_split` 四位跳变案例：四路编码边沿和完整参考使用事件合同，
+  `filt` 另行使用连续响应合同；两个 `HDR1X4` 的 8 个连接器引脚、逐板保存重开、拓扑、
+  布局和标量接口均通过，状态为 `accepted/native-verified`。原始 DAC `analog_out` 仍由
+  转换案例单独验收；对应故障矩阵现覆盖 9 类篡改并全部拒绝。
+
+- 新增受限混合数字/模拟双板原生验收案例：数字 `DNOT4` 板通过 14.3 `HDR1X4` 将
+  `sig`、供电和双地连接到 RC 负载板；接收端边界使用显式 `explicit-digital-fixture`，
+  只允许 V、DNOT4 和 R/C/L。Multisim 14.3 逐板保存重开、拓扑、探针、瞬态、跨板序列和
+  完整参考均通过，状态为 `accepted/native-verified`。严格采样轴和缺少接收端夹具的失败
+  证据保持失败关闭；新增 CLI 回归入口可在不启动 COM 时输出逻辑合同和夹具 digest；
+  该案例不扩展为任意多板联调或 PCB 生产能力。
+- 新增混合多板离线证据复核和故障矩阵：归档 manifest、夹具 digest、连接器 P1–P4、
+  探针映射、重开拓扑、采样轴、完整参考和文件哈希均会失败关闭；本机 7/7 故障注入
+  全部被拒绝，复核过程不启动 COM。
+
+- 刷新版本准入矩阵：32 位 worker 实测检测到 Multisim 14.3，14.3 标记为
+  `api-verified`；14.2 与 14.3.1 保持 `unverified`，不借用 14.3 的元件或电路结论。
+  `runtime.json`、`native-api.json`、`matrix.json` 由 SHA-256 manifest 绑定；该证据只
+  覆盖 Automation API 探测，完整元件和电路族仍须按版本独立原生回归。
+
+- 修复混合信号回归中生成适配器输出探针的原生重开遗漏：当最长中段导线距离异网仅
+  8 个绘图单位以内时，不再把探针放在线路中段，而是退回到已验证的元件端点；安全
+  直线仍保留中段探针以改善图面。新增近旁异网与安全中段单测。Multisim 14.3 实机
+  重新验证 `shift_s0_rc_load` 和 `adc4_rc_bridge`，保存重开、ReportNetlist、布局、
+  引脚、瞬态和全部请求输出均通过，混合信号矩阵恢复为 13/13。该规则解决的是探针
+  持久化/观测通道问题，不改变网络拓扑；探针返回值现在同时记录源网络、候选元件端点、
+  实际落点和 `terminal`/`interior` 选择，便于后续适配器审计。结果也不外推到其他版本。
+
+- 统一实验链路中的模型来源留证：`ModelReference` 与元件选择的 `model_source` 现在
+  归一到同一 `model_provenance` 合同。SPICE 兼容性审计、实验目录 manifest、Markdown
+  报告和资源摘要会共享来源、SHA-256、许可证状态及确定性 digest；缺失声明保持为
+  `missing`/`unknown`，不会自动读取或下载模型，也不改变旧调用接口。
+
+- 新增 `DesignPatchApplicationService` 作为补丁审批、持久化应用、回滚和崩溃恢复的
+  传输无关应用层；CLI 已切换到该入口，保留原有一次性令牌、目标锁、事务回执和
+  journal 语义。后续 MCP/Workbench 写入适配器可复用同一服务，不复制事务逻辑。
+
+- Workbench loopback API 增加显式 `--enable-writes` 开关及受项目根目录约束的补丁审批、
+  应用、回滚和恢复路由。默认只读行为保持不变；HTTP 不返回 bearer token，令牌只写入
+  本地文件并由同一 `DesignPatchApplicationService` 消费。
+
+- Workbench 增加验证后提交路由，复用现有 verification-plan、实验 manifest 和 workflow
+  journal。只有真实实验的全部硬约束通过才写回设计，失败候选不会自动提交。
+
+- MCP `full` profile 新增七个补丁事务工具，统一复用 `DesignPatchApplicationService`：
+  基础审批、应用、回滚、恢复，以及验证后审批、实验提交和恢复。审批只把一次性令牌
+  写入调用方指定的新文件，响应不返回 bearer token；执行只读取令牌文件并明确返回
+  写入、仿真、提交和失败候选保留状态。受限 `core`、`experiment`、`optimization`
+  profile 保持原工具集合，DeepSeek Harness full 契约更新为 122 个工具。
+
+- 加强验证后 workflow 恢复安全性：manifest 绑定 owner PID，运行中的实验拒绝恢复；
+  已有回执但残留底层 patch journal 时，恢复先完成 journal 的摘要、审批和清理校验，
+  不再把未消费或未清理的事务直接标记为 committed。
+
+- 验证后 workflow manifest 升级到 schema 2。旧 schema 1 清单仍可读取用于审计，但因缺少
+  owner PID 元数据，恢复会失败关闭并要求人工处理底层 journal，避免兼容迁移降低安全性。
+
+- 重新完成复杂数字原生回归：Multisim 14.3 单板矩阵 5/5 通过，命名引脚 141/141 通过；
+  两个双板 HDR1X4 案例在 DC/TRAN/AC 共 6/6 次 `accepted/native-verified`。实测覆盖
+  保存重开、ReportNetlist、布局、跨板接口、完整参考、远端 1 kΩ 负载和报告导出；证据及
+  本地模板包不进入开源仓库，也不外推为任意数字拓扑或其他 Multisim 版本保证。
+
+- `compare_design_variants` 现在支持同一基准 `CircuitDesign` 的 `DesignPatch` 候选：
+  补丁先按 compare-and-swap 合同在内存中校验和应用，再沿用统一实验、硬约束和实测排名。
+  候选补丁副本与设计一起写入比较目录并纳入 manifest；流程保持只读，不会自动修改或采纳
+  源工程。完整设计候选的旧调用方式保持兼容。
+
+- 新增受限真实 LM324AJ 双板合同层：固定 `sensor`/`conditioner` 分区、`HDR1X4` 的
+  `P1=stage1`、`P2=vcc`、`P3=vss`、`P4=0` 和 LM324AJ A 单元端子顺序；接收板使用
+  明确声明的原生上游电路夹具。新增保存重开后的全引脚、R/C SI 值、LM324AJ/LM158_4
+  `CiModel` 指纹门禁与离线故障注入回归。现有 MCP 多板工具可通过 `vendor_contract`
+  复用该合同；预览不启动 COM。范围仅为 Multisim 14.3、本机授权模型和固定拓扑，
+  不包含任意供应商多板、跨板联合优化或高级排线。详见
+  `docs/VENDOR_MULTIBOARD_ACCEPTANCE_20261011.md`。
+
+- 完成真实 LM324AJ 双板的最终原生闭环：发送板实验显式加入接收端 LM324AJ 输入/负载
+  夹具，避免 AC/TRAN 独立板边界条件失真；通用验收器新增可审计的比较门槛参数，默认
+  仍为 `1e-9 V`，LM324AJ 合同明确使用 `1e-7 V`。Multisim 14.3/Python 3.13 64 位下
+  OP、AC、TRAN 三种分析均 `accepted/native-verified`，TRAN 仅在调用方显式选择
+  `series_alignment=linear` 时进行自适应轴重采样。真实模型、逐板/完整参考、接口序列、
+  引脚、R/C 与 `CiModel` 指纹均已归档；本机证据不进入公开仓库。
+
+- 在真实双板验收结果中补充两份不含实验夹具的物理板图导出。每份板图都经过 Multisim
+  保存重开、HDR1X4 四针、LM324AJ 五端子、R/C SI 值和源/重开模型指纹检查，并写入 PNG、
+  SPICE、组件清单与 SHA-256 清单；物理板图只代表板级设计视图，不代表再次完成孤立板仿真、
+  PCB 制造或高级排线优化。
+
+- 用第二组 `100 mV / 增益 10 / 1 kHz / ±15 V / 100 kΩ` 需求重建同一 LM324AJ 双板合同，
+  OP/AC/TRAN 和两份物理板图再次全部通过；夹具值从批准设计派生，确认负载、供电、增益
+  和滤波参数没有被固定样例吞掉。
+
+- 增加真实双板证据归档复核器 `tools/verify_vendor_multiboard_evidence.py`，不启动 COM，
+  重新检查合同、分区、夹具、引脚、R/C、模型指纹、完整采样矩阵、接口/参考比较、物理
+  板图、报告和 SHA-256 清单。离线故障注入覆盖 13 类篡改，修改或重新计算错误哈希均保持失败。
+
+- 增加真实 LM324AJ 单板准入记录和 14.3 精确版本回归：锁定 `1IN+`、`1IN-`、`VS+`、
+  `VS-`、`1OUT` 的语义顺序，未校准工作点不达标时返回 `target-not-met`，测量反馈的
+  `VTRIM` 原型可在同一验收范围内重新生成并通过 OP/AC/TRAN。模型正文和授权模板仍只
+  在本机验证，不进入公开包；14.2、14.3.1 或其它版本不会借用 14.3 映射。详见
+  `docs/VENDOR_COMPONENT_ACCEPTANCE_20261011.md`。
+
+- 修正自然语言真实运放入口对 `±12 V` 供电的解析，并让低截止频率自动选择远离截止点的
+  通带采样窗口。第二个 `50 mV / 增益 5 / 500 Hz / 47 kΩ` 需求在 Multisim 14.3 上
+  经过 5 个未校准候选和 1 个测量反馈校准候选，最终 OP/AC/TRAN 原生采样通过；失败候选
+  仍保留为 `target-not-met`，没有放宽指标。
+
+- 完成固定理想双板信号流程的首个公开需求回归矩阵：六组增益、偏置、源阻抗、截止频率
+  与非零输入相位变体，在 Multisim 14.3 上共 12/12 OP/AC 原生分析通过；补充三板身份、
+  完整观测映射、采样状态/轴/有限数值和归档哈希门禁。7 类故意损坏的证据均被拒绝，
+  非数值阻容读回以明确可序列化失败返回。该结果仍限定于理想 OPAMP5、显式单向前级夹具
+  和基本双板联调，不代表真实运放、PCB 或高级布线优化。
+
+- 已审核 `signal-active` 显式夹具接入固定双板传感器流程，复用现有规划/验收工具；
+  前级 RC 电路片段保留 AC 幅相，来源及全部分区/元件/连接器进入一致性门禁。
+  HDR1X4 支持两根独立地线；保存重开严格核对全部引脚、SI 阻容与理想模型。
+  四组 Multisim 14.3 原生 OP/AC 验收通过，含 64 位主进程、独立板图与报告导出。
+  修复理想运放输出探针重开遗漏，仿真前拒绝请求探针缺失；补充不启动 COM 的证据复核。
+  图面仍需审阅；不宣称真实器件、PCB 或任意双向耦合联调。高级布局和联合优化不在本轮范围。
+
+- 有源编译新增显式 DC/AC 激励与源阻抗合同，组合前后摘要分别保存；新增夹具审阅项，
+  审批时重建全部组合连接，防止沿用旧凭证或修改源、负载与引脚。既有原生模拟入口支持
+  精确绑定新预览/审批，补充阻容回读、理想模型表达式及版本检查。Multisim 14.3 上四组
+  理想有源方案与默认输入两端点完成保存重开、OP/AC、PNG/CSV/HTML 导出，包含 64 位
+  主进程实机运行；能力发现记录具体案例。基础无激励输出保持兼容；未宣称真实芯片、
+  实物或任意拓扑验收，图面交叉与标签仍需审阅。详见有源模板本轮原生验收文档。
+
+- `signal-active` 接入统一元件解析、审批及 `CircuitDesign`/SPICE 预览链：显式理想
+  OPAMP5、独立滤波电容额定值审查、有限增益校正、源/负载合同和正负偏置，支持受限
+  放大/衰减与一阶低通。真实芯片不会静默替换成理想模型；模型合同进入审批摘要。
+  往返门禁核查引脚、数值、模型和参数；旧无源摘要保持兼容。独立节点计算及接口回归
+  属于软件证据；带显式夹具的本轮原生验收见上述新增记录，不改变既有公开工具数。
+
+- 新增共享工程能力发现：MCP `runtime_status`、元件目录支持可选 `target_version`，
+  本机 `/api/capabilities` 和只读 CLI `capabilities` 共用契约。分别返回旧目录标签、
+  受限工作流/profile、实际编译矩阵、精确版本元件映射与 SHA-256、公开文档原生案例。
+  缺少目标版本清单时不借用邻近版本；历史记录、相关底层实验和本机依赖不冒充当前
+  工程验收。已有契约字段与 115 个 MCP 工具保持兼容。
+
+- 明确后续开源/商业研发边界：开源推进复杂电路、基本多板联调和原生正确性验证；商业版
+  重点做安装和使用体验，后续专有多板优化、跨板整体优化及高级布局/排线优化独立维护。
+  已有公开代码保留原许可和贡献者归属。
+  发布审计与 wheel/sdist 检查拦截商业目录、商品归档和 NI 本地资产，CI 及公开发布工作流
+  在上传前执行同一边界门禁；Git 候选路径使用 NUL 分隔，避免中文文件名转义导致漏检。
+- 统一模型许可证声明检查，`pending`、`NOASSERTION`、`待核对` 等保留为证据缺口并阻断
+  模型审批；来源字段拒绝类型错误、控制字符和静默截断。外部模型重哈希使用实际有界
+  读取并拒绝跨平台盘符、目录穿越、Windows 流/设备别名及根目录外的符号链接，返回结果
+  只保留引用元数据，不包含模型正文或根目录绝对路径。
+
 - 新增双板复杂数字回归案例 `split_logic_load`：以已验收的 `HDR1X4` 真实连接器跨接
   `clk`、`data`、共享电源和地，在远端板保留 1 kΩ 输出负载，并分别覆盖 DC、TRAN、AC
   原生验收。新增结构化案例模块和 `tools/run_multiboard_digital_regression.py` 运行器；

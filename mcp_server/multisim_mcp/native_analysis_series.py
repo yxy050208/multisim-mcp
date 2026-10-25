@@ -13,6 +13,7 @@ import csv
 import math
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -219,6 +220,372 @@ def compare_native_series(
     return result
 
 
+@dataclass(frozen=True)
+class DigitalEdgeComparisonContract:
+    """Explicit contract for comparing logic transitions on adaptive axes.
+
+    This contract compares threshold-crossing events only. It does not
+    interpolate the complete waveform and therefore cannot certify analog
+    shape, propagation delay through an undeclared load, or continuous-time
+    behavior.
+    """
+
+    low_voltage: float = 0.0
+    high_voltage: float = 5.0
+    threshold_voltage: float = 2.5
+    level_tolerance: float = 0.05
+    edge_time_tolerance: float = 1e-9
+    minimum_edge_separation: float = 0.0
+
+    def validate(self) -> None:
+        values = (
+            self.low_voltage,
+            self.high_voltage,
+            self.threshold_voltage,
+            self.level_tolerance,
+            self.edge_time_tolerance,
+            self.minimum_edge_separation,
+        )
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(float(value)) for value in values):
+            raise ValueError("digital edge contract values must be finite numbers")
+        if not self.low_voltage < self.threshold_voltage < self.high_voltage:
+            raise ValueError("digital edge threshold must lie between low and high rails")
+        if self.level_tolerance < 0 or self.edge_time_tolerance < 0 or self.minimum_edge_separation < 0:
+            raise ValueError("digital edge tolerances must be non-negative")
+        if self.level_tolerance >= min(
+            self.threshold_voltage - self.low_voltage,
+            self.high_voltage - self.threshold_voltage,
+        ):
+            raise ValueError("digital edge level tolerance must leave a threshold band")
+
+
+def _digital_edge_events(
+    series: Mapping[str, Any], contract: DigitalEdgeComparisonContract,
+) -> dict[str, Any]:
+    """Extract threshold crossings without resampling an adaptive axis."""
+    if not isinstance(series, Mapping) or series.get("status") != "pass":
+        return {"status": "unverified", "reason": "complete native series is required"}
+    if series.get("analysis") != "tran":
+        return {"status": "invalid", "reason": "digital edge comparison requires transient series"}
+    axis = series.get("axis")
+    real = series.get("real")
+    if not isinstance(axis, list) or not isinstance(real, list) or len(axis) < 2 or len(axis) != len(real):
+        return {"status": "invalid", "reason": "transient axis and real samples are incomplete"}
+    if any(not _finite(value) for value in (*axis, *real)):
+        return {"status": "invalid", "reason": "transient axis or real samples are non-finite"}
+    if any(float(after) <= float(before) for before, after in zip(axis, axis[1:])):
+        return {"status": "invalid", "reason": "transient axis is not strictly increasing"}
+
+    low, high, threshold, tolerance = (
+        contract.low_voltage,
+        contract.high_voltage,
+        contract.threshold_voltage,
+        contract.level_tolerance,
+    )
+    states: list[int | None] = []
+    for value in real:
+        if abs(float(value) - low) <= tolerance:
+            states.append(0)
+        elif abs(float(value) - high) <= tolerance:
+            states.append(1)
+        else:
+            states.append(None)
+
+    events: list[dict[str, Any]] = []
+    transition_indices: set[int] = set()
+    for index, (x0, x1, y0, y1) in enumerate(zip(axis, axis[1:], real, real[1:])):
+        y0, y1 = float(y0), float(y1)
+        if y0 == y1:
+            continue
+        if y0 < threshold <= y1:
+            direction = "rising"
+        elif y0 > threshold >= y1:
+            direction = "falling"
+        else:
+            continue
+        fraction = (threshold - y0) / (y1 - y0)
+        event_time = float(x0) + fraction * (float(x1) - float(x0))
+        if events and event_time - float(events[-1]["time"]) < contract.minimum_edge_separation:
+            return {
+                "status": "invalid",
+                "reason": "multiple digital edges violate minimum separation",
+                "events": events,
+            }
+        events.append({
+            "direction": direction,
+            "time": event_time,
+            "sample_index": index,
+        })
+        transition_indices.update((index, index + 1))
+
+    invalid_levels = [
+        index for index, state in enumerate(states)
+        if state is None and index not in transition_indices
+    ]
+    if invalid_levels:
+        return {
+            "status": "invalid",
+            "reason": "non-digital level samples are outside declared transition brackets",
+            "invalid_level_indices": invalid_levels[:16],
+            "events": events,
+        }
+    if states[0] is None or states[-1] is None:
+        return {"status": "invalid", "reason": "initial or final sample is not a digital level", "events": events}
+    return {
+        "status": "pass",
+        "initial_level": states[0],
+        "final_level": states[-1],
+        "events": events,
+        "sample_count": len(real),
+        "axis_start": float(axis[0]),
+        "axis_end": float(axis[-1]),
+    }
+
+
+def compare_digital_edge_series(
+    expected: Mapping[str, Any] | None,
+    actual: Mapping[str, Any] | None,
+    *,
+    contract: DigitalEdgeComparisonContract | None = None,
+) -> dict[str, Any]:
+    """Compare digital edge timing on two independently sampled series.
+
+    Missing or incomplete native responses remain ``unverified``. A malformed
+    response is ``invalid``. A complete response with mismatched levels,
+    directions, counts, or edge times is ``fail``.
+    """
+    contract = contract or DigitalEdgeComparisonContract()
+    contract.validate()
+    left = _digital_edge_events(expected, contract)
+    right = _digital_edge_events(actual, contract)
+    result: dict[str, Any] = {
+        "status": "unverified",
+        "passed": False,
+        "edge_time_tolerance": float(contract.edge_time_tolerance),
+        "comparison_basis": "threshold-crossing events; no waveform resampling",
+        "expected": left,
+        "actual": right,
+    }
+    if left.get("status") == "unverified" or right.get("status") == "unverified":
+        result["reason"] = "complete native series required at both endpoints"
+        return result
+    if left.get("status") != "pass" or right.get("status") != "pass":
+        result.update(status="invalid", reason="digital edge extraction failed")
+        return result
+    if left["initial_level"] != right["initial_level"] or left["final_level"] != right["final_level"]:
+        result.update(status="fail", reason="initial or final digital levels differ")
+        return result
+    expected_events = left["events"]
+    actual_events = right["events"]
+    if len(expected_events) != len(actual_events):
+        result.update(
+            status="fail",
+            reason="digital edge counts differ",
+            expected_edge_count=len(expected_events),
+            actual_edge_count=len(actual_events),
+        )
+        return result
+    timing_errors: list[float] = []
+    mismatches: list[dict[str, Any]] = []
+    for index, (expected_event, actual_event) in enumerate(zip(expected_events, actual_events)):
+        error = abs(float(expected_event["time"]) - float(actual_event["time"]))
+        timing_errors.append(error)
+        if expected_event["direction"] != actual_event["direction"] or error > contract.edge_time_tolerance:
+            mismatches.append({
+                "index": index,
+                "expected_direction": expected_event["direction"],
+                "actual_direction": actual_event["direction"],
+                "expected_time": expected_event["time"],
+                "actual_time": actual_event["time"],
+                "absolute_time_error": error,
+            })
+    result.update(
+        status="pass" if not mismatches else "fail",
+        passed=not mismatches,
+        edge_count=len(expected_events),
+        maximum_edge_time_error=max(timing_errors, default=0.0),
+        mismatches=mismatches[:16],
+        reason=("all edge directions and threshold times matched" if not mismatches
+                else "one or more edge directions or threshold times differed"),
+    )
+    return result
+
+
+@dataclass(frozen=True)
+class ContinuousResponseContract:
+    """Compare bounded transient response features on adaptive native axes.
+
+    This is intentionally a feature contract rather than a resampled waveform
+    comparison.  It verifies the initial/final values, global peak and valley,
+    response range, and the time positions of those extrema.  A complete
+    native series is still required; missing, downsampled, malformed, or
+    non-finite data fails closed.  Passing this contract does not certify
+    component tolerance, continuous-time behaviour between native samples, or
+    physical-board performance.
+    """
+
+    final_value_tolerance: float = 0.05
+    extrema_value_tolerance: float = 0.05
+    response_range_tolerance: float = 0.05
+    time_tolerance: float = 1e-6
+    minimum_samples: int = 3
+
+    def validate(self) -> None:
+        values = (
+            self.final_value_tolerance,
+            self.extrema_value_tolerance,
+            self.response_range_tolerance,
+            self.time_tolerance,
+        )
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in values
+        ):
+            raise ValueError("continuous response tolerances must be finite numbers")
+        if any(float(value) < 0 for value in values):
+            raise ValueError("continuous response tolerances must be non-negative")
+        if (
+            isinstance(self.minimum_samples, bool)
+            or not isinstance(self.minimum_samples, int)
+            or self.minimum_samples < 3
+        ):
+            raise ValueError("continuous response minimum_samples must be an integer >= 3")
+
+
+def _continuous_response_metrics(
+    series: Mapping[str, Any] | None, contract: ContinuousResponseContract,
+) -> dict[str, Any]:
+    """Extract response features without interpolating or resampling samples."""
+    if not isinstance(series, Mapping) or series.get("status") != "pass":
+        return {"status": "unverified", "reason": "complete native series is required"}
+    if series.get("analysis") != "tran":
+        return {"status": "invalid", "reason": "continuous response requires transient series"}
+    axis = series.get("axis")
+    real = series.get("real")
+    if (
+        not isinstance(axis, list)
+        or not isinstance(real, list)
+        or len(axis) != len(real)
+        or len(axis) < contract.minimum_samples
+    ):
+        return {
+            "status": "invalid",
+            "reason": "transient response has too few or incomplete samples",
+        }
+    declared_count = series.get("sample_count")
+    if declared_count is not None and (
+        isinstance(declared_count, bool)
+        or not isinstance(declared_count, int)
+        or declared_count != len(real)
+    ):
+        return {"status": "invalid", "reason": "transient sample metadata contradicts samples"}
+    if any(not _finite(value) for value in (*axis, *real)):
+        return {"status": "invalid", "reason": "transient response contains non-finite samples"}
+    if any(float(after) <= float(before) for before, after in zip(axis, axis[1:])):
+        return {"status": "invalid", "reason": "transient axis is not strictly increasing"}
+    peak_index = max(range(len(real)), key=lambda index: float(real[index]))
+    valley_index = min(range(len(real)), key=lambda index: float(real[index]))
+    peak_value = float(real[peak_index])
+    valley_value = float(real[valley_index])
+    return {
+        "status": "pass",
+        "sample_count": len(real),
+        "axis_start": float(axis[0]),
+        "axis_end": float(axis[-1]),
+        "initial_value": float(real[0]),
+        "final_value": float(real[-1]),
+        "peak_value": peak_value,
+        "peak_time": float(axis[peak_index]),
+        "valley_value": valley_value,
+        "valley_time": float(axis[valley_index]),
+        "response_range": peak_value - valley_value,
+    }
+
+
+def compare_continuous_response_series(
+    expected: Mapping[str, Any] | None,
+    actual: Mapping[str, Any] | None,
+    *,
+    contract: ContinuousResponseContract | None = None,
+) -> dict[str, Any]:
+    """Compare RC-like transient features while preserving adaptive axes.
+
+    The comparator never interpolates a response.  Time differences are
+    bounded only at the declared extrema and analysis endpoints, so an
+    independently sampled native response cannot pass by hiding a topology
+    error behind a full-waveform resampling step.
+    """
+    contract = contract or ContinuousResponseContract()
+    contract.validate()
+    left = _continuous_response_metrics(expected, contract)
+    right = _continuous_response_metrics(actual, contract)
+    result: dict[str, Any] = {
+        "status": "unverified",
+        "passed": False,
+        "comparison_basis": "native RC response features; no waveform resampling",
+        "tolerances": {
+            "final_value": float(contract.final_value_tolerance),
+            "extrema_value": float(contract.extrema_value_tolerance),
+            "response_range": float(contract.response_range_tolerance),
+            "time": float(contract.time_tolerance),
+            "minimum_samples": contract.minimum_samples,
+        },
+        "expected": left,
+        "actual": right,
+    }
+    if left.get("status") == "unverified" or right.get("status") == "unverified":
+        result["reason"] = "complete native series required at both endpoints"
+        return result
+    if left.get("status") != "pass" or right.get("status") != "pass":
+        result.update(status="invalid", reason="continuous response feature extraction failed")
+        return result
+    value_checks = {
+        "initial_value": abs(left["initial_value"] - right["initial_value"])
+        <= contract.extrema_value_tolerance,
+        "final_value": abs(left["final_value"] - right["final_value"])
+        <= contract.final_value_tolerance,
+        "peak_value": abs(left["peak_value"] - right["peak_value"])
+        <= contract.extrema_value_tolerance,
+        "valley_value": abs(left["valley_value"] - right["valley_value"])
+        <= contract.extrema_value_tolerance,
+        "response_range": abs(left["response_range"] - right["response_range"])
+        <= contract.response_range_tolerance,
+    }
+    time_errors = {
+        "axis_start": abs(left["axis_start"] - right["axis_start"]),
+        "axis_end": abs(left["axis_end"] - right["axis_end"]),
+        "peak_time": abs(left["peak_time"] - right["peak_time"]),
+        "valley_time": abs(left["valley_time"] - right["valley_time"]),
+    }
+    time_checks = {
+        name: error <= contract.time_tolerance for name, error in time_errors.items()
+    }
+    checks = {**value_checks, **time_checks}
+    result.update(
+        status="pass" if all(checks.values()) else "fail",
+        passed=all(checks.values()),
+        checks=checks,
+        value_errors={
+            "initial_value": abs(left["initial_value"] - right["initial_value"]),
+            "final_value": abs(left["final_value"] - right["final_value"]),
+            "peak_value": abs(left["peak_value"] - right["peak_value"]),
+            "valley_value": abs(left["valley_value"] - right["valley_value"]),
+            "response_range": abs(left["response_range"] - right["response_range"]),
+        },
+        time_errors=time_errors,
+        maximum_time_axis_error=max(time_errors.values()),
+        reason=(
+            "initial/final values, peak, valley, range and adaptive-axis times matched"
+            if all(checks.values())
+            else "one or more continuous response features exceeded the declared tolerance"
+        ),
+    )
+    return result
+
+
 def write_native_series_csv(path: Path, series: Mapping[str, Mapping[str, Any]]) -> None:
     """Export full samples beside the retained scalar summary and raw native JSON."""
     with path.open("w", encoding="utf-8", newline="") as stream:
@@ -233,7 +600,11 @@ def write_native_series_csv(path: Path, series: Mapping[str, Mapping[str, Any]])
 
 
 __all__ = [
+    "ContinuousResponseContract",
+    "DigitalEdgeComparisonContract",
+    "compare_continuous_response_series",
     "compare_native_series",
+    "compare_digital_edge_series",
     "extract_native_analysis_series",
     "native_series_informative",
     "write_native_series_csv",
