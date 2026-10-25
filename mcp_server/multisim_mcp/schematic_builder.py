@@ -3601,6 +3601,14 @@ def _pick_probe_point(
                     and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
                 ):
                     return True
+                # Keep probes away from a nearby parallel foreign net. A small
+                # gap can be snapped across by Multisim when the project is reopened.
+                if sx == ex and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6:
+                    if abs(px - sx) <= 8.0:
+                        return True
+                if sy == ey and min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6:
+                    if abs(py - sy) <= 8.0:
+                        return True
         return False
 
     if prefer_interior:
