@@ -808,3 +808,23 @@ simulation output; proprietary NI sample designs are not distributed.
 
 Project code is MIT licensed. NI Multisim, its formats, trademarks, and locally
 installed samples remain subject to their respective owners' terms.
+
+
+## Schematic runtime prerequisites
+
+The public wheel contains the MCP server and diagnostics, but it intentionally does
+not redistribute NI Multisim XML templates. Before using
+`create_schematic_from_netlist`, generate a local pack from an authorized
+Multisim installation:
+
+```powershell
+py -3-32 tools/bootstrap_local_component_pack.py --output C:\MultisimMcp\component-pack
+$env:MULTISIM_MCP_TEMPLATE_DIR = "C:\MultisimMcp\component-pack"
+```
+
+Install the pinned `electronics-workbench-decoder@0.2.0` package and point
+`MULTISIM_MCP_EWD` and `MULTISIM_MCP_EWE` at its real
+`dist/ewd.js` and `dist/ewe.js` files. On Windows, a `node.exe` executable is
+required; `.cmd` and `.bat` shims are rejected. Run `runtime_status` or
+`multisim-mcp doctor --lang en` before building. Missing templates or codecs are
+reported with the exact setup hint and no partial schematic is attempted.
