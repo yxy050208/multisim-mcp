@@ -3588,26 +3588,30 @@ def _pick_probe_point(
     foreign_paths = other_wire_paths or []
 
     def blocked(point: tuple[float, float]) -> bool:
+        """Reject exact crossings and near-parallel foreign wire snaps."""
         px, py = point
         for path in foreign_paths:
             for start, end in zip(path, path[1:]):
                 sx, sy = start
                 ex, ey = end
+                # Exact collinear overlap/crossing is always unsafe.
                 cross = (px - sx) * (ey - sy) - (py - sy) * (ex - sx)
-                if abs(cross) > 1e-6:
-                    continue
-                if (
+                if abs(cross) <= 1e-6 and (
                     min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6
                     and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
                 ):
                     return True
-                # Keep probes away from a nearby parallel foreign net. A small
-                # gap can be snapped across by Multisim when the project is reopened.
-                if sx == ex and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6:
-                    if abs(px - sx) <= 8.0:
+                # Multisim can snap an interior probe across a short gap
+                # between parallel orthogonal wires when the project is
+                # saved and reopened.  Apply the clearance only while the
+                # candidate lies alongside the foreign segment.
+                if sx == ex:
+                    alongside = min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
+                    if alongside and abs(px - sx) <= 8.0:
                         return True
-                if sy == ey and min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6:
-                    if abs(py - sy) <= 8.0:
+                elif sy == ey:
+                    alongside = min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6
+                    if alongside and abs(py - sy) <= 8.0:
                         return True
         return False
 
