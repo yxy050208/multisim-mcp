@@ -20,9 +20,7 @@ class DshSchemaTest(unittest.TestCase):
                     },
                 }
             },
-            "properties": {
-                "options": {"$ref": "#/$defs/Options"},
-            },
+            "properties": {"options": {"$ref": "#/$defs/Options"}},
         }
         normalized = normalize_dsh_tool_schema(source)
         self.assertNotIn("$defs", normalized)
@@ -45,9 +43,7 @@ class DshSchemaTest(unittest.TestCase):
         normalized = normalize_dsh_tool_schema(source)
         self.assertNotIn("anyOf", normalized["items"])
         self.assertIn("oneOf", normalized["items"])
-        self.assertEqual(
-            normalized["items"]["oneOf"][1]["additionalProperties"], True
-        )
+        self.assertEqual(normalized["items"]["oneOf"][1]["additionalProperties"], True)
 
 
 class DshServerBoundaryTest(unittest.IsolatedAsyncioTestCase):
@@ -62,9 +58,7 @@ class DshServerBoundaryTest(unittest.IsolatedAsyncioTestCase):
         server.add_tool(dict_tool)
         tools = await server.list_tools()
         tool = next(item for item in tools if item.name == "dict_tool")
-        self.assertEqual(
-            tool.input_schema["properties"]["values"]["additionalProperties"], True
-        )
+        self.assertEqual(tool.input_schema["properties"]["values"]["additionalProperties"], True)
 
 
 if __name__ == "__main__":

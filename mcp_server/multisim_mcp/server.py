@@ -19,13 +19,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 
 from multisim_mcp.dsh_schema import normalize_dsh_tool_schema
-from multisim_mcp.multisim_client import Ms14Codec
-
 from multisim_mcp import __version__
 from multisim_mcp.api_contract import build_capabilities
+from multisim_mcp.engineering_capabilities import (
+    component_mapping_capabilities,
+    engineering_runtime_readiness,
+)
 from multisim_mcp.experiment_resources import (
     ExperimentResourceIndex,
     ExperimentResult,
@@ -62,6 +63,7 @@ from multisim_mcp.course_demo import (
 from multisim_mcp.backend_differential import compare_registered_experiments
 from multisim_mcp.design_optimization import (
     DesignOptimizationService,
+    evaluate_optimization_layout as evaluate_optimization_layout_directory,
     validate_optimization_spec,
 )
 from multisim_mcp.global_optimization import (
@@ -79,6 +81,13 @@ from multisim_mcp.design_diagnosis import (
 )
 from multisim_mcp.design_comparison import DesignVariantComparisonService
 from multisim_mcp.design_patch_evaluation import DesignPatchEvaluationService
+from multisim_mcp.design_patch_service import prepare_design_patch
+from multisim_mcp.design_patch_application import DesignPatchApplicationService
+from multisim_mcp.design_patch_transactions import (
+    DEFAULT_APPROVAL_TTL_SECONDS,
+    read_approval_token,
+    write_approval_token,
+)
 from multisim_mcp.design_plans import (
     plan_design_options as build_design_plan_options,
     select_design_option as select_planned_design_option,
@@ -164,6 +173,7 @@ from multisim_mcp.com_worker_client import (
     WorkerMultisimClient,
     worker_runtime_diagnostics,
 )
+from multisim_mcp.multisim_client import Ms14Codec
 from multisim_mcp.multisim_backend import MultisimBackend
 from multisim_mcp.ngspice_backend import NgspiceBackend, cancellable_process_runner
 from multisim_mcp import component_placement
@@ -226,34 +236,6 @@ _WORKER_EXECUTOR = ThreadPoolExecutor(
 _TOOL_PROFILE = selected_tool_profile()
 
 
-# The MCP layer reports unexpected exceptions as ``UnexpectedToolError("Error
-# executing tool <name>")`` and drops the exception text, so a client only ever
-# sees the tool name. These are the failure types tool bodies raise
-# deliberately; re-raising them as ToolError keeps their message visible.
-_EXPECTED_TOOL_ERRORS: tuple[type[BaseException], ...] = (
-    OSError,  # includes FileNotFoundError and PermissionError
-    RuntimeError,  # includes WorkerUnavailableError and COM failures
-    TimeoutError,
-    InterruptedError,
-    ValueError,
-)
-
-
-def _tool_error(exc: BaseException) -> ToolError:
-    return ToolError(str(exc) or type(exc).__name__)
-
-
-def _wrap_with_tool_error_reporting(function: Any) -> Any:
-    @functools.wraps(function)
-    def with_tool_error_reporting(*args: Any, **kwargs: Any) -> Any:
-        try:
-            return function(*args, **kwargs)
-        except _EXPECTED_TOOL_ERRORS as exc:
-            raise _tool_error(exc) from exc
-
-    return with_tool_error_reporting
-
-
 def _invoke_tool_on_worker_thread(function: Any, args: tuple, kwargs: dict) -> Any:
     """Keep blocking, stateful worker calls off the MCP event loop."""
     return function(*args, **kwargs)
@@ -281,18 +263,16 @@ class MultisimMCPServer(MCPServer):
                 # Keep the original callable available to internal code and unit
                 # tests while omitting it from MCP tools/list for this process.
                 return function
-
-            reporting = _wrap_with_tool_error_reporting(function)
             if not com_serialized:
-                register(reporting)
+                register(function)
                 return function
 
-            @functools.wraps(reporting)
+            @functools.wraps(function)
             async def serialized(*args: Any, **kwargs: Any) -> Any:
                 loop = asyncio.get_running_loop()
                 invoke = functools.partial(
                     _invoke_tool_on_worker_thread,
-                    reporting,
+                    function,
                     args,
                     kwargs,
                 )
@@ -324,6 +304,11 @@ mcp = MultisimMCPServer(
         "convergence, and evidence-backed bias/saturation findings. "
         "Use evaluate_design_patch to retest an explicit reversible patch against "
         "the baseline without modifying or automatically adopting the design. "
+        "In full profile, use approve_design_patch and the file-backed "
+        "approval_token_file adapters for explicit patch persistence; use "
+        "approve_verified_design_patch and apply_verified_design_patch to run "
+        "the bound experiment before committing, and recover_* only for a "
+        "journal-checked interrupted workflow. "
         "Use global_optimize_design for bounded mixed topology/value Pareto "
         "search, or autonomous_correct_design for model-proposed repairs that "
         "must compile and pass real experiment gates; neither persists a patch. "
@@ -724,8 +709,13 @@ def connect() -> dict:
 
 
 @mcp.tool()
-def runtime_status() -> dict:
+def runtime_status(target_version: str | None = None) -> dict:
     """Check local EDA runtime compatibility without starting Multisim."""
+    profile = tool_profile_status(_TOOL_PROFILE)
+    contract = build_capabilities(
+        server_version=__version__, tool_profile=profile,
+        target_version=target_version,
+    )
     result = worker_runtime_diagnostics(_MULTISIM_WORKER)
     completeness = template_completeness()
     paths = completeness["search_paths"]
@@ -742,11 +732,9 @@ def runtime_status() -> dict:
     result["missing_component_templates"] = completeness["missing_by_kind"]
     result["core_missing_component_kinds"] = completeness["core_missing_kinds"]
     result["extended_missing_component_kinds"] = completeness["extended_missing_kinds"]
-    result["tool_profile"] = tool_profile_status(_TOOL_PROFILE)
-    result["api_contract"] = build_capabilities(
-        server_version=__version__,
-        tool_profile=result["tool_profile"],
-    )
+    result["tool_profile"] = profile
+    result["api_contract"] = contract
+    result["engineering_runtime"] = engineering_runtime_readiness(result)
     eda_service = _eda_application_service()
     result["eda_backends"] = [
         capabilities.to_dict()
@@ -1162,11 +1150,17 @@ def approve_component_resolution(
 def compile_executable_netlist(
     draft: dict[str, Any],
     component_approval: dict[str, Any],
+    experiment_fixture: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile an approved logical draft into a bounded pin-level preview.
 
     Only options in the compiler support matrix are accepted.  External model
     bytes, when present, are re-hashed beneath ``MULTISIM_MCP_MODEL_ROOT``.
+    Optional experiment_fixture composes an explicit DC/AC source and source
+    impedance before review, currently signal-active/14.3 only. It requires
+    schema_version, target_version, dc_voltage_v, source_impedance_ohm and
+    included_load_ohm; optional ac_amplitude_v/ac_phase_deg are small-signal AC.
+    The resulting netlist review requires confirm_fixture and fixture_sha256.
     The result stays in memory and does not write files, create a schematic,
     start Multisim, or run a simulation.
     """
@@ -1175,6 +1169,7 @@ def compile_executable_netlist(
         draft,
         component_approval,
         model_root=configured_root,
+        experiment_fixture=experiment_fixture,
     )
 
 
@@ -1395,8 +1390,18 @@ def retry_experiment_job(job_id: str) -> JobSubmission:
 
 
 @mcp.tool()
-def schematic_component_catalog() -> dict:
+def schematic_component_catalog(target_version: str | None = None) -> dict:
     """List native component families available to the schematic generator."""
+    mappings = component_mapping_capabilities(target_version)
+    mapping_status_by_kind = {}
+    for item in mappings["components"]:
+        kind = item["native_name"]
+        if mapping_status_by_kind.get(kind) != "recorded-native-verified":
+            mapping_status_by_kind[kind] = item["status"]
+    default_mapping_status = (
+        "not-selected" if mappings["target_version"] is None else
+        "manifest-unavailable" if mappings["status"] == "manifest-unavailable" else "not-listed"
+    )
     experimental_carriers = {
         "E", "F", "G", "H", "BV", "BI", "T",
         "XSUB2", "XSUB3", "XSUB4", "XSUB5", "XSUBN",
@@ -1410,6 +1415,8 @@ def schematic_component_catalog() -> dict:
     unavailable = set(completeness["unavailable_kinds"])
     templates_ready = completeness["complete"]
     return {
+        "versioned_components": mappings,
+        "maturity_scope": "legacy-template-carrier-label; not version-specific native verification",
         "template_search_paths": [str(path) for path in search_paths],
         "schematic_templates_ready": templates_ready,
         "schematic_templates_status": (
@@ -1436,6 +1443,9 @@ def schematic_component_catalog() -> dict:
                 ),
                 "value_unit": definition.value_unit,
                 "ready": definition.kind not in unavailable,
+                "versioned_mapping_status": mapping_status_by_kind.get(
+                    definition.kind, default_mapping_status,
+                ),
                 "missing_templates": missing_by_kind.get(definition.kind, []),
                 "maturity": (
                     "experimental-carrier"
@@ -2200,11 +2210,7 @@ def _require_schematic_prerequisites(parsed: Any) -> None:
         if item.kind in COMPONENT_DEFINITIONS
     }
     missing_by_kind = completeness["missing_by_kind"]
-    missing_used = sorted(
-        kind
-        for kind in used_kinds
-        if missing_by_kind.get(kind)
-    )
+    missing_used = sorted(kind for kind in used_kinds if missing_by_kind.get(kind))
     problems: list[str] = []
     if missing:
         problems.append("missing base templates: " + ", ".join(missing))
@@ -2618,13 +2624,36 @@ def _run_ngspice_netlist_impl(
 
 
 @mcp.tool()
-def plan_multiboard_engineering_request(request: dict[str, Any]) -> dict[str, Any]:
+def plan_multiboard_engineering_request(
+    request: dict[str, Any] | None = None,
+    executable_netlist: dict[str, Any] | None = None,
+    netlist_approval: dict[str, Any] | None = None,
+    vendor_contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Validate a structured multi-board request and return a planning-only contract.
 
     This tool never opens Multisim, writes a project, or starts simulation.  A
     feasible candidate may include board-local logical artifacts, but native
     generation and acceptance remain a separate explicit step.
     """
+    if vendor_contract is not None:
+        if executable_netlist is not None or netlist_approval is not None or request is not None:
+            raise ValueError("vendor_contract cannot be combined with request or executable netlist")
+        from .vendor_multiboard import validate_lm324aj_multiboard_contract
+        checked = validate_lm324aj_multiboard_contract(vendor_contract)
+        return {
+            "status": "planned",
+            "verification_status": "unverified",
+            "profile": checked["profile"],
+            "target_multisim_version": checked["target_multisim_version"],
+            "contract_digest": checked["contract_digest"],
+            "partition": checked["partition"],
+            "fixture_count": len(checked["fixtures"]),
+            "limitations": checked["limitations"],
+        }
+    if executable_netlist is not None or netlist_approval is not None:
+        from .signal_multiboard import bind_signal_multiboard_request
+        request = bind_signal_multiboard_request(request, executable_netlist, netlist_approval)
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
     return build_engineering_plan(request)
@@ -2684,13 +2713,16 @@ def _engineering_request_design(
 
 @mcp.tool()
 def run_native_multiboard_acceptance(
-    request: dict[str, Any],
+    request: dict[str, Any] | None,
     output_directory: str,
     candidate_index: int | None = None,
     execute: bool = False,
     target_multisim_version: str = "14.3",
     analysis: str = "dc",
     analysis_options: dict[str, Any] | None = None,
+    executable_netlist: dict[str, Any] | None = None,
+    netlist_approval: dict[str, Any] | None = None,
+    vendor_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run or preview native acceptance for a selected structured multi-board request.
 
@@ -2706,6 +2738,22 @@ def run_native_multiboard_acceptance(
     resampling basis is recorded in the result. Scalar endpoint values remain
     a report summary only.
     """
+    if vendor_contract is not None:
+        if executable_netlist is not None or netlist_approval is not None or request is not None:
+            raise ValueError("vendor_contract cannot be combined with request or executable netlist")
+        from .vendor_multiboard import run_lm324aj_multiboard_acceptance
+        return run_lm324aj_multiboard_acceptance(
+            vendor_contract, output_directory, execute=execute,
+            analysis=analysis, analysis_options=analysis_options,
+        )
+    if executable_netlist is not None or netlist_approval is not None:
+        from .signal_multiboard import run_approved_signal_multiboard
+        return run_approved_signal_multiboard(
+            request, executable_netlist, netlist_approval, output_directory,
+            candidate_index=candidate_index, execute=execute,
+            target_multisim_version=target_multisim_version,
+            analysis=analysis, analysis_options=analysis_options,
+        )
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
     plan = build_engineering_plan(request)
@@ -2901,7 +2949,9 @@ def run_natural_opamp_engineering_request(text: str, output_dir: str, execute: b
 
 
 @mcp.tool()
-def run_generated_analog_project(proposal: dict[str, Any], output_dir: str, execute: bool = False) -> dict[str, Any]:
+def run_generated_analog_project(proposal: dict[str, Any], output_dir: str, execute: bool = False,
+                                executable_netlist: dict[str, Any] | None = None,
+                                netlist_approval: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build and verify a composed linear analog design in native Multisim 14.3.
 
     The host AI translates the user's request into proposal fields: title,
@@ -2921,9 +2971,15 @@ def run_generated_analog_project(proposal: dict[str, Any], output_dir: str, exec
     native pin, runs native analyses, checks ideal-model phasors against
     independent nodal equations, exports schematic PNG, matrices, CSV and HTML.
     Missing checks yields reference-only acceptance, not requirements approval.
+    Optional executable_netlist/netlist_approval must be supplied together and
+    bind proposal.netlist exactly to a reviewed experiment_fixture preview.
+    This path also checks passive values and the saved ideal VCVS model. The
+    native proposal's experiments/checks and execute flag authorize the run;
+    this path does not claim a separate simulation-plan approval artifact.
     """
     from multisim_mcp.generated_analog_run import run_generated_analog_project as run
-    return run(proposal, output_dir, execute=execute)
+    return run(proposal, output_dir, execute=execute,
+               executable_netlist=executable_netlist, netlist_approval=netlist_approval)
 
 
 @mcp.tool()
@@ -3184,6 +3240,45 @@ def _design_patch_evaluation_service() -> DesignPatchEvaluationService:
     return DesignPatchEvaluationService(_experiment_application_service())
 
 
+def _design_patch_application_service() -> DesignPatchApplicationService:
+    """Build the transport-neutral durable patch application service."""
+    return DesignPatchApplicationService()
+
+
+def _require_distinct_patch_paths(label: str, *paths: str | None) -> None:
+    """Reject an approval-token destination that aliases a workflow input."""
+    resolved = [
+        Path(path).expanduser().resolve()
+        for path in paths
+        if path is not None
+    ]
+    if len(resolved) != len(set(resolved)):
+        raise ValueError(f"{label} paths must be distinct")
+
+
+def _write_mcp_approval_token(
+    result: dict[str, Any], token_output: str
+) -> dict[str, Any]:
+    """Persist an approval secret and return a response that never exposes it."""
+    token = result.pop("approval_token", None)
+    if not isinstance(token, str):
+        raise RuntimeError("approval service did not return a bearer token")
+    token_file = write_approval_token(token_output, token)
+    result.update(
+        {
+            "success": True,
+            "token_output": token_file,
+            "approval_token_exposed": False,
+            "approval_only": True,
+            "approval_consumed": False,
+            "design_written": False,
+            "simulation_performed": False,
+            "commit_performed": False,
+        }
+    )
+    return result
+
+
 def _run_circuit_experiment_impl(
     netlist: str,
     commands: str,
@@ -3383,6 +3478,260 @@ def evaluate_design_patch(
 
 
 @mcp.tool()
+def approve_design_patch(
+    design_path: str,
+    token_output: str,
+    receipt_path: str,
+    patch_path: str | None = None,
+    revert_transaction: str | None = None,
+    output_path: str | None = None,
+    in_place: bool = False,
+    regenerate_source_netlist: bool = False,
+    approval_store: str | None = None,
+    ttl_seconds: int = DEFAULT_APPROVAL_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Approve one exact patch apply or revert and write its bearer token locally.
+
+    The one-time token is written to ``token_output`` and is intentionally
+    omitted from the returned MCP payload.  Pass exactly one of ``patch_path``
+    or ``revert_transaction``; this step never changes the design.
+    """
+    _require_distinct_patch_paths(
+        "design-patch",
+        design_path,
+        patch_path,
+        revert_transaction,
+        output_path,
+        receipt_path,
+        token_output,
+    )
+    result = _design_patch_application_service().approve_basic(
+        design_path,
+        patch_path=patch_path,
+        revert_transaction=revert_transaction,
+        output_path=output_path,
+        in_place=in_place,
+        receipt_path=receipt_path,
+        regenerate_source_netlist=regenerate_source_netlist,
+        approval_store=approval_store,
+        ttl_seconds=ttl_seconds,
+    )
+    result = _write_mcp_approval_token(result, token_output)
+    result["receipt"] = str(Path(receipt_path).expanduser().resolve())
+    return result
+
+
+@mcp.tool()
+def apply_design_patch(
+    design_path: str,
+    patch_path: str,
+    approval_token_file: str,
+    receipt_path: str,
+    output_path: str | None = None,
+    in_place: bool = False,
+    regenerate_source_netlist: bool = False,
+    approval_store: str | None = None,
+) -> dict[str, Any]:
+    """Consume a file-backed approval and durably apply one design patch."""
+    token = read_approval_token(approval_token_file)
+    result = _design_patch_application_service().execute_basic(
+        design_path,
+        patch_path=patch_path,
+        transaction_path=None,
+        output_path=output_path,
+        in_place=in_place,
+        receipt_path=receipt_path,
+        regenerate_source_netlist=regenerate_source_netlist,
+        approval_token=token,
+        approval_store=approval_store,
+    )
+    result.update(
+        {
+            "approval_token_exposed": False,
+            "design_written": bool(result.get("success")),
+            "simulation_performed": False,
+            "commit_performed": bool(result.get("success")),
+        }
+    )
+    return result
+
+
+@mcp.tool()
+def revert_design_patch(
+    design_path: str,
+    transaction_path: str,
+    approval_token_file: str,
+    receipt_path: str,
+    output_path: str | None = None,
+    in_place: bool = False,
+    regenerate_source_netlist: bool = False,
+    approval_store: str | None = None,
+) -> dict[str, Any]:
+    """Consume a separate approval and durably revert one patch transaction."""
+    token = read_approval_token(approval_token_file)
+    result = _design_patch_application_service().execute_basic(
+        design_path,
+        patch_path=None,
+        transaction_path=transaction_path,
+        output_path=output_path,
+        in_place=in_place,
+        receipt_path=receipt_path,
+        regenerate_source_netlist=regenerate_source_netlist,
+        approval_token=token,
+        approval_store=approval_store,
+    )
+    result.update(
+        {
+            "approval_token_exposed": False,
+            "design_written": bool(result.get("success")),
+            "simulation_performed": False,
+            "commit_performed": bool(result.get("success")),
+        }
+    )
+    return result
+
+
+@mcp.tool()
+def recover_design_patch(
+    journal_path: str | None = None,
+    target_path: str | None = None,
+    action: str = "auto",
+    approval_store: str | None = None,
+) -> dict[str, Any]:
+    """Recover one abandoned patch journal after its owner process has exited."""
+    result = _design_patch_application_service().recover_basic(
+        journal_path=journal_path,
+        target_path=target_path,
+        action=action,
+        approval_store=approval_store,
+    )
+    result.update(
+        {
+            "approval_token_exposed": False,
+            "design_written": bool(result.get("success"))
+            and result.get("action") == "commit",
+            "simulation_performed": False,
+            "commit_performed": bool(result.get("success"))
+            and result.get("action") == "commit",
+        }
+    )
+    return result
+
+
+@mcp.tool()
+def approve_verified_design_patch(
+    design_path: str,
+    patch_path: str,
+    token_output: str,
+    receipt_path: str,
+    verification_plan_path: str,
+    experiment_output: str,
+    workflow_manifest: str,
+    output_path: str | None = None,
+    in_place: bool = False,
+    regenerate_source_netlist: bool = False,
+    timeout_seconds: float = 120.0,
+    max_points: int = 2000,
+    approval_store: str | None = None,
+    ttl_seconds: int = DEFAULT_APPROVAL_TTL_SECONDS,
+) -> dict[str, Any]:
+    """Approve a patch plus its exact verification and commit contract."""
+    _require_distinct_patch_paths(
+        "verified design-patch",
+        design_path,
+        patch_path,
+        output_path,
+        receipt_path,
+        verification_plan_path,
+        experiment_output,
+        workflow_manifest,
+        token_output,
+    )
+    result = _design_patch_application_service().approve_verified(
+        design_path,
+        patch_path,
+        output_path=output_path,
+        in_place=in_place,
+        receipt_path=receipt_path,
+        regenerate_source_netlist=regenerate_source_netlist,
+        verification_plan_path=verification_plan_path,
+        experiment_output=experiment_output,
+        workflow_manifest=workflow_manifest,
+        timeout_seconds=timeout_seconds,
+        max_points=max_points,
+        approval_store=approval_store,
+        ttl_seconds=ttl_seconds,
+    )
+    result = _write_mcp_approval_token(result, token_output)
+    result["receipt"] = str(Path(receipt_path).expanduser().resolve())
+    result["workflow_manifest"] = str(
+        Path(workflow_manifest).expanduser().resolve()
+    )
+    return result
+
+
+@mcp.tool()
+def apply_verified_design_patch(
+    design_path: str,
+    patch_path: str,
+    approval_token_file: str,
+    receipt_path: str,
+    verification_plan_path: str,
+    experiment_output: str,
+    workflow_manifest: str,
+    output_path: str | None = None,
+    in_place: bool = False,
+    regenerate_source_netlist: bool = False,
+    timeout_seconds: float = 120.0,
+    max_points: int = 2000,
+    approval_store: str | None = None,
+) -> dict[str, Any]:
+    """Run the approved experiment and commit only when every requirement passes."""
+    result = _design_patch_application_service().execute_verified(
+        _experiment_application_service(),
+        design_path,
+        patch_path,
+        output_path=output_path,
+        in_place=in_place,
+        receipt_path=receipt_path,
+        regenerate_source_netlist=regenerate_source_netlist,
+        verification_plan_path=verification_plan_path,
+        experiment_output=experiment_output,
+        workflow_manifest=workflow_manifest,
+        approval_token=read_approval_token(approval_token_file),
+        timeout_seconds=timeout_seconds,
+        max_points=max_points,
+        approval_store=approval_store,
+    )
+    result.update(
+        {
+            "approval_token_exposed": False,
+            "design_written": bool(result.get("design_committed")),
+            "simulation_performed": result.get("state")
+            in {"verification_passed", "rejected", "committed", "commit_failed", "experiment_error"},
+            "commit_performed": bool(result.get("design_committed")),
+            "failure_candidate_preserved": result.get("design_committed") is False,
+        }
+    )
+    return result
+
+
+@mcp.tool()
+def recover_verified_design_patch(workflow_manifest: str) -> dict[str, Any]:
+    """Finalize or safely abort a crash-interrupted verified patch workflow."""
+    result = _design_patch_application_service().recover_verified(workflow_manifest)
+    result.update(
+        {
+            "approval_token_exposed": False,
+            "design_written": result.get("action") == "finalized-committed",
+            "simulation_performed": False,
+            "commit_performed": result.get("action") == "finalized-committed",
+        }
+    )
+    return result
+
+
+@mcp.tool()
 def optimize_design(
     design: dict[str, Any],
     spec: dict[str, Any],
@@ -3413,6 +3762,42 @@ def optimize_design(
         output_dir,
         timeout_per_experiment=timeout_per_experiment,
         max_points=max_points,
+    )
+
+
+@mcp.tool()
+def evaluate_optimization_layout(
+    optimization_output_dir: str,
+    base_positions: dict[str, Any],
+    probe_nets: list[str] | None = None,
+    step: float = 270.0,
+    moves: int = 1,
+    max_candidates: int = 32,
+    fixed_refdes: list[str] | None = None,
+    materialize: bool = False,
+    materialize_directory: str | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Attach bounded single-board layout evidence to an optimization directory.
+
+    The parameter optimization must already have produced its auditable
+    directory.  Every persisted candidate patch is replayed, evaluated by the
+    deterministic layout validator, and ranked together with its electrical
+    objective.  ``materialize`` optionally emits candidate ``.ms14`` files;
+    native Multisim save/reopen and simulation acceptance remain a separate
+    explicit gate.
+    """
+    return evaluate_optimization_layout_directory(
+        optimization_output_dir,
+        base_positions,
+        probe_nets=list(probe_nets or []),
+        step=step,
+        moves=moves,
+        max_candidates=max_candidates,
+        fixed_refdes=list(fixed_refdes or []),
+        materialize=materialize,
+        materialize_directory=materialize_directory,
+        overwrite=overwrite,
     )
 
 
@@ -3845,20 +4230,42 @@ def compare_design_variants(
     output_dir: str,
     timeout_per_experiment: float = 120.0,
     max_points: int = 2000,
+    base_design: dict[str, Any] | None = None,
+    regenerate_source_netlist: bool = False,
 ) -> dict[str, Any]:
-    """Rank 2-16 complete designs using one evidence-backed experiment contract.
+    """Rank complete designs or approved in-memory patches using one contract.
 
-    Each item must contain exactly ``variant_id`` and ``design``. All requirements
-    are hard constraints, only finite measured passes are ranked, and no source
-    design is modified or automatically adopted.
+    A normal item contains exactly ``variant_id`` and ``design``. A patch item
+    contains exactly ``variant_id`` and ``patch`` and requires ``base_design``;
+    the patch is validated and applied in memory before the same experiment
+    service evaluates it. Patch JSON is persisted beside the candidate design
+    for review. All requirements remain hard constraints, only finite measured
+    passes are ranked, and no source design is modified or automatically adopted.
     """
     if not isinstance(variants, list):
         raise ValueError("variants must be an array")
+    if not isinstance(regenerate_source_netlist, bool):
+        raise ValueError("regenerate_source_netlist must be a boolean")
+    patch_items = [
+        item for item in variants
+        if isinstance(item, dict) and "patch" in item
+    ]
+    if patch_items and base_design is None:
+        raise ValueError("base_design is required when variants contain patches")
+    if base_design is not None and not patch_items:
+        raise ValueError("base_design is only valid when variants contain patches")
+    base = CircuitDesign.from_dict(base_design) if base_design is not None else None
     normalized: dict[str, CircuitDesign] = {}
+    variant_metadata: dict[str, dict[str, Any]] = {}
     for index, item in enumerate(variants):
-        if not isinstance(item, dict) or set(item) != {"variant_id", "design"}:
+        if not isinstance(item, dict):
             raise ValueError(
-                f"variants[{index}] must contain exactly variant_id and design"
+                f"variants[{index}] must contain exactly variant_id and design or patch"
+            )
+        fields = set(item)
+        if fields not in ({"variant_id", "design"}, {"variant_id", "patch"}):
+            raise ValueError(
+                f"variants[{index}] must contain exactly variant_id and design or patch"
             )
         variant_id = item["variant_id"]
         if not isinstance(variant_id, str) or not variant_id.strip():
@@ -3866,11 +4273,27 @@ def compare_design_variants(
         normalized_id = variant_id.strip()
         if normalized_id in normalized:
             raise ValueError(f"duplicate variant id: {normalized_id}")
-        normalized[normalized_id] = CircuitDesign.from_dict(item["design"])
+        if "design" in item:
+            normalized[normalized_id] = CircuitDesign.from_dict(item["design"])
+            continue
+        assert base is not None  # guarded by the patch_items/base_design check
+        prepared = prepare_design_patch(
+            base,
+            item["patch"],
+            regenerate_source_netlist=regenerate_source_netlist,
+        )
+        if prepared.source_netlist_update_required:
+            raise ValueError(
+                f"variants[{index}] patch would leave source_netlist stale; "
+                "set regenerate_source_netlist=True"
+            )
+        normalized[normalized_id] = prepared.candidate
+        variant_metadata[normalized_id] = {"patch": prepared.patch.to_dict()}
     return _design_comparison_service().run(
         normalized,
         spec,
         output_dir,
+        variant_metadata=variant_metadata or None,
         timeout_per_experiment=timeout_per_experiment,
         max_points=max_points,
     )
@@ -4222,16 +4645,53 @@ def validate_layout_positions(
     positions: dict[str, Any] | None = None,
     sheet_size: list[float] | None = None,
     probe_nets: list[str] | None = None,
+    optimize: bool = False,
+    step: float = 270.0,
+    moves: int = 1,
+    max_candidates: int = 32,
+    fixed_refdes: list[str] | None = None,
+    materialize: bool = False,
+    output_ms14: str | None = None,
+    include_experimental_probes: bool = False,
+    overwrite: bool = False,
 ) -> dict:
     """Dry-run a custom layout and report geometry findings in seconds.
 
-    Runs the real builder (obstacle-aware routing included) into a scratch
-    directory -- no Multisim launch, no files kept -- and returns the
-    geometry preflight: final placements, component-overlap pairs,
-    wire-through-body points and the resulting sheet size.  Use it to iterate
-    on a ``positions`` map cheaply before the minute-scale
-    ``create_schematic_from_netlist`` build + verification cycle (typically 1-3 minutes on a large board -- no Multisim launch, no files kept).
+    By default this runs the real builder (obstacle-aware routing included)
+    into a scratch directory -- no Multisim launch, no files kept -- and
+    returns the geometry preflight: final placements, component-overlap pairs,
+    wire-through-body points and the resulting sheet size.  With
+    ``optimize=true, materialize=true`` and an explicit ``output_ms14``, the
+    selected candidate is instead regenerated into a new file for the next
+    native save/reopen and simulation gate.
     """
+    if materialize and not optimize:
+        raise ValueError("materialize=true requires optimize=true")
+    if materialize and not output_ms14:
+        raise ValueError("output_ms14 is required when materialize=true")
+    if optimize:
+        if not positions:
+            raise ValueError("positions are required when optimize=true")
+        result = component_placement.optimize_layout_positions(
+            netlist,
+            positions,
+            probe_nets=probe_nets,
+            step=step,
+            moves=moves,
+            max_candidates=max_candidates,
+            fixed_refdes=fixed_refdes or (),
+        )
+        if materialize:
+            result["materialized"] = component_placement.materialize_layout_positions(
+                netlist,
+                result,
+                output_ms14,
+                probe_nets=probe_nets,
+                include_experimental_probes=include_experimental_probes,
+                sheet_size=tuple(sheet_size) if sheet_size else None,
+                overwrite=overwrite,
+            )
+        return result
     return component_placement.validate_layout_positions(
         netlist,
         positions=positions,

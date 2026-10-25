@@ -8,8 +8,8 @@ experiments, exporting data, and generating reproducible reports.
 非官方 Multisim 自动化 MCP：从受限 SPICE 网表生成可编辑电路图，调用本机
 Multisim 执行实验，并导出 `.ms14`、原理图、raw、CSV、SVG 和 Markdown 报告。
 
-> MCP Core 1.3.0rc3 release candidate, published to PyPI and the official MCP
-> Registry; stable 1.2.0 remains available.
+> MCP Core 1.3.0 is the current stable source/package line, published to PyPI and the official MCP
+> Registry.
 > This source/package does not include the React Workbench frontend. It may expose
 > optional loopback bridge APIs for compatible local clients. This project is not
 > affiliated with NI. Multisim must be
@@ -24,6 +24,15 @@ fail closed outside Windows. The minimal non-root image contains no EDA runtime,
 NI software, samples, licenses, or extracted templates.
 
 ## Current capability
+
+Latest source milestone: approved ideal `signal-active` previews can now enter
+the fixed sensor/buffer + gain/bias two-board workflow through existing
+`plan_multiboard_engineering_request` / `run_native_multiboard_acceptance` tools.
+Multisim 14.3 OP/AC cases include native HDR1X4 pin/RLC/model readback, explicit
+upstream RC fixtures, full-reference measurements, separate board-only drawings
+and reports. This is unreleased source work; ideal devices and sampled cases do
+not certify vendor parts or physical PCBs. See
+[the acceptance record](../docs/SIGNAL_MULTIBOARD_NATIVE_ACCEPTANCE_20261011.md).
 
 Stable and verified on Multisim 14.3:
 
@@ -42,8 +51,9 @@ Stable and verified on Multisim 14.3:
   `approve_executable_netlist` workflow that compares
   2--4 technical paths, binds the selected option, collects electrical parameters,
   then emits an explicitly approved but non-executable logical block network and a separate
-  human-reviewed component approval artifact. The first bounded compiler supports only
-  `signal-passive` and emits an in-memory pin-level CircuitDesign/SPICE preview; the separate
+  human-reviewed component approval artifact. The bounded compiler supports
+  `signal-passive` and explicitly selected ideal OPAMP5 `signal-active` designs, emitting an in-memory
+  pin-level CircuitDesign/SPICE preview; the separate
   `approve_executable_netlist` gate binds the preview digest and only opens schematic planning;
   file writes, stimuli, analysis, and simulation remain later explicit gates.
 - Durable `submit_circuit_experiment` queue with progress, cancellation,
@@ -264,6 +274,27 @@ $env:PYTHONPATH = (Resolve-Path .).Path
 python -m multisim_mcp.cli workbench-api --root C:\msre_exp --port 8787
 ```
 
+The bridge remains read-only unless it is started with `--enable-writes`. In that
+explicit local mode, the Workbench may call `/api/design-patch/approve`,
+`/api/design-patch/apply`, `/api/design-patch/revert`, and
+`/api/design-patch/recover`. The verified flow additionally provides
+`/api/design-patch/verified-approve`, `/api/design-patch/verified-apply`, and
+`/api/design-patch/verified-recover`; it commits only after the bound experiment
+passes all requirements. Design, patch, receipt, journal, and token files
+must stay below the configured project root; bearer tokens are written to a
+local token file and are never returned in HTTP responses. The routes reuse the
+same `DesignPatchApplicationService` as the CLI and remain disabled by default.
+
+The MCP `full` profile exposes the same service through
+`approve_design_patch`, `apply_design_patch`, `revert_design_patch`,
+`recover_design_patch`, `approve_verified_design_patch`,
+`apply_verified_design_patch`, and `recover_verified_design_patch`. Approval
+tools write the one-time bearer token to a caller-selected new local file and
+never return it; execution tools accept only `approval_token_file`. The
+verified path runs the bound experiment and commits only an all-pass result.
+The `core`, `experiment`, and `optimization` profiles keep their existing
+read/experiment tool sets and do not discover these mutation adapters.
+
 The client can read that bounded snapshot. Experiment
 details reuse the existing Resource summary and media must be referenced by a
 verified directory manifest. The `Models / API` page also reads the secret-free
@@ -448,7 +479,8 @@ journaling, and verified commit/rollback for CircuitDesign JSON. The additional
 `patch-verify-approve`, `patch-verify-apply`, and `patch-verify-recover` commands
 bind an explicit verification plan and complete experiment evidence, simulate
 the in-memory candidate through Multisim, and persist only an all-pass verdict.
-These mutation commands are not exposed to the model.
+These local CLI mutation commands are not exposed to the model; the equivalent
+MCP adapters are available only when the `full` profile is explicitly selected.
 The `diagnose-design` CLI and `diagnose_design` MCP tool run without a model,
 COM activation, simulation, or writes. A completed experiment may be attached
 only when its recursive manifest verifies and its canonical netlist matches the
@@ -469,6 +501,12 @@ source design is never modified, and the selected patch still requires the
 verified approval workflow. Each patch, experiment, objective, procurement
 verdict, failure, stopping reason, CSV comparison, and recursive manifest is retained. See
 [`docs/DESIGN_OPTIMIZATION.md`](../docs/DESIGN_OPTIMIZATION.md).
+After that run completes, `evaluate_optimization_layout` can replay every
+persisted candidate patch, run bounded single-board geometry optimization, and
+write a combined electrical/layout ranking. It accepts the baseline
+`refdes -> [x, y]` positions and may explicitly materialize candidate `.ms14`
+files; native Multisim save/reopen and simulation acceptance remain separate
+gates. See [`docs/SINGLE_BOARD_LAYOUT_OPTIMIZATION.md`](../docs/SINGLE_BOARD_LAYOUT_OPTIMIZATION.md).
 Mixed finite-domain topology/value search is documented in
 [`docs/GLOBAL_OPTIMIZATION.md`](../docs/GLOBAL_OPTIMIZATION.md). The bounded
 diagnose-propose-simulate-select loop is documented in
@@ -582,7 +620,14 @@ to inspect the logical module/net structure and unresolved component requirement
 provenance, call `approve_component_resolution` to bind the human review gate. The approval
 artifact authorizes only a later compiler and does not itself generate SPICE. For an option in the
 explicit support matrix, call `compile_executable_netlist`; it revalidates the artifact and local
-model hashes, and currently supports only `signal-passive`. Then call
+model hashes, and supports `signal-passive` and `signal-active` with explicit ideal OPAMP5 models.
+The active template handles bounded affine gain/offset and a first-order low-pass; real vendor
+opamps are not silently replaced. Optional `experiment_fixture` adds explicit DC/AC stimulus
+before review and requires `confirm_fixture` plus the fixture hash. Four fixture cases and two
+default input endpoints passed saved-project Multisim 14.3 OP/AC, pin/RLC/model readback and
+exports, including a 64-bit host with the 32-bit worker. See
+[native fixture acceptance](https://github.com/yxy050208/multisim-mcp/blob/main/docs/ACTIVE_SIGNAL_NATIVE_ACCEPTANCE_20261011.md).
+Then call
 `approve_executable_netlist` with explicit review confirmations; its approval only opens schematic
 planning and remains unapproved for file writes or simulation. To consume that approval, pass the
 complete preview as `executable_netlist`, the approval artifact as `netlist_approval`, and the
@@ -808,7 +853,6 @@ simulation output; proprietary NI sample designs are not distributed.
 
 Project code is MIT licensed. NI Multisim, its formats, trademarks, and locally
 installed samples remain subject to their respective owners' terms.
-
 
 ## Schematic runtime prerequisites
 

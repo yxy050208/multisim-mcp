@@ -3,9 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
+
+
+TOOLS_ROOT = Path(__file__).resolve().parent
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from public_asset_policy import forbidden_public_asset_reason  # noqa: E402
+
+
+def _verify_member_paths(names: list[str], label: str) -> None:
+    for name in names:
+        reason = forbidden_public_asset_reason(name)
+        if reason:
+            raise ValueError(f"{label} contains a forbidden public asset ({reason}): {name}")
 
 
 def verify(dist: Path, version: str) -> tuple[Path, Path]:
@@ -20,6 +35,7 @@ def verify(dist: Path, version: str) -> tuple[Path, Path]:
 
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
+        _verify_member_paths(names, "wheel")
         if sum(name.endswith("/SKILL.md") for name in names) != 5:
             raise ValueError("wheel must contain exactly five packaged Skills")
         if not any(name.endswith("licenses/LICENSE") for name in names):
@@ -31,6 +47,7 @@ def verify(dist: Path, version: str) -> tuple[Path, Path]:
 
     with tarfile.open(sdist, "r:gz") as archive:
         names = archive.getnames()
+        _verify_member_paths(names, "sdist")
         if sum(name.endswith("/SKILL.md") for name in names) != 5:
             raise ValueError("sdist must contain exactly five packaged Skills")
         if not any(name.endswith("/LICENSE") for name in names):

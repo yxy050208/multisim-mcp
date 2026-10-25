@@ -8,7 +8,6 @@ without Multisim, COM, or the MCP runtime.  The generated XML is encoded to
 from __future__ import annotations
 
 import copy
-import html
 import itertools
 import math
 import os
@@ -24,6 +23,7 @@ from multisim_mcp.orthogonal_routing import route_pins, junction_point, pin_esca
 
 from multisim_mcp.component_adapters import expand_component_adapters
 from multisim_mcp.native_xml import parse_native_xml, write_native_xml
+from multisim_mcp.ideal_models import IDEAL_OPAMP5_GAIN_SPICE
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
@@ -395,23 +395,16 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
     # Local-only LM324AJ section A. A separate kind prevents a real vendor
     # device from inheriting ideal OPAMP5 semantics.
     #
-    # Port order follows the part's own pin table, NOT the SPICE template.
-    # The extracted LM324AJ carrier carries the full quad pin table in
-    # CiaCollString[39]/[40]:
-    #     names : 1IN+ 1IN- VS- VS+ 1OUT 2IN+ 2IN- VS- VS+ 2OUT 3IN+ ...
-    #     pins  : 3    2    11   4   1    5    6    11   4    7    10  ...
-    # so section A is (3,2,11,4,1) == (1IN+, 1IN-, VS-, VS+, 1OUT).
-    # Multisim's netlister walks that table, and its own SaveAs rewrites our
-    # <Ports> list into this order, so the builder must emit it directly.
-    # Getting this wrong is what makes the exporter reject the instance with
-    #   Error: RefDes 'u41', element 'xu41_a':
-    #          Invalid subckt definition name 'lm158_4__opamp__1'
-    # even though the CiModel object and its card are byte-identical to NI's
-    # own working sample (samples/Non-InvertingOpAmp.ms14).
+    # The source netlist contract uses the semantic order
+    # (1IN+, 1IN-, VS+, VS-, 1OUT).  The extracted carrier exposes separate
+    # CiPort objects whose local names are authoritative: port 4 is VS+ and
+    # port 5 is VS-.  Do not follow the numeric pin-table order (11 then 4)
+    # here, or a generated positive/negative supply pair is silently swapped
+    # after Multisim saves and reopens the project.
     "LM324AJ": ComponentDefinition(
         "LM324AJ", "lm324aj_element.xml", "sym_lm324aj.xml",
-        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port5.xml",
-         "lm324aj_port4.xml", "lm324aj_port3.xml"), 432, 657, 180,
+        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port4.xml",
+         "lm324aj_port5.xml", "lm324aj_port3.xml"), 432, 657, 180,
     ),
     # Verified native LM555CN carrier. The files are intentionally supplied
     # by the user-local component pack, not bundled with this open-source
@@ -530,18 +523,6 @@ NATIVE_MODEL_ALIASES: dict[str, frozenset[str]] = {
     "CD4017": frozenset({"CD4017", "CD4017B", "4017B_5", "4017BD_5V", "4017BD_5V"}),
 }
 
-# Carrier families whose netlist X-lines the command engine cannot resolve by
-# name. prepare_simulation_netlist renders each such instance from the
-# carrier's own extracted templates (see _render_carrier_instance) so native
-# database parts simulate — and produce verifiable waveforms — like any other
-# device. Families without an extracted carrier fall back to the engine's own
-# error, which names the part instead of silently dropping it.
-_CARRIER_RENDER_ALIASES: dict[str, str] = {
-    alias: kind
-    for kind in ("TIMER8", "DFF8", "CD4017")
-    for alias in NATIVE_MODEL_ALIASES.get(kind, ())
-}
-
 
 @dataclass
 class ParsedNetlist:
@@ -573,6 +554,7 @@ def _looks_like_spice_record(line: str) -> bool:
         "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K",
         "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
     }
+
 
 def _logical_netlist_lines(text: str) -> list[str]:
     """Fold SPICE `+` continuation records into their preceding logical line."""
@@ -1699,90 +1681,6 @@ def _canonicalize_ground_aliases(lines: Sequence[str]) -> list[str]:
     return rendered
 
 
-def _model_body(kind: str) -> tuple[str, str]:
-    """Return ``(model_name, body)`` from a carrier's model template.
-
-    The body is a ``.subckt`` (analog macros such as TIMER8) or a ``.MODEL``
-    (XSPICE digital carriers such as DFF8) stored in a CiaCString/CiaCollString
-    slot of the extracted model template, with HTML entities from the XML.
-    """
-    model_item = _load_template(kind.lower() + "_model.xml")
-    for node in model_item.iter():
-        value = (node.get("String") or node.get("Value") or "")
-        stripped = value.removeprefix("&ASC").lstrip()
-        if re.match(r"\.subckt\b", stripped, re.I) or re.match(
-            r"\.model\b", stripped, re.I
-        ):
-            body = html.unescape(stripped).strip()
-            parts = body.split()
-            if len(parts) < 2:
-                raise ValueError(
-                    f"{kind} model template has an unnamed {parts[0] if parts else 'empty'} definition"
-                )
-            return parts[1], body
-    raise ValueError(f"{kind} model template contains no .subckt or .MODEL body")
-
-
-def _render_carrier_instance(
-    kind: str, refdes: str, nodes: list[str], embeds: dict[str, str]
-) -> tuple[str, tuple[str, str] | None]:
-    """Render one carrier instance line against its extracted templates.
-
-    Returns ``(instance_line, embed)`` where ``embed`` is an optional
-    ``(model_name, body)`` pair the caller must emit once per model name, or
-    ``None`` when the template carries its model inline (per-instance subckt).
-    Raises when the templates do not match the declared terminals, so a pack
-    defect surfaces instead of silently emitting a mis-wired instance.
-    """
-    definition = COMPONENT_DEFINITIONS[kind]
-    element_item = _load_template(definition.element_template)
-    template = element_item.find("./CiComponent//CiaSpiceTmpltExprt")
-    if template is None:
-        raise ValueError(f"{kind} element template has no SPICE template")
-    raw = (template.get("String") or "").removeprefix("&ASC")
-
-    stem = re.sub(r"[^A-Za-z0-9_]", "_", refdes) or "inst"
-    distinct_names: list[str] = []
-    # Carrier pin names may carry the active-low tilde (~1PR, ~1Q), which is
-    # part of the token: %t~1PR names the pin, and the conditional form
-    # (%t1D?%t:d%t;1D) falls back to an internal d<pin> node when unconnected.
-    for name in re.findall(r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)", raw):
-        if name not in distinct_names:
-            distinct_names.append(name)
-    if len(distinct_names) != len(nodes):
-        raise ValueError(
-            f"{kind} template declares {len(distinct_names)} terminals "
-            f"({', '.join(distinct_names)}) but the instance provides {len(nodes)}"
-        )
-    mapping = dict(zip(distinct_names, nodes))
-
-    def sub_conditional(match: re.Match[str]) -> str:
-        return mapping[match.group(1)]
-
-    def sub_plain(match: re.Match[str]) -> str:
-        name = match.group(1)
-        if name not in mapping:
-            raise ValueError(
-                f"{kind} template references unknown terminal {name!r}"
-            )
-        return mapping[name]
-
-    out = re.sub(
-        r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)\?%t:d%t;\1", sub_conditional, raw
-    )
-    out = re.sub(r"%t([~A-Za-z0-9_][A-Za-z0-9_]*)", sub_plain, out)
-    out = out.replace("%p", stem)
-
-    if "%m" not in out:
-        # Inline-model style (e.g. the rated 555 carries instance + .subckt in
-        # one string, with the subckt name parametrized by %p).
-        return out, None
-
-    model_name, body = _model_body(kind)
-    out = out.replace("%m", model_name)
-    return out, (model_name, body)
-
-
 def prepare_simulation_netlist(
     text: str, *, ngspice_compatible: bool = False
 ) -> str:
@@ -1805,9 +1703,6 @@ def prepare_simulation_netlist(
 
     rendered: list[str] = []
     required_models: dict[str, str] = {}
-    # Native-carrier model bodies (.subckt/.MODEL) referenced by rendered
-    # carrier instances, emitted once per model name at .end.
-    carrier_embeds: dict[str, str] = {}
     for line in logical_lines:
         parts = line.split()
         if (
@@ -1858,36 +1753,6 @@ def prepare_simulation_netlist(
                     f"B__{stem}_N {negative} {common} V={{-({expression})}}",
                 )
             )
-            continue
-        if (
-            len(parts) >= 3
-            and not line.startswith(("*", ";"))
-            and parts[0][0].upper() == "X"
-            and parts[-1].upper() in _CARRIER_RENDER_ALIASES
-        ):
-            # Native carriers (TIMER8/DFF8/CD4017) are real Multisim database
-            # macros the command engine cannot resolve by name: an unrendered
-            # X-line makes the engine drop the instance, so a generated design
-            # simulates as if the part were absent. Render the carrier's own
-            # SPICE template instead: named tokens (%tGND ...) become the
-            # netlist nodes in terminal order, conditional tokens
-            # (%t1D?%t:d%t;1D) resolve to the connected net, %p becomes the
-            # instance stem, and the referenced model body (.subckt or .MODEL)
-            # is embedded once per model name.
-            kind = _CARRIER_RENDER_ALIASES[parts[-1].upper()]
-            nodes = parts[1:-1]
-            try:
-                instance, embed = _render_carrier_instance(
-                    kind, parts[0], nodes, carrier_embeds
-                )
-            except (FileNotFoundError, ValueError):
-                # Leave the line for the engine so the failure names the part,
-                # instead of silently emitting a different circuit.
-                rendered.append(line)
-                continue
-            if embed is not None:
-                carrier_embeds.setdefault(embed[0], embed[1])
-            rendered.append(instance)
             continue
         if (
             len(parts) == 8
@@ -2041,19 +1906,12 @@ def prepare_simulation_netlist(
                 for name, definition in sorted(required_models.items())
             )
             required_models.clear()
-            for name, body in sorted(carrier_embeds.items()):
-                rendered.append(f"* multisim-mcp: carrier model {name}")
-                rendered.append(body)
-            carrier_embeds.clear()
         rendered.append(line)
     if required_models:
         rendered.extend(
             f".model {name} {definition}"
             for name, definition in sorted(required_models.items())
         )
-    for name, body in sorted(carrier_embeds.items()):
-        rendered.append(f"* multisim-mcp: carrier model {name}")
-        rendered.append(body)
     return "\n".join(rendered).rstrip() + "\n"
 
 
@@ -2498,7 +2356,7 @@ def _configure_component_semantics(
         template = element_item.find("./CiComponent//CiaSpiceTmpltExprt")
         if template is None:
             raise ValueError("Native OPAMP5 carrier has no SPICE template")
-        template.set("String", _asc("e%p %tOUT 0 %tIN+ %tIN- 1e5"))
+        template.set("String", _asc(f"e%p %tOUT 0 %tIN+ %tIN- {IDEAL_OPAMP5_GAIN_SPICE}"))
         return
     if spec.kind == "HDR1X4":
         # A passive native header has no SPICE card.  Its electrical identity
@@ -3587,6 +3445,14 @@ def _pick_probe_point(
     """Pick a native-stable point that does not sit on another net crossing."""
     foreign_paths = other_wire_paths or []
 
+    # Multisim's probe hit-testing has a small snap radius.  A probe can be
+    # electrically on its own wire in the source XML and still disappear from
+    # the saved project's analysis channels when a different-net route runs
+    # immediately alongside it.  Keep exact crossings as a hard block and use
+    # this smaller clearance only for the optional interior-wire placement.
+    # Terminal anchors remain valid when an interior candidate is too close.
+    interior_clearance = 8.0
+
     def blocked(point: tuple[float, float]) -> bool:
         px, py = point
         for path in foreign_paths:
@@ -3603,6 +3469,31 @@ def _pick_probe_point(
                     return True
         return False
 
+    def near_foreign(point: tuple[float, float]) -> bool:
+        """Return whether a point is inside Multisim's practical wire gap."""
+        px, py = point
+        for path in foreign_paths:
+            for start, end in zip(path, path[1:]):
+                sx, sy = start
+                ex, ey = end
+                if sx == ex:
+                    distance = abs(px - sx)
+                    if min(sy, ey) <= py <= max(sy, ey):
+                        if distance < interior_clearance:
+                            return True
+                    elif min(abs(py - sy), abs(py - ey)) < interior_clearance:
+                        if distance < interior_clearance:
+                            return True
+                elif sy == ey:
+                    distance = abs(py - sy)
+                    if min(sx, ex) <= px <= max(sx, ex):
+                        if distance < interior_clearance:
+                            return True
+                    elif min(abs(px - sx), abs(px - ex)) < interior_clearance:
+                        if distance < interior_clearance:
+                            return True
+        return False
+
     if prefer_interior:
         # A probe rendered exactly on a resistor/source pin is electrically
         # valid but obscures the symbol and makes a generated sheet look as if
@@ -3616,10 +3507,20 @@ def _pick_probe_point(
                 length = abs(end[0] - start[0]) + abs(end[1] - start[1])
                 if length >= 24.0:
                     interior_candidates.append((length, (start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
-        available = [item for item in interior_candidates if not blocked((item[1], item[2]))]
-        if available:
-            _, x, y = max(available, key=lambda item: item[0])
-            return x, y
+        if interior_candidates:
+            longest = max(interior_candidates, key=lambda item: item[0])
+            longest_point = (longest[1], longest[2])
+            # If the route's best (longest) segment is near another net,
+            # prefer a pin anchor for the whole probe rather than moving to a
+            # shorter interior segment that may still be ambiguous after the
+            # native editor snaps the drawing.  This is the observed failure
+            # mode for generated adapter outputs with RC loads.
+            if (
+                not blocked(longest_point)
+                and not near_foreign(longest_point)
+            ):
+                _, x, y = longest
+                return x, y
     if pin_points:
         terminals = {point for path in wire_paths for point in (path[0], path[-1])}
         candidates = [point for point in pin_points if point in terminals and not blocked(point)]
@@ -3672,6 +3573,7 @@ def _add_probes(
     output_ms14: str,
     net_pin_points: dict[str, list[tuple[float, float]]] | None = None,
     prefer_interior_nets: set[str] | None = None,
+    net_pin_anchors: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Insert voltage probes on named nets and register them with Multisim."""
     probes: list[dict[str, Any]] = []
@@ -3718,6 +3620,7 @@ def _add_probes(
 
     for index, net in enumerate(probe_nets, start=1):
         refdes = f"PR{index}"
+        anchors = list((net_pin_anchors or {}).get(net, []))
         point = _pick_probe_point(
             net_wires.get(net, []),
             (net_pin_points or {}).get(net),
@@ -3731,6 +3634,25 @@ def _add_probes(
         )
         if point is None:
             continue
+
+        selected_anchor = next(
+            (
+                anchor
+                for anchor in anchors
+                if abs(float(anchor.get("x", 0.0)) - point[0]) <= 1e-6
+                and abs(float(anchor.get("y", 0.0)) - point[1]) <= 1e-6
+            ),
+            None,
+        )
+        endpoint_records = [
+            {
+                "refdes": str(anchor.get("refdes", "")),
+                "kind": str(anchor.get("kind", "")),
+                "x": float(anchor.get("x", 0.0)),
+                "y": float(anchor.get("y", 0.0)),
+            }
+            for anchor in anchors
+        ]
 
         element_item = _deepcopy(_load_template("probe_element.xml"))
         symbol_item = _deepcopy(_load_template("probe_symbol.xml"))
@@ -3778,8 +3700,21 @@ def _add_probes(
                 "voltage_output": f"V(OutProbe{index - 1 if index > 1 else ''})",
                 "current_output": f"I(OutProbe{index - 1 if index > 1 else ''})",
                 "attachment": {
+                    "source_net": net,
                     "wire_segments_available": len(net_wires.get(net, [])),
                     "point_selected_on_wire": True,
+                    "placement": "terminal" if selected_anchor else "interior",
+                    "component_endpoints": endpoint_records,
+                    "selected_endpoint": (
+                        {
+                            "refdes": str(selected_anchor.get("refdes", "")),
+                            "kind": str(selected_anchor.get("kind", "")),
+                            "x": float(selected_anchor.get("x", 0.0)),
+                            "y": float(selected_anchor.get("y", 0.0)),
+                        }
+                        if selected_anchor
+                        else None
+                    ),
                     "native_output_requires_enumeration": True,
                 },
             }
@@ -4433,13 +4368,37 @@ def build_schematic(
             if _normalize_net(name)[0] != "0"
         ]
     spec_kind_by_refdes = {spec.refdes.casefold(): spec.kind for spec in specs}
+    net_pin_anchors = {
+        net_name: [
+            {
+                "refdes": str(item.get("refdes", "")),
+                "kind": spec_kind_by_refdes.get(str(item.get("refdes", "")).casefold(), ""),
+                "x": float(item.get("x", 0.0)),
+                "y": float(item.get("y", 0.0)),
+            }
+            for item in net_connections
+        ]
+        for net_name, net_connections in connections.items()
+    }
+    # Native middle-of-wire probes on ideal opamp outputs may disappear on
+    # reopen. Use a terminal attachment, as already required by L/C nets.
+    # Generated adapter stages have the same native persistence boundary: their
+    # output wire may be electrically valid in the source XML but disappear
+    # from the saved project's output enumeration.  Prefer a terminal for
+    # those nets too; direct primitive gates keep the higher-quality interior
+    # placement profile.
+    opamp_output_nets = {spec.nodes[4] for spec in specs if spec.kind == "OPAMP5"}
     prefer_interior_probe_nets = {
         net_name
         for net_name, net_connections in connections.items()
         if any(net_name == requested for requested in probe_nets)
+        and net_name not in opamp_output_nets
         and len(net_connections) >= 2
-        and all(spec_kind_by_refdes.get(str(item.get("refdes", "")).casefold()) not in {"L", "C"}
-                for item in net_connections)
+        and all(
+            spec_kind_by_refdes.get(str(item.get("refdes", "")).casefold()) is not None
+            and spec_kind_by_refdes.get(str(item.get("refdes", "")).casefold()) not in {"L", "C"}
+            for item in net_connections
+        )
     }
     probes = _add_probes(
         root,
@@ -4453,6 +4412,7 @@ def build_schematic(
         str(Path(output_path).with_suffix(".ms14")),
         net_pin_points,
         prefer_interior_probe_nets,
+        net_pin_anchors,
     )
 
     model_warnings: list[str] = [
@@ -4509,29 +4469,6 @@ def build_schematic(
                 model_warnings.append(
                     f"{spec.refdes}: requested timer model {spec.model!r} is represented "
                     "by the local LM555CN carrier and requires explicit compatibility review"
-                )
-            # Interactive "rated virtual" timers (the Basic group's 555) simulate
-            # through Multisim's interactive engine only: in a batch run the
-            # output flips once and then stalls, which reads as a successful but
-            # dead circuit. Warn so the user reaches for the database part.
-            try:
-                carrier_text = (
-                    _load_template("timer8_element.xml").find(
-                        "./CiComponent//CiaSpiceTmpltExprt"
-                    ).get("String")
-                    or ""
-                ) + "".join(
-                    (node.get("String") or node.get("Value") or "")
-                    for node in _load_template("timer8_model.xml").iter()
-                )
-            except FileNotFoundError:
-                carrier_text = ""
-            if "RATED" in carrier_text.upper():
-                model_warnings.append(
-                    f"{spec.refdes}: the local TIMER8 carrier is an interactive "
-                    "'rated virtual' timer; command-engine (batch) verification "
-                    "degenerates for it — place the database LM555CN (Mixed/TIMER) "
-                    "and re-extract for verifiable waveforms"
                 )
         if spec.kind == "DFF8":
             model_warnings.append(

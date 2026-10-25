@@ -22,7 +22,7 @@ python -m multisim_mcp.cli capabilities --target-version 14.3 --profile experime
   `versioned_components` 与上述 `component_mappings` 共用实现。
   每个载体的 `versioned_mapping_status` 另行标明版本证据；`ready` 仍只表示模板文件存在。
 
-MCP 当前 `full` profile 提供 122 个工具，已有无参数调用及契约版本 1 兼容。`engineering` 是新增的
+MCP 当前 `full` profile 提供 123 个工具，已有无参数调用及契约版本 1 兼容。`engineering` 是新增的
 独立版本对象；客户端不应以旧目录的 `status` 或载体 `maturity` 推断实验已经通过。
 API 的非法、空白或重复目标版本返回 HTTP 400；CLI 非法版本返回结构化错误和退出码 2。
 新 CLI 的 JSON 使用 ASCII Unicode 转义，避免 Windows ANSI/UTF-8 管道解码不一致

@@ -24,21 +24,22 @@
     "mcp_prompts_bridged": false,
     "skill_discovery_root": ".dsh/skills",
     "bundle_package": "multisim-mcp-dsh-plugin",
-    "bundle_version": "1.3.0-rc.5",
+    "bundle_version": "1.3.0",
     "compatible_core_versions": [
       "1.1.0",
       "1.2.0",
       "1.3.0rc1",
       "1.3.0rc2",
       "1.3.0rc3",
-      "1.3.0rc4"
+      "1.3.0rc4",
+      "1.3.0"
     ],
     "bundle_path": "integrations/deepseek-harness",
     "tool_profiles": {
       "core": 34,
       "experiment": 92,
-      "optimization": 70,
-      "full": 115
+      "optimization": 71,
+      "full": 123
     },
     "skills": [
       "multisim-create-experiment",
