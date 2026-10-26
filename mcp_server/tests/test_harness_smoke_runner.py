@@ -54,7 +54,7 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "dsh.stdout.log"
             log.write_text(
-                "dsh web: http://127.0.0.1:60475/?token=abc123\\n",
+                "dsh web: http://127.0.0.1:60475/?token=abc123\n",
                 encoding="utf-8",
             )
             self.assertEqual(
@@ -73,7 +73,7 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "dsh.stdout.log"
             url = "http://127.0.0.1:60475/?token=abc123"
-            log.write_text(f"dsh web: {url}\\n", encoding="utf-8")
+            log.write_text(f"dsh web: {url}\n", encoding="utf-8")
             with patch.object(smoke.urllib.request, "urlopen", return_value=context) as urlopen:
                 ready, detail = smoke._wait_for_web(
                     process, 60475, 1, stdout_path=log
