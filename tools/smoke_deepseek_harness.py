@@ -52,7 +52,7 @@ def _process_group_options() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
-_DSH_WEB_URL_RE = re.compile(r"\\bdsh web:\\s*(https?://\\S+)", re.IGNORECASE)
+_DSH_WEB_URL_RE = re.compile(r"\bdsh web:\s*(https?://\S+)", re.IGNORECASE)
 
 
 def _web_url_from_log(path: Path | None, port: int) -> str | None:
