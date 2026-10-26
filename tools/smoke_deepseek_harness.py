@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import re
 import os
@@ -88,6 +89,13 @@ def _wait_for_web(
 ) -> tuple[bool, str]:
     deadline = time.monotonic() + timeout
     base_url = f"http://127.0.0.1:{port}/"
+    # dsh uses the tokenized root URL to mint a signed cookie and redirects
+    # to the clean root.  urllib's default opener follows that redirect but
+    # discards Set-Cookie, so the follow-up request becomes a misleading 401.
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cookie_jar)
+    )
     last_error = "web endpoint did not respond"
     while time.monotonic() < deadline:
         return_code = process.poll()
@@ -95,7 +103,7 @@ def _wait_for_web(
             return False, f"dsh exited before readiness with code {return_code}"
         request_url = _web_url_from_log(stdout_path, port) or base_url
         try:
-            with urllib.request.urlopen(request_url, timeout=2) as response:
+            with opener.open(request_url, timeout=2) as response:
                 if 200 <= response.status < 500:
                     if response.status == 401 and request_url == base_url:
                         last_error = (
