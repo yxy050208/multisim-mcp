@@ -74,13 +74,22 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
             log = Path(temporary) / "dsh.stdout.log"
             url = "http://127.0.0.1:60475/?token=abc123"
             log.write_text(f"dsh web: {url}\n", encoding="utf-8")
-            with patch.object(smoke.urllib.request, "urlopen", return_value=context) as urlopen:
+            opener = Mock()
+            opener.open.return_value = context
+            with patch.object(
+                smoke.urllib.request, "build_opener", return_value=opener
+            ) as build_opener:
                 ready, detail = smoke._wait_for_web(
                     process, 60475, 1, stdout_path=log
                 )
         self.assertTrue(ready)
         self.assertEqual(detail, "HTTP 200")
-        urlopen.assert_called_once_with(url, timeout=2)
+        build_opener.assert_called_once()
+        self.assertIsInstance(
+            build_opener.call_args.args[0],
+            smoke.urllib.request.HTTPCookieProcessor,
+        )
+        opener.open.assert_called_once_with(url, timeout=2)
 
     def test_stop_process_escalates_after_timeout(self) -> None:
         process = Mock()
