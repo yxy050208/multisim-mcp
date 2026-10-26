@@ -3,6 +3,9 @@ import unittest
 from pathlib import Path
 
 from multisim_mcp import server
+from multisim_mcp.natural_analog_frontend import parse_natural_analog_frontend
+from multisim_mcp.spice_adapter import circuit_design_from_spice
+from multisim_mcp.vendor_multiboard import prepare_lm324aj_multiboard_contract
 
 
 class EngineeringMultiboardServerTest(unittest.TestCase):
@@ -112,3 +115,22 @@ class EngineeringMultiboardServerTest(unittest.TestCase):
         for board in prepared["boards"]:
             self.assertIn("XJ1 bus 0", board["spice_netlist"])
             self.assertEqual(board["connector_components"][0]["kind"], "HDR1X4")
+
+    def test_vendor_contract_uses_existing_mcp_tools_without_new_tool_name(self):
+        proposal = parse_natural_analog_frontend(
+            "传感器输入 50mV，总增益 5，截止频率 500Hz，±12V 供电，47kΩ 负载"
+        )["proposal"]
+        contract = prepare_lm324aj_multiboard_contract(
+            circuit_design_from_spice(proposal["netlist"], design_id="server-lm324", title="server LM324")
+        )
+        plan = server.plan_multiboard_engineering_request(vendor_contract=contract)
+        self.assertEqual(plan["status"], "planned")
+        self.assertEqual(plan["profile"], "approved-lm324aj-two-board-v1")
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "vendor-preview"
+            result = server.run_native_multiboard_acceptance(
+                None, str(output), execute=False, analysis="ac", vendor_contract=contract
+            )
+            self.assertEqual(result["status"], "logical-only")
+            self.assertEqual(result["profile"], "approved-lm324aj-two-board-v1")
+            self.assertFalse(output.exists())

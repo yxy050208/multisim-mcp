@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ from multisim_mcp.executable_netlists import (
     COMPILER_SUPPORT_MATRIX,
     compile_executable_netlist,
     verify_approved_model_files,
+    _model_relative_path,
 )
 from multisim_mcp.netlist_drafts import prepare_netlist_draft
 from multisim_mcp.spice_adapter import circuit_design_from_spice
@@ -170,6 +172,103 @@ class ExecutableNetlistCompilerTest(unittest.TestCase):
             }
             with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
                 verify_approved_model_files(snapshot, root)
+
+
+class ModelFileBoundaryTest(unittest.TestCase):
+    def test_model_paths_reject_windows_aliases_on_all_hosts(self) -> None:
+        for uri in (
+            "C:/models/test.lib", "C:test.lib", "//host/models/test.lib",
+            "file:///test.lib", "https://example.invalid/test.lib", "/test.lib",
+            "../test.lib", "models/../test.lib", "models//test.lib", "./test.lib",
+            "test.lib:stream", "NUL.lib", "models/COM1", "models/name./test.lib",
+            "models/name /test.lib", "models/test\x00.lib",
+        ):
+            with self.subTest(uri=uri), self.assertRaises(ValueError):
+                _model_relative_path(uri)
+        self.assertEqual(_model_relative_path("models\\测试.lib").as_posix(), "models/测试.lib")
+
+    def test_rehash_is_readonly_and_returns_no_content_or_absolute_path(self) -> None:
+        content = b"* PRIVATE MODEL BODY\n.model TEST D\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "模型").mkdir()
+            model = root / "模型" / "测试.lib"
+            model.write_bytes(content)
+            snapshot = {"cr-01": {"model_source": {
+                "name": "TEST", "uri": "模型/测试.lib",
+                "sha256": hashlib.sha256(content).hexdigest(), "license": "local-use-only",
+            }}}
+            before = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+            result = verify_approved_model_files(snapshot, root)
+            encoded = json.dumps(result, ensure_ascii=False)
+            self.assertNotIn("PRIVATE MODEL BODY", encoded)
+            self.assertNotIn(str(root), encoded)
+            self.assertEqual(result[0]["license"], "local-use-only")
+            self.assertEqual(result[0]["status"], "bytes-rehashed")
+            self.assertEqual(model.read_bytes(), content)
+            self.assertEqual(before, sorted(path.relative_to(root).as_posix() for path in root.rglob("*")))
+            model.write_bytes(content + b"changed")
+            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+                verify_approved_model_files(snapshot, root)
+
+    def test_placeholder_license_rejected_before_file_read(self) -> None:
+        for license_value in ("pending", " NOASSERTION ", "待核对", "unknown", "unspecified"):
+            with self.subTest(license=license_value):
+                snapshot = {"cr-01": {"model_source": {
+                    "name": "TEST", "uri": "test.lib", "sha256": "a" * 64, "license": license_value,
+                }}}
+                with patch.object(Path, "open", side_effect=AssertionError("must not read")):
+                    with self.assertRaisesRegex(ValueError, "reviewed license"):
+                        verify_approved_model_files(snapshot, "missing-root")
+
+    def test_read_is_bounded_even_when_file_grows_after_stat(self) -> None:
+        content = b"123456789"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test.lib").write_bytes(content)
+            snapshot = {"cr-01": {"model_source": {
+                "name": "TEST", "uri": "test.lib", "sha256": hashlib.sha256(content).hexdigest(),
+                "license": "MIT",
+            }}}
+            with patch("multisim_mcp.executable_netlists.MAX_MODEL_FILE_BYTES", 8):
+                with self.assertRaisesRegex(ValueError, "exceeds 8 bytes"):
+                    verify_approved_model_files(snapshot, root)
+                (root / "test.lib").write_bytes(b"1")
+                with patch.object(Path, "open", return_value=io.BytesIO(content)) as opened:
+                    with self.assertRaisesRegex(ValueError, "exceeds 8 bytes"):
+                        verify_approved_model_files(snapshot, root)
+                    opened.assert_called_once_with("rb")
+
+    def test_symlink_outside_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "root"
+            root.mkdir()
+            outside = Path(directory) / "outside.lib"
+            outside.write_bytes(b".model TEST D\n")
+            try:
+                (root / "test.lib").symlink_to(outside)
+            except OSError:
+                self.skipTest("symlink creation is unavailable on this host")
+            snapshot = {"cr-01": {"model_source": {
+                "name": "TEST", "uri": "test.lib", "sha256": hashlib.sha256(outside.read_bytes()).hexdigest(),
+                "license": "MIT",
+            }}}
+            with self.assertRaisesRegex(ValueError, "outside model_root"):
+                verify_approved_model_files(snapshot, root)
+
+    def test_report_size_matches_bytes_actually_hashed(self) -> None:
+        content = b".model TEST D\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "test.lib").write_bytes(b"1")
+            digest = hashlib.sha256(content).hexdigest()
+            snapshot = {"cr-01": {"model_source": {
+                "name": "TEST", "uri": "test.lib", "sha256": digest, "license": "MIT",
+            }}}
+            with patch.object(Path, "open", return_value=io.BytesIO(content)):
+                verified = verify_approved_model_files(snapshot, root)
+            self.assertEqual(verified[0]["sha256"], digest)
+            self.assertEqual(verified[0]["size_bytes"], len(content))
 
 
 if __name__ == "__main__":

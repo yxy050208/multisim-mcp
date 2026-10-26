@@ -9,8 +9,8 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> The current stable release remains `v1.2.0`; `1.3.0rc3` is now published as a
-> tagged PyPI and official MCP Registry prerelease candidate. This project is not affiliated
+> The `release/v1.3.0` branch is completing the stable-release gates. PyPI, MCP Registry,
+> GitHub, and npm metadata will be verified independently after publication. This project is not affiliated
 > with or endorsed by NI. A
 > locally installed and licensed Multisim 14+ environment is required. The
 > COM runs in an isolated 32-bit Python worker; the MCP frontend may use either
@@ -21,7 +21,7 @@ and create reproducible reports.
 > `split_logic_load`, `split_mixed_logic`, HDR1X4 pin checks, cross-board
 > interfaces, a remote 1 kΩ load, and DC/TRAN/AC. This remains source-candidate
 > functionality; see the [regression evidence](docs/MULTIBOARD_DIGITAL_REGRESSION.md).
-> The published stable package remains `v1.2.0`; the prerelease package is `1.3.0rc3`.
+> The historical `v1.2.0` release remains available while the `v1.3.0` publication is prepared.
 
 > `v1.2.0` is the **frontend-free MCP Core release**. It contains the
 > Python MCP server, CLI, EDA core, model/DeepSeek adapters, tests, documentation,
@@ -34,8 +34,7 @@ The completed development phases and release gates are recorded in the
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[GitHub stable release](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.2.0) ·
-[1.3.0rc3 prerelease](https://github.com/yxy050208/multisim-mcp/releases/tag/v1.3.0rc3)
+[`1.3.0` release notes](docs/RELEASE_NOTES_v1.3.0.md)
 
 The `v1.2.0` release exposes 78 tools, 20 resource templates, and five
 bilingual prompts. It adds approval-gated design planning, diagnosis and patch
@@ -43,13 +42,12 @@ evaluation, global optimization, autonomous correction, Multisim/ngspice
 differential validation, and recoverable jobs. See the
 [release notes](docs/RELEASE_NOTES_v1.2.0.md).
 
-The `1.3.0rc3` source candidate currently exposes 115 tools in its `full`
-profile; the stable `v1.2.0` package remains the published 78-tool release.
+The `1.3.0` release branch currently exposes 123 tools in its `full` profile.
+The public package and registry publication remain separate release steps.
 
-`1.3.0rc3` passed the GitHub Actions Windows 32-bit protocol, Linux ngspice,
-public-artifact, and DeepSeek Harness compatibility checks. It is published to
-PyPI and the official MCP Registry as a prerelease; the npm plugin keeps
-`latest` on `1.1.0` and `next` on the existing `1.3.0-rc.3` candidate.
+The release branch has passed the local public-artifact and target compatibility checks.
+The final Windows/Linux CI run and the PyPI, MCP Registry, and npm publication checks
+remain required before calling `1.3.0` publicly released.
 
 ## End-to-end workflow
 
@@ -269,7 +267,7 @@ merges into a live Claude Desktop, Codex, or Harness configuration automatically
 See the [DeepSeek / Harness integration guide](docs/DEEPSEEK_HARNESS.md) for the
 credential boundary and compatibility baseline.
 `--tool-profile core|experiment|optimization|full` limits tool discovery;
-omitting it preserves the 115-tool `full` compatibility mode. Artifact export is
+omitting it preserves the 122-tool `full` compatibility mode. Artifact export is
 disabled unless `--artifact-export-dir` explicitly approves a destination root.
 The Harness skill installer preserves existing files unless `--force` is explicit.
 Model-provider self-configuration supports DeepSeek, OpenAI, Ollama, and custom

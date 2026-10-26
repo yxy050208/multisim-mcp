@@ -4,7 +4,7 @@
 包、MCP Registry 和该 bundle 是三个独立发布物；版本当前保持同步，但不能由同一个
 上传步骤隐式联动。
 
-> 发布状态：`multisim-mcp-dsh-plugin@1.1.0` 已于 2026-08-23 使用维护者 2FA
+> 发布状态：`multisim-mcp-dsh-plugin@1.3.0` 已于 2026-08-23 使用维护者 2FA
 > 首次公开发布。Registry integrity 为
 > `sha512-tdZ2d3tw5lxe7Dg5aCTEZekw8tIb0jqk3d8j8o39BylKrEs+aPOiuXka1mNT4pYVLLdkzAZ6gEiRUHzf0pMEqQ==`。
 > 发布后已从 npm 包名完成隔离安装、Cordis 合成、MCP 启动和 Web HTTP 200 验证。
@@ -31,7 +31,7 @@ npm pack .\integrations\deepseek-harness --dry-run --json --ignore-scripts
 发布守卫把 Registry 的 404 解释为“当前未被占用”，但这不是名称保留。首次发布前
 必须重新执行；如果 Registry 已出现同名包且其 repository 不是本项目，守卫会失败。
 
-## 首次发布 1.1.0
+## 后续发布 1.3.0
 
 npm 的 staged publishing 明确要求包已经存在，因此全新包不能使用
 `npm stage publish`。首次发布需要包所有者在可信本机完成，并使用账户 2FA：
@@ -48,7 +48,7 @@ npm publish .\multisim-mcp-dsh-plugin-1.1.0.tgz --access public
 立即核对：
 
 ```powershell
-npm view multisim-mcp-dsh-plugin@1.1.0 `
+npm view multisim-mcp-dsh-plugin@1.3.0 `
   name version repository dist.integrity dist.shasum --json
 ```
 

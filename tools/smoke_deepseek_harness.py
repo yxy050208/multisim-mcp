@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import signal
 import shutil
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -50,19 +52,57 @@ def _process_group_options() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
+_DSH_WEB_URL_RE = re.compile(r"\bdsh web:\s*(https?://\S+)", re.IGNORECASE)
+
+
+def _web_url_from_log(path: Path | None, port: int) -> str | None:
+    """Read the tokenized local Web URL printed by the official dsh CLI."""
+    if path is None or not path.exists():
+        return None
+    for line in reversed(_tail(path, limit=4000).splitlines()):
+        match = _DSH_WEB_URL_RE.search(line)
+        if not match:
+            continue
+        candidate = match.group(1).rstrip(".,);")
+        try:
+            parsed = urllib.parse.urlsplit(candidate)
+        except ValueError:
+            continue
+        if (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname in {"127.0.0.1", "localhost"}
+            and parsed.port == port
+            and parsed.path in {"", "/"}
+            and parsed.query
+        ):
+            return candidate
+    return None
+
+
 def _wait_for_web(
-    process: subprocess.Popen[Any], port: int, timeout: float
+    process: subprocess.Popen[Any],
+    port: int,
+    timeout: float,
+    *,
+    stdout_path: Path | None = None,
 ) -> tuple[bool, str]:
     deadline = time.monotonic() + timeout
-    url = f"http://127.0.0.1:{port}/"
+    base_url = f"http://127.0.0.1:{port}/"
     last_error = "web endpoint did not respond"
     while time.monotonic() < deadline:
         return_code = process.poll()
         if return_code is not None:
             return False, f"dsh exited before readiness with code {return_code}"
+        request_url = _web_url_from_log(stdout_path, port) or base_url
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with urllib.request.urlopen(request_url, timeout=2) as response:
                 if 200 <= response.status < 500:
+                    if response.status == 401 and request_url == base_url:
+                        last_error = (
+                            "web endpoint requires the tokenized URL printed by dsh"
+                        )
+                        time.sleep(0.5)
+                        continue
                     return True, f"HTTP {response.status}"
         except (OSError, urllib.error.URLError) as exc:
             last_error = str(exc)
@@ -232,7 +272,10 @@ def run_smoke(
             )
             try:
                 web_ready, readiness = _wait_for_web(
-                    process, port, startup_timeout
+                    process,
+                    port,
+                    startup_timeout,
+                    stdout_path=stdout_path,
                 )
             finally:
                 _stop_process(process)

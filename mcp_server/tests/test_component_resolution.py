@@ -151,6 +151,22 @@ class ComponentResolutionTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown requirement"):
             resolve_component_requirements(draft, {"cr-99": "resistor"})
 
+    def test_model_metadata_is_not_coerced_or_silently_truncated(self) -> None:
+        _, _, draft = _ready("设计传感器无源滤波", "signal-passive")
+        for field, value in (
+            ("name", "a" * 161), ("name", "MODEL\nBODY"),
+            ("uri", "a" * 301), ("uri", None), ("uri", "test\x00.lib"),
+            ("license", None), ("license", 123), ("license", "MIT\nprivate text"),
+            ("license", "a" * 81),
+        ):
+            with self.subTest(field=field, value=value):
+                source = {"name": "TEST", "uri": "test.lib", "sha256": "a" * 64, "license": "MIT"}
+                source[field] = value
+                with self.assertRaisesRegex(ValueError, f"model_source.{field}"):
+                    resolve_component_requirements(draft, {"cr-01": {
+                        "family": "series-resistor", "model_source": source,
+                    }})
+
     def test_mcp_adapter_exposes_the_same_read_only_boundary(self) -> None:
         _, _, draft = _ready("设计通用接口电路", "general-minimal")
         result = server.resolve_component_requirements(draft)

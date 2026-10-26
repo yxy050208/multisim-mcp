@@ -149,7 +149,12 @@ class CircuitComponent:
             value = _require_text(value, "component.value", maximum=1024)
         model = self.model
         if model is not None:
-            model = _require_text(model, "component.model", maximum=255)
+            # Behavioral sources such as the portable ADC4 quantizer can
+            # contain a bounded nested expression rather than a short model
+            # identifier. Keep the field finite (4 KiB) while avoiding an
+            # artificial 255-byte ceiling that prevents a valid structured
+            # design from round-tripping the reviewed adapter expansion.
+            model = _require_text(model, "component.model", maximum=4096)
         object.__setattr__(self, "refdes", refdes)
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "nodes", nodes)

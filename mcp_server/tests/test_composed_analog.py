@@ -57,6 +57,27 @@ class RouterTests(unittest.TestCase):
         self.assertNotEqual(point, (50.0, 0.0))
         self.assertIn(point, {(0, 0), (100, 0)})
 
+    def test_probe_uses_terminal_when_long_segment_runs_near_foreign_net(self):
+        # A three-unit parallel gap is electrically distinct in the source
+        # XML, but Multisim can snap an interior probe across that gap when it
+        # saves and reopens the project.  The stable fallback is a pin anchor.
+        point = _pick_probe_point(
+            [[(0, 0), (100, 0), (100, 30)]],
+            pin_points=[(0, 0), (100, 30)],
+            prefer_interior=True,
+            other_wire_paths=[[(0, 3), (100, 3)]],
+        )
+        self.assertIn(point, {(0, 0), (100, 30)})
+
+    def test_probe_keeps_safe_long_segment_interior(self):
+        point = _pick_probe_point(
+            [[(0, 0), (100, 0)]],
+            pin_points=[(0, 0), (100, 0)],
+            prefer_interior=True,
+            other_wire_paths=[[(0, 30), (100, 30)]],
+        )
+        self.assertEqual(point, (50.0, 0.0))
+
 
 class ReferenceTests(unittest.TestCase):
     def test_two_active_poles_against_closed_form_complex_transfer(self):

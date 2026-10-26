@@ -285,6 +285,8 @@ def _artifact_allowlist(root: Path) -> dict[str, str]:
             if relative == COMPARISON_DATA_NAME
             else "verification-plan"
             if relative == VERIFICATION_PLAN_NAME
+            else "variant-patch"
+            if relative.startswith("variants/") and relative.endswith(".patch.json")
             else "variant-design"
             if relative.startswith("variants/")
             else "experiment-artifact"
@@ -307,6 +309,7 @@ class DesignVariantComparisonService:
         spec: Mapping[str, Any],
         output_directory: str,
         *,
+        variant_metadata: Mapping[str, Mapping[str, Any]] | None = None,
         timeout_per_experiment: float = 120.0,
         max_points: int = 2000,
         checkpoint: ProgressCallback | None = None,
@@ -340,6 +343,29 @@ class DesignVariantComparisonService:
             raise ValueError("output_directory must not be a filesystem root")
 
         normalized, prepared = validate_comparison_spec(spec, variants)
+        metadata_by_id: dict[str, dict[str, Any]] = {}
+        if variant_metadata is not None:
+            if not isinstance(variant_metadata, Mapping):
+                raise ValueError("variant_metadata must be an object")
+            unknown = set(variant_metadata) - set(variants)
+            if unknown:
+                raise ValueError(
+                    "variant_metadata contains unknown variants: "
+                    + ", ".join(sorted(str(item) for item in unknown))
+                )
+            for variant_id, raw_metadata in variant_metadata.items():
+                if not isinstance(raw_metadata, Mapping):
+                    raise ValueError(f"variant_metadata.{variant_id} must be an object")
+                if set(raw_metadata) - {"patch"}:
+                    raise ValueError(
+                        f"variant_metadata.{variant_id} contains unknown fields"
+                    )
+                patch = raw_metadata.get("patch")
+                if patch is not None and not isinstance(patch, Mapping):
+                    raise ValueError(f"variant_metadata.{variant_id}.patch must be an object")
+                metadata_by_id[str(variant_id)] = {
+                    "patch": _plain_json(patch) if patch is not None else None,
+                }
         comparison_id = f"comparison-{uuid.uuid4().hex}"
 
         def notify(stage: str, progress: int, message: str) -> None:
@@ -360,6 +386,12 @@ class DesignVariantComparisonService:
                     root / "variants" / f"{item['variant_id']}.json",
                     item["design"].to_dict(),
                 )
+                metadata = metadata_by_id.get(item["variant_id"])
+                if metadata is not None and metadata.get("patch") is not None:
+                    _atomic_json(
+                        root / "variants" / f"{item['variant_id']}.patch.json",
+                        metadata["patch"],
+                    )
             _atomic_json(root / COMPARISON_SPEC_NAME, normalized)
             _atomic_json(
                 root / VERIFICATION_PLAN_NAME,
@@ -396,6 +428,11 @@ class DesignVariantComparisonService:
                         "design_digest": item["design_digest"],
                         "netlist_digest": item["netlist_digest"],
                         "design_path": f"variants/{item['variant_id']}.json",
+                        **(
+                            {"patch_path": f"variants/{item['variant_id']}.patch.json"}
+                            if metadata_by_id.get(item["variant_id"], {}).get("patch") is not None
+                            else {}
+                        ),
                     }
                     for item in prepared
                 ],

@@ -180,5 +180,32 @@ class ComponentApprovalTest(unittest.TestCase):
             )
 
 
+    def test_license_placeholders_cannot_be_approved_as_model_provenance(self) -> None:
+        draft = _ready("signal-active")
+        baseline = resolve_component_requirements(draft)
+        for license_value in ("NOASSERTION", "unspecified", "待核对", "未审核"):
+            with self.subTest(license=license_value):
+                selections = {}
+                for item in baseline["requirements"]:
+                    candidate = item["candidates"][0]
+                    selected = {"family": candidate["family"]}
+                    for rating in candidate["rating_requirements"]:
+                        if rating.get("minimum") is not None:
+                            selected[rating["metric"]] = rating["minimum"]
+                    if candidate["model_requirement"] == "verified-model-required":
+                        selected["model_source"] = {
+                            "name": "LOCAL", "uri": "model.lib", "sha256": "a" * 64,
+                            "license": license_value,
+                        }
+                    selections[item["requirement_id"]] = selected
+                resolution = resolve_component_requirements(draft, selections)
+                with self.assertRaisesRegex(ValueError, "unreviewed-license"):
+                    approve_component_resolution(draft, resolution, {
+                        "approved": True, "resolution_id": resolution["resolution_id"],
+                        "resolution_digest": resolution["resolution_digest"],
+                        "confirm_topology": True, "confirm_ratings": True, "confirm_model_provenance": True,
+                    })
+
+
 if __name__ == "__main__":
     unittest.main()

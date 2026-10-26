@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .eda_core import ModelReference
+from .model_provenance import build_model_provenance, has_declared_model_license
 from .safety import validate_spice_netlist
 
 
@@ -31,7 +32,6 @@ _SOLVER_VERSION_PATTERNS = {
         re.compile(r"(?i)\bmultisim(?:\s+(?:version|release))?\s+([0-9]+(?:\.[0-9]+)*)"),
     ),
 }
-_LICENSE_UNKNOWN = frozenset({"", "unknown", "noassertion", "none", "unspecified"})
 
 
 def _sha256_text(value: str) -> str:
@@ -377,6 +377,7 @@ def audit_spice_compatibility(
     if not _BACKEND_ID.fullmatch(normalized_backend):
         raise ValueError("backend_id must be a stable lowercase identifier")
     references = _model_references(model_references)
+    model_provenance = build_model_provenance(references)
     records = _logical_records(netlist)
     diagnostics: list[dict[str, Any]] = []
     features, dialect_markers = _feature_inventory(
@@ -492,8 +493,7 @@ def audit_spice_compatibility(
         license_value = explicit.license if explicit is not None else None
         license_status = (
             "declared"
-            if license_value is not None
-            and license_value.strip().casefold() not in _LICENSE_UNKNOWN
+            if has_declared_model_license(license_value)
             else "unknown"
         )
         source = explicit.source if explicit is not None else (
@@ -543,8 +543,7 @@ def audit_spice_compatibility(
             continue
         license_status = (
             "declared"
-            if explicit.license is not None
-            and explicit.license.strip().casefold() not in _LICENSE_UNKNOWN
+            if has_declared_model_license(explicit.license)
             else "unknown"
         )
         models.append(
@@ -657,6 +656,10 @@ def audit_spice_compatibility(
             "solver_version_status": solver_status,
         },
         "models": models,
+        # This is the normalized declaration supplied by the caller.  The
+        # detailed ``models`` list below additionally records what the deck
+        # actually embedded or resolved at runtime.
+        "model_provenance": model_provenance,
         "model_fingerprint_sha256": model_fingerprint,
         "summary": {
             "risk_level": risk_level,

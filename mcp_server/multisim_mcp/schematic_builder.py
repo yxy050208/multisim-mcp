@@ -3588,19 +3588,31 @@ def _pick_probe_point(
     foreign_paths = other_wire_paths or []
 
     def blocked(point: tuple[float, float]) -> bool:
+        """Reject exact crossings and near-parallel foreign wire snaps."""
         px, py = point
         for path in foreign_paths:
             for start, end in zip(path, path[1:]):
                 sx, sy = start
                 ex, ey = end
+                # Exact collinear overlap/crossing is always unsafe.
                 cross = (px - sx) * (ey - sy) - (py - sy) * (ex - sx)
-                if abs(cross) > 1e-6:
-                    continue
-                if (
+                if abs(cross) <= 1e-6 and (
                     min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6
                     and min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
                 ):
                     return True
+                # Multisim can snap an interior probe across a short gap
+                # between parallel orthogonal wires when the project is
+                # saved and reopened.  Apply the clearance only while the
+                # candidate lies alongside the foreign segment.
+                if sx == ex:
+                    alongside = min(sy, ey) - 1e-6 <= py <= max(sy, ey) + 1e-6
+                    if alongside and abs(px - sx) <= 8.0:
+                        return True
+                elif sy == ey:
+                    alongside = min(sx, ex) - 1e-6 <= px <= max(sx, ex) + 1e-6
+                    if alongside and abs(py - sy) <= 8.0:
+                        return True
         return False
 
     if prefer_interior:
@@ -3616,10 +3628,15 @@ def _pick_probe_point(
                 length = abs(end[0] - start[0]) + abs(end[1] - start[1])
                 if length >= 24.0:
                     interior_candidates.append((length, (start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0))
-        available = [item for item in interior_candidates if not blocked((item[1], item[2]))]
-        if available:
-            _, x, y = max(available, key=lambda item: item[0])
-            return x, y
+        if interior_candidates:
+            # If the route's longest candidate is unsafe, do not move the
+            # probe to a shorter segment on the same route.  The native editor
+            # can still snap that alternate interior point across the nearby
+            # foreign net; use a terminal anchor instead.
+            longest = max(interior_candidates, key=lambda item: item[0])
+            if not blocked((longest[1], longest[2])):
+                _, x, y = longest
+                return x, y
     if pin_points:
         terminals = {point for path in wire_paths for point in (path[0], path[-1])}
         candidates = [point for point in pin_points if point in terminals and not blocked(point)]

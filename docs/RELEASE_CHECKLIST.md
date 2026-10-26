@@ -117,3 +117,19 @@ adding an ignore rule does not remove a file that is already staged.
       reviewer.
 - [ ] Disallow traditional publish tokens and verify package provenance on the
       next staged release.
+
+
+## Required before v1.3.0
+
+- [ ] Freeze the reviewed `release/v1.3.0` commit and confirm no private or local
+      Multisim assets are staged.
+- [ ] Synchronize `pyproject.toml`, `multisim_mcp.__version__`, `server.json`,
+      `compatibility/deepseek-harness.json`, and the DSH bundle at `1.3.0`.
+- [ ] Pass the full COM-free suite, package/resource checks, release audit, and
+      clean wheel/sdist inspection.
+- [ ] Pass Windows 32-bit protocol/COM CI and Linux ngspice CI from the same
+      reviewed commit.
+- [ ] Create and push annotated tag `v1.3.0`; verify the tag SHA before publication.
+- [ ] Publish and verify PyPI and MCP Registry metadata, then stage/review the
+      independent npm `1.3.0` bundle.
+- [ ] Create the bilingual GitHub Release with only verified public artifacts.

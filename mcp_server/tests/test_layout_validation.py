@@ -63,6 +63,34 @@ class LayoutValidationTest(unittest.TestCase):
             validate_schematic_geometry([], {}, max_crossings_per_wire=-1)
         with self.assertRaises(ValueError):
             validate_schematic_geometry([], {}, max_crossings_per_wire=True)
+        with self.assertRaises(ValueError):
+            validate_schematic_geometry([], {}, clearance=float("nan"))
+
+    def test_rejects_nonfinite_or_nonpositive_component_geometry(self) -> None:
+        for placement in (
+            {"refdes": "R1", "x": float("nan"), "y": 0},
+            {"refdes": "R1", "x": 0, "y": float("inf")},
+            {"refdes": "R1", "x": 0, "y": 0, "width": 0},
+            {"refdes": "R1", "x": 0, "y": 0, "height": -1},
+        ):
+            with self.subTest(placement=placement):
+                result = validate_schematic_geometry([placement], {})
+                self.assertEqual(result["status"], "fail")
+                self.assertIn("invalid-placement", {item["code"] for item in result["findings"]})
+
+    def test_rejects_nonfinite_and_zero_length_wire_segments(self) -> None:
+        for path in (
+            [(0, 0), (float("nan"), 10)],
+            [(0, 0), (0, 0)],
+            [(0, 0), None],
+        ):
+            with self.subTest(path=path):
+                result = validate_schematic_geometry([], {"n1": [path]})
+                self.assertEqual(result["status"], "fail")
+                self.assertTrue(
+                    {item["code"] for item in result["findings"]}
+                    & {"invalid-wire-point", "degenerate-wire"}
+                )
 
 
 if __name__ == "__main__":

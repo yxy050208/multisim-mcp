@@ -21,6 +21,37 @@ spec.loader.exec_module(case)
 
 
 class NativeXmlTests(unittest.TestCase):
+    def test_lm324_supply_ports_follow_semantic_positive_negative_order(self):
+        if not any((p / "lm324aj_element.xml").is_file() for p in template_search_paths()):
+            self.skipTest("requires local LM324AJ templates")
+        netlist = (
+            "VCC vcc 0 DC 15\nVSS vss 0 DC -15\nV1 in 0 DC .1\n"
+            "XU1 in fb vcc vss out LM324AJ\nR1 out fb 10k\nR2 fb 0 10k\n.end\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.xml"
+            build_schematic(netlist, path)
+            root = parse_native_xml(path).getroot()
+            nodes = {
+                item.get("CiID"): item.find("CiNode").get("LocalName").removeprefix("&ASC")
+                for item in root.iter("Item")
+                if item.find("CiNode") is not None
+            }
+            item = next(
+                item for item in root.iter("Item")
+                if item.find("CiComponent") is not None
+                and item.find("CiComponent").get("LocalName") == "&ASCU1"
+            )
+            component_id = item.find("CiComponent").get("CiID") or item.get("CiID")
+            pins = {
+                port.get("LocalName").removeprefix("&ASC"): nodes[port.find("Nodes/Item").get("CiID")]
+                for port in root.iter("CiPort")
+                if port.get("Component") == component_id
+            }
+            self.assertEqual(pins, {
+                "1IN+": "in", "1IN-": "fb", "VS+": "vcc", "VS-": "vss", "1OUT": "out",
+            })
+
     def test_voltage_pin_semantics_do_not_depend_on_template_filename_order(self):
         if not any((p/"minimal.ms14.xml").is_file() for p in template_search_paths()):
             self.skipTest("requires local templates")

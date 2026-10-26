@@ -2,10 +2,9 @@
 
 The MCP server remains the primary integration surface.  This tiny bridge is
 only for a local browser UI: it binds to loopback by default and serves bounded
-project data. Read-only inspection and chat do not mutate projects. The model-
-engineering routes are the controlled backend handoff for a future standalone
-UI and write only to a caller-supplied new output directory through the
-audited engineering service.
+project data. Read-only inspection and chat do not mutate projects. Optional
+write routes are disabled unless the caller explicitly enables them and then
+remain bounded to the configured project root and the audited patch service.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
+from .agent_workflow import build_engineering_task_chain
 from .api_contract import build_capabilities, build_error
 from .job_engine import ExperimentJobManager, default_job_dir
 from .model_provider import ModelMessage, ModelProviderRegistry, ModelRuntimeError
@@ -30,6 +30,8 @@ from .design_specifications import prepare_design_specification
 from .netlist_drafts import prepare_netlist_draft
 from .component_resolution import resolve_component_requirements
 from .component_approvals import approve_component_resolution
+from .design_patch_application import DesignPatchApplicationService
+from .design_patch_transactions import read_approval_token, write_approval_token
 from .executable_netlists import compile_executable_netlist
 from .executable_approvals import approve_executable_netlist
 from .simulation_approvals import approve_simulation_plan
@@ -49,6 +51,30 @@ from .workbench_artifacts import (
 )
 from .workspace_manifest import read_directory_manifest
 from .tool_profiles import selected_tool_profile, tool_profile_status
+
+
+def _project_path(root: str, value: object, field_name: str, *, must_exist: bool = False) -> Path:
+    """Resolve one Workbench path without allowing it to escape the project root."""
+    if not isinstance(value, str) or not value.strip() or "\x00" in value:
+        raise ValueError(f"{field_name} must be a non-empty path")
+    unresolved = Path(value).expanduser()
+    if unresolved.is_symlink() or unresolved.parent.is_symlink():
+        raise ValueError(f"{field_name} must not be a symbolic link")
+    resolved_root = Path(root).expanduser().resolve()
+    resolved = unresolved.resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must stay inside the Workbench project root") from exc
+    if must_exist and not resolved.is_file():
+        raise FileNotFoundError(f"{field_name} does not exist: {resolved}")
+    if not must_exist and not resolved.parent.is_dir():
+        raise FileNotFoundError(f"{field_name} parent directory does not exist: {resolved.parent}")
+    return resolved
+
+
+def _relative_project_path(root: str, path: Path) -> str:
+    return path.resolve().relative_to(Path(root).expanduser().resolve()).as_posix()
 
 
 WORKBENCH_API_SCHEMA_VERSION = 1
@@ -568,7 +594,8 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     "schema_version": WORKBENCH_API_SCHEMA_VERSION,
                     "service": "multisim-mcp-workbench",
                     "status": "ok",
-                    "read_only": True,
+                    "read_only": not self.server.enable_writes,
+                    "write_enabled": self.server.enable_writes,
                     "provider_probe": True,
                     "assistant": "read-only-chat",
                     "root": str(self.server.project_root),
@@ -577,13 +604,20 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
             return
         if route == "/api/capabilities":
             profile = selected_tool_profile()
-            self._send_json(
-                200,
-                build_capabilities(
+            query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+            try:
+                target_versions = query.get("target_version", [None])
+                if len(target_versions) != 1:
+                    raise ValueError("target_version must be provided at most once")
+                capabilities = build_capabilities(
                     server_version=__version__,
                     tool_profile=tool_profile_status(profile),
-                ),
-            )
+                    target_version=target_versions[0],
+                )
+            except ValueError as exc:
+                self._send_json(400, {"success": False, "error": build_error(exc, command="capabilities")})
+                return
+            self._send_json(200, capabilities)
             return
         if route == "/api/provider-config":
             config_path = default_provider_config_path()
@@ -853,6 +887,356 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler contract
         route = urlsplit(self.path).path
+        if route.startswith("/api/design-patch/") and not self.server.enable_writes:
+            self._send_json(
+                403,
+                {
+                    "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                    "service": "multisim-mcp-workbench",
+                    "success": False,
+                    "read_only": True,
+                    "write_enabled": False,
+                    "error": {
+                        "schema_version": 1,
+                        "code": "permission_denied",
+                        "type": "PermissionError",
+                        "message": "design-patch write routes require enable_writes=true",
+                        "retryable": False,
+                        "command": route,
+                    },
+                },
+            )
+            return
+        if route == "/api/agent-workflow/plan":
+            try:
+                payload = self._read_json_body()
+                chain = build_engineering_task_chain(
+                    payload.get("requirements"),
+                    chain_id=payload.get("chain_id"),
+                    model_profiles=payload.get("model_profiles", {}),
+                    include_optimization=payload.get("include_optimization", True),
+                )
+                self._send_json(
+                    200,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": True,
+                        "read_only": True,
+                        "execution_started": False,
+                        "chain": chain.to_dict(),
+                    },
+                )
+            except (OSError, TypeError, ValueError, RuntimeError) as exc:
+                self._send_json(
+                    400,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": True,
+                        "execution_started": False,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+            return
+        if route == "/api/design-patch/approve":
+            try:
+                payload = self._read_json_body()
+                root = self.server.project_root
+                design = _project_path(root, payload.get("design_path"), "design_path", must_exist=True)
+                patch_value = payload.get("patch_path")
+                revert_value = payload.get("revert_transaction")
+                patch = (
+                    _project_path(root, patch_value, "patch_path", must_exist=True)
+                    if patch_value is not None
+                    else None
+                )
+                revert = (
+                    _project_path(root, revert_value, "revert_transaction", must_exist=True)
+                    if revert_value is not None
+                    else None
+                )
+                output_value = payload.get("output_path")
+                output = (
+                    _project_path(root, output_value, "output_path")
+                    if output_value is not None
+                    else None
+                )
+                receipt = _project_path(root, payload.get("receipt_path"), "receipt_path")
+                token_output = _project_path(root, payload.get("token_output"), "token_output")
+                paths = [design, patch, revert, output, receipt, token_output]
+                if len({path for path in paths if path is not None}) != len(
+                    [path for path in paths if path is not None]
+                ):
+                    raise ValueError("design-patch paths must be distinct")
+                in_place = payload.get("in_place", False)
+                if not isinstance(in_place, bool):
+                    raise ValueError("in_place must be a boolean")
+                service = DesignPatchApplicationService()
+                result = service.approve_basic(
+                    str(design),
+                    patch_path=str(patch) if patch is not None else None,
+                    revert_transaction=str(revert) if revert is not None else None,
+                    output_path=str(output) if output is not None else None,
+                    in_place=in_place,
+                    receipt_path=str(receipt),
+                    regenerate_source_netlist=payload.get("regenerate_source_netlist", False),
+                    ttl_seconds=payload.get("ttl_seconds", 900),
+                )
+                token = result.pop("approval_token")
+                write_approval_token(str(token_output), token)
+                result.update(
+                    {
+                        "service": "multisim-mcp-workbench",
+                        "success": True,
+                        "read_only": False,
+                        "approval_only": True,
+                        "approval_token_exposed": False,
+                        "token_output": _relative_project_path(root, token_output),
+                    }
+                )
+            except (TypeError, ValueError, OSError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "approval_only": True,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
+        if route in {"/api/design-patch/apply", "/api/design-patch/revert"}:
+            try:
+                payload = self._read_json_body()
+                root = self.server.project_root
+                design = _project_path(root, payload.get("design_path"), "design_path", must_exist=True)
+                patch_value = payload.get("patch_path") if route.endswith("/apply") else None
+                transaction_value = payload.get("transaction_path") if route.endswith("/revert") else None
+                patch = (
+                    _project_path(root, patch_value, "patch_path", must_exist=True)
+                    if patch_value is not None
+                    else None
+                )
+                transaction = (
+                    _project_path(root, transaction_value, "transaction_path", must_exist=True)
+                    if transaction_value is not None
+                    else None
+                )
+                output_value = payload.get("output_path")
+                output = (
+                    _project_path(root, output_value, "output_path")
+                    if output_value is not None
+                    else None
+                )
+                receipt = _project_path(root, payload.get("receipt_path"), "receipt_path")
+                token_file = _project_path(root, payload.get("approval_token_file"), "approval_token_file", must_exist=True)
+                in_place = payload.get("in_place", False)
+                if not isinstance(in_place, bool):
+                    raise ValueError("in_place must be a boolean")
+                token = read_approval_token(str(token_file))
+                result = DesignPatchApplicationService().execute_basic(
+                    str(design),
+                    patch_path=str(patch) if patch is not None else None,
+                    transaction_path=str(transaction) if transaction is not None else None,
+                    output_path=str(output) if output is not None else None,
+                    in_place=in_place,
+                    receipt_path=str(receipt),
+                    regenerate_source_netlist=payload.get("regenerate_source_netlist", False),
+                    approval_token=token,
+                )
+                result.update(
+                    {
+                        "service": "multisim-mcp-workbench",
+                        "read_only": False,
+                        "approval_token_exposed": False,
+                    }
+                )
+            except (TypeError, ValueError, OSError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
+        if route == "/api/design-patch/recover":
+            try:
+                payload = self._read_json_body()
+                root = self.server.project_root
+                journal_value = payload.get("journal_path")
+                target_value = payload.get("target_path")
+                journal = (
+                    _project_path(root, journal_value, "journal_path", must_exist=True)
+                    if journal_value is not None
+                    else None
+                )
+                target = (
+                    _project_path(root, target_value, "target_path", must_exist=False)
+                    if target_value is not None
+                    else None
+                )
+                result = DesignPatchApplicationService().recover_basic(
+                    journal_path=str(journal) if journal is not None else None,
+                    target_path=str(target) if target is not None else None,
+                    action=payload.get("action", "auto"),
+                )
+                result.update({"service": "multisim-mcp-workbench", "read_only": False})
+            except (TypeError, ValueError, OSError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
+        if route == "/api/design-patch/verified-approve":
+            try:
+                payload = self._read_json_body()
+                root = self.server.project_root
+                design = _project_path(root, payload.get("design_path"), "design_path", must_exist=True)
+                patch = _project_path(root, payload.get("patch_path"), "patch_path", must_exist=True)
+                plan = _project_path(root, payload.get("verification_plan_path"), "verification_plan_path", must_exist=True)
+                experiment = _project_path(root, payload.get("experiment_output"), "experiment_output")
+                workflow = _project_path(root, payload.get("workflow_manifest"), "workflow_manifest")
+                receipt = _project_path(root, payload.get("receipt_path"), "receipt_path")
+                token_output = _project_path(root, payload.get("token_output"), "token_output")
+                output_value = payload.get("output_path")
+                output = _project_path(root, output_value, "output_path") if output_value is not None else None
+                in_place = payload.get("in_place", False)
+                if not isinstance(in_place, bool):
+                    raise ValueError("in_place must be a boolean")
+                result = DesignPatchApplicationService().approve_verified(
+                    str(design),
+                    str(patch),
+                    output_path=str(output) if output is not None else None,
+                    in_place=in_place,
+                    receipt_path=str(receipt),
+                    regenerate_source_netlist=payload.get("regenerate_source_netlist", False),
+                    verification_plan_path=str(plan),
+                    experiment_output=str(experiment),
+                    workflow_manifest=str(workflow),
+                    timeout_seconds=payload.get("timeout_seconds", 120.0),
+                    max_points=payload.get("max_points", 2000),
+                    ttl_seconds=payload.get("ttl_seconds", 900),
+                )
+                token = result.pop("approval_token")
+                write_approval_token(str(token_output), token)
+                result.update(
+                    {
+                        "service": "multisim-mcp-workbench",
+                        "success": True,
+                        "read_only": False,
+                        "approval_only": True,
+                        "approval_token_exposed": False,
+                        "token_output": _relative_project_path(root, token_output),
+                    }
+                )
+            except (TypeError, ValueError, OSError, RuntimeError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "approval_only": True,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
+        if route == "/api/design-patch/verified-apply":
+            try:
+                payload = self._read_json_body()
+                root = self.server.project_root
+                design = _project_path(root, payload.get("design_path"), "design_path", must_exist=True)
+                patch = _project_path(root, payload.get("patch_path"), "patch_path", must_exist=True)
+                plan = _project_path(root, payload.get("verification_plan_path"), "verification_plan_path", must_exist=True)
+                experiment = _project_path(root, payload.get("experiment_output"), "experiment_output")
+                workflow = _project_path(root, payload.get("workflow_manifest"), "workflow_manifest")
+                receipt = _project_path(root, payload.get("receipt_path"), "receipt_path")
+                token_file = _project_path(root, payload.get("approval_token_file"), "approval_token_file", must_exist=True)
+                output_value = payload.get("output_path")
+                output = _project_path(root, output_value, "output_path") if output_value is not None else None
+                in_place = payload.get("in_place", False)
+                if not isinstance(in_place, bool):
+                    raise ValueError("in_place must be a boolean")
+                from .server import _experiment_application_service
+
+                result = DesignPatchApplicationService().execute_verified(
+                    _experiment_application_service(),
+                    str(design),
+                    str(patch),
+                    output_path=str(output) if output is not None else None,
+                    in_place=in_place,
+                    receipt_path=str(receipt),
+                    regenerate_source_netlist=payload.get("regenerate_source_netlist", False),
+                    verification_plan_path=str(plan),
+                    experiment_output=str(experiment),
+                    workflow_manifest=str(workflow),
+                    approval_token=read_approval_token(str(token_file)),
+                    timeout_seconds=payload.get("timeout_seconds", 120.0),
+                    max_points=payload.get("max_points", 2000),
+                )
+                result.update({"service": "multisim-mcp-workbench", "read_only": False, "approval_token_exposed": False})
+            except (TypeError, ValueError, OSError, RuntimeError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
+        if route == "/api/design-patch/verified-recover":
+            try:
+                payload = self._read_json_body()
+                workflow = _project_path(
+                    self.server.project_root,
+                    payload.get("workflow_manifest"),
+                    "workflow_manifest",
+                    must_exist=True,
+                )
+                result = DesignPatchApplicationService().recover_verified(str(workflow))
+                result.update({"service": "multisim-mcp-workbench", "read_only": False})
+            except (TypeError, ValueError, OSError, RuntimeError) as exc:
+                self._send_json(
+                    422 if isinstance(exc, (TypeError, ValueError)) else 500,
+                    {
+                        "schema_version": WORKBENCH_API_SCHEMA_VERSION,
+                        "service": "multisim-mcp-workbench",
+                        "success": False,
+                        "read_only": False,
+                        "error": self._structured_error(exc, route),
+                    },
+                )
+                return
+            self._send_json(200, result)
+            return
         if route == "/api/assistant-chat":
             try:
                 result = _run_assistant_chat(self._read_json_body())
@@ -1064,6 +1448,7 @@ class _WorkbenchRequestHandler(BaseHTTPRequestHandler):
                     draft,
                     component_approval,
                     model_root=Path(self.server.project_root) / "models",
+                    experiment_fixture=payload.get("experiment_fixture"),
                 )
             except (TypeError, ValueError, OSError) as exc:
                 self._send_json(
@@ -1386,12 +1771,14 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         verify: bool,
         max_entries: int,
         max_depth: int,
+        enable_writes: bool,
     ) -> None:
         super().__init__(server_address, _WorkbenchRequestHandler)
         self.project_root = project_root
         self.verify = verify
         self.max_entries = max_entries
         self.max_depth = max_depth
+        self.enable_writes = enable_writes
 
 
 class IPv6WorkbenchHTTPServer(WorkbenchHTTPServer):
@@ -1406,10 +1793,13 @@ def create_workbench_server(
     verify: bool = True,
     max_entries: int = 256,
     max_depth: int = 5,
+    enable_writes: bool = False,
 ) -> WorkbenchHTTPServer:
-    """Create, but do not start, the loopback workbench server."""
+    """Create, but do not start, the loopback Workbench server."""
     normalized_host = _loopback_host(host)
     _port(port)
+    if not isinstance(enable_writes, bool):
+        raise ValueError("enable_writes must be a boolean")
     # inspect_project performs the same strict root checks and validates limits.
     root = Path(project_root).expanduser().resolve()
     inspect_project(root, verify=False, max_entries=max_entries, max_depth=max_depth)
@@ -1421,6 +1811,7 @@ def create_workbench_server(
         verify=verify,
         max_entries=max_entries,
         max_depth=max_depth,
+        enable_writes=enable_writes,
     )
 
 
@@ -1432,9 +1823,10 @@ def serve_workbench_api(
     verify: bool = True,
     max_entries: int = 256,
     max_depth: int = 5,
+    enable_writes: bool = False,
     ready: Callable[[WorkbenchHTTPServer], None] | None = None,
 ) -> None:
-    """Serve the read-only bridge until interrupted."""
+    """Serve the Workbench bridge until interrupted."""
     server = create_workbench_server(
         project_root,
         host=host,
@@ -1442,6 +1834,7 @@ def serve_workbench_api(
         verify=verify,
         max_entries=max_entries,
         max_depth=max_depth,
+        enable_writes=enable_writes,
     )
     if ready is not None:
         ready(server)

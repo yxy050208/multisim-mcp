@@ -12,6 +12,9 @@ import json
 from collections.abc import Mapping
 from typing import Any, Final
 
+from .agent_workflow_contract import build_agent_workflow_capabilities
+from .engineering_capabilities import build_engineering_capabilities
+
 
 API_CONTRACT_NAME: Final = "multisim-mcp-agent-api"
 API_CONTRACT_VERSION: Final = "1"
@@ -63,6 +66,7 @@ FEATURES: Final = (
     "durable_jobs",
     "experiment_resources",
     "structured_errors",
+    "agent_workflow",
 )
 
 
@@ -70,6 +74,7 @@ def build_capabilities(
     *,
     server_version: str,
     tool_profile: Mapping[str, Any] | None = None,
+    target_version: str | None = None,
 ) -> dict[str, Any]:
     """Build deterministic capabilities for Agents and future UI clients.
 
@@ -98,6 +103,10 @@ def build_capabilities(
             "available_profiles": [str(item) for item in available_profiles],
         },
         "features": list(FEATURES),
+        "engineering": build_engineering_capabilities(
+            profile=profile_name, target_version=target_version,
+        ),
+        "agent_workflow": build_agent_workflow_capabilities(),
         "errors": {
             "schema_version": ERROR_SCHEMA_VERSION,
             "codes": list(ERROR_CODES),

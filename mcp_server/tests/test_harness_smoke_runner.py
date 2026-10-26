@@ -25,7 +25,7 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
             command = smoke._pnpm_command("@deepseek-ai/dsh", "0.2.1-rc.2", "--version")
         self.assertEqual(
             command,
-            ["pnpm", "dlx", "@deepseek-ai/dsh@0.2.1-rc.2", "--version"],
+                ["pnpm", "dlx", "@deepseek-ai/dsh@0.2.1-rc.2", "--version"],
         )
 
     def test_pnpm_command_fails_when_pnpm_is_missing(self) -> None:
@@ -49,6 +49,38 @@ class HarnessSmokeRunnerTest(unittest.TestCase):
             result = smoke._tail(log, limit=12)
         self.assertLessEqual(len(result), 12)
         self.assertIn("tail", result)
+
+    def test_web_url_from_log_accepts_the_tokenized_dsh_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "dsh.stdout.log"
+            log.write_text(
+                "dsh web: http://127.0.0.1:60475/?token=abc123\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                smoke._web_url_from_log(log, 60475),
+                "http://127.0.0.1:60475/?token=abc123",
+            )
+            self.assertIsNone(smoke._web_url_from_log(log, 60476))
+
+    def test_wait_for_web_uses_tokenized_url(self) -> None:
+        process = Mock()
+        process.poll.return_value = None
+        response = Mock(status=200)
+        context = Mock()
+        context.__enter__ = Mock(return_value=response)
+        context.__exit__ = Mock(return_value=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "dsh.stdout.log"
+            url = "http://127.0.0.1:60475/?token=abc123"
+            log.write_text(f"dsh web: {url}\n", encoding="utf-8")
+            with patch.object(smoke.urllib.request, "urlopen", return_value=context) as urlopen:
+                ready, detail = smoke._wait_for_web(
+                    process, 60475, 1, stdout_path=log
+                )
+        self.assertTrue(ready)
+        self.assertEqual(detail, "HTTP 200")
+        urlopen.assert_called_once_with(url, timeout=2)
 
     def test_stop_process_escalates_after_timeout(self) -> None:
         process = Mock()

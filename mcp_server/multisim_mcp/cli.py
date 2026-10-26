@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from multisim_mcp import __version__
-from multisim_mcp.api_contract import build_error_envelope
+from multisim_mcp.api_contract import build_capabilities, build_error_envelope
 from multisim_mcp.agent_audit import (
     AgentAuditTrail,
     validate_agent_audit_output,
@@ -32,16 +32,12 @@ from multisim_mcp.correction_benchmarks import (
     validate_standard_benchmarks,
 )
 from multisim_mcp.design_patch_tools import ReadOnlyDesignPatchPreview
+from multisim_mcp.design_patch_application import DesignPatchApplicationService
 from multisim_mcp.design_patch_transactions import (
     DEFAULT_APPROVAL_TTL_SECONDS,
-    apply_patch_transaction,
-    approve_patch_apply,
-    approve_patch_revert,
     read_approval_token,
     read_design_document,
     read_patch_document,
-    recover_patch_transaction,
-    revert_patch_transaction,
     write_approval_token,
 )
 from multisim_mcp.design_optimization import (
@@ -79,11 +75,6 @@ from multisim_mcp.design_patch_evaluation import (
     DesignPatchEvaluationService,
     read_patch_evaluation_spec,
 )
-from multisim_mcp.design_patch_workflow import (
-    approve_verified_patch_application,
-    execute_verified_patch_application,
-    recover_verified_patch_workflow,
-)
 from multisim_mcp.eda_agent_tools import create_readonly_eda_bindings
 from multisim_mcp.eda_core import CircuitDesign
 from multisim_mcp.experiment_agent_tools import ReadOnlyExperimentEvidence
@@ -118,7 +109,9 @@ from multisim_mcp.provider_config import (
 )
 from multisim_mcp.project_inspection import inspect_project
 from multisim_mcp.spice_adapter import circuit_design_from_spice
-from multisim_mcp.tool_profiles import TOOL_PROFILE_ENV, TOOL_PROFILES
+from multisim_mcp.tool_profiles import (
+    TOOL_PROFILE_ENV, TOOL_PROFILES, selected_tool_profile, tool_profile_status,
+)
 from multisim_mcp.workbench_api import (
     DEFAULT_WORKBENCH_API_HOST,
     DEFAULT_WORKBENCH_API_PORT,
@@ -1468,12 +1461,12 @@ def _run_patch_approval(args: argparse.Namespace) -> dict[str, Any]:
         "approval_store": args.approval_store,
         "ttl_seconds": args.ttl_seconds,
     }
-    if args.patch:
-        result = approve_patch_apply(args.design, args.patch, **common)
-    else:
-        result = approve_patch_revert(
-            args.design, args.revert_transaction, **common
-        )
+    result = DesignPatchApplicationService().approve_basic(
+        args.design,
+        patch_path=args.patch,
+        revert_transaction=args.revert_transaction,
+        **common,
+    )
     token = result.pop("approval_token")
     token_file = write_approval_token(str(token_output), token)
     result.update(
@@ -1610,9 +1603,10 @@ def _run_search_plan_submit(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _run_patch_apply(args: argparse.Namespace) -> dict[str, Any]:
-    return apply_patch_transaction(
+    return DesignPatchApplicationService().execute_basic(
         args.design,
-        args.patch,
+        patch_path=args.patch,
+        transaction_path=None,
         output_path=args.output,
         in_place=args.in_place,
         receipt_path=args.receipt,
@@ -1623,9 +1617,10 @@ def _run_patch_apply(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _run_patch_revert(args: argparse.Namespace) -> dict[str, Any]:
-    return revert_patch_transaction(
+    return DesignPatchApplicationService().execute_basic(
         args.design,
-        args.transaction,
+        patch_path=None,
+        transaction_path=args.transaction,
         output_path=args.output,
         in_place=args.in_place,
         receipt_path=args.receipt,
@@ -1636,7 +1631,7 @@ def _run_patch_revert(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _run_patch_recover(args: argparse.Namespace) -> dict[str, Any]:
-    return recover_patch_transaction(
+    return DesignPatchApplicationService().recover_basic(
         journal_path=args.journal,
         target_path=args.target,
         action=args.action,
@@ -1685,7 +1680,7 @@ def _run_patch_verify_approval(args: argparse.Namespace) -> dict[str, Any]:
         if path is not None
     ):
         raise ValueError("approval token output must be distinct from workflow paths")
-    result = approve_verified_patch_application(
+    result = DesignPatchApplicationService().approve_verified(
         args.design,
         args.patch,
         ttl_seconds=args.ttl_seconds,
@@ -1703,7 +1698,7 @@ def _run_patch_verify_approval(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _run_patch_verify_apply(args: argparse.Namespace) -> dict[str, Any]:
-    return execute_verified_patch_application(
+    return DesignPatchApplicationService().execute_verified(
         _verified_patch_experiment_service(),
         args.design,
         args.patch,
@@ -1713,7 +1708,7 @@ def _run_patch_verify_apply(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _run_patch_verify_recover(args: argparse.Namespace) -> dict[str, Any]:
-    return recover_verified_patch_workflow(args.workflow_manifest)
+    return DesignPatchApplicationService().recover_verified(args.workflow_manifest)
 
 
 def _run_optimize_design(args: argparse.Namespace) -> dict[str, Any]:
@@ -2096,6 +2091,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("serve", help="start the MCP stdio server")
 
+    capabilities = subparsers.add_parser(
+        "capabilities", help="read bounded engineering capabilities without starting EDA or calling a model",
+    )
+    capabilities.add_argument("--target-version", help="exact Multisim version; no neighboring-version fallback")
+    capabilities.add_argument("--profile", choices=TOOL_PROFILES, help="tool profile; defaults to the server environment")
+    capabilities.add_argument("--json", dest="json_command", action="store_true")
+
     natural = subparsers.add_parser("natural-engineering", help="plan or execute a bounded natural-language RC design")
     source = natural.add_mutually_exclusive_group(required=True)
     source.add_argument("--text", help="natural-language RC requirements")
@@ -2283,7 +2285,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     workbench_api = subparsers.add_parser(
         "workbench-api",
-        help="serve a loopback-only read-only project snapshot API for the workbench",
+        help="serve the loopback Workbench API (read-only unless --enable-writes is set)",
     )
     workbench_api.add_argument("--root", required=True, help="project/workspace directory")
     workbench_api.add_argument(
@@ -2313,6 +2315,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-verify",
         action="store_true",
         help="load manifests without hashing referenced artifacts",
+    )
+    workbench_api.add_argument(
+        "--enable-writes",
+        action="store_true",
+        help="enable explicitly approved DesignPatch write/recovery routes",
     )
 
     workbench = subparsers.add_parser(
@@ -2354,6 +2361,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-verify",
         action="store_true",
         help="load manifests without hashing referenced artifacts",
+    )
+    workbench.add_argument(
+        "--enable-writes",
+        action="store_true",
+        help="enable explicitly approved DesignPatch write/recovery routes",
     )
     workbench.add_argument(
         "--open",
@@ -3247,6 +3259,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 2
+    if args.command == "capabilities":
+        try:
+            result = build_capabilities(
+                server_version=__version__,
+                tool_profile=tool_profile_status(args.profile or selected_tool_profile()),
+                target_version=args.target_version,
+            )
+        except (OSError, ValueError) as exc:
+            if json_output:
+                print(json.dumps(_cli_error("capabilities", exc), ensure_ascii=True, indent=2))
+            else:
+                print(f"capabilities: {exc}", file=sys.stderr)
+            return 2
+        # ASCII escapes preserve Unicode names through Windows ANSI-codepage
+        # pipes as well as UTF-8 clients. Discovery performs no runtime probe.
+        print(json.dumps(result, ensure_ascii=True, indent=2))
+        return 0
     if args.command == "doctor":
         report = collect_doctor_report(args.lang, connect=args.connect)
         if json_output:
@@ -3443,6 +3472,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify=not args.no_verify,
                 max_entries=args.max_entries,
                 max_depth=args.max_depth,
+                enable_writes=args.enable_writes,
             )
         except (OSError, RuntimeError, ValueError) as exc:
             if json_output:
@@ -3473,7 +3503,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "api_url": f"http://{host_text}:{server.server_port}",
                 "project_root": str(Path(args.root).expanduser().resolve()),
                 "ui_root": str(ui_root),
-                "read_only_api": True,
+                "read_only_api": not args.enable_writes,
+                "write_enabled": args.enable_writes,
                 "ai_assistant": "read-only-chat",
             }
             browser_opened = False
@@ -3500,6 +3531,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verify=not args.no_verify,
                 max_entries=args.max_entries,
                 max_depth=args.max_depth,
+                enable_writes=args.enable_writes,
                 ready=report_ready,
             )
         except (OSError, RuntimeError, ValueError) as exc:

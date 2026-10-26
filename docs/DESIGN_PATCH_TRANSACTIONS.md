@@ -7,6 +7,17 @@
 当前写入对象是版本化 `CircuitDesign` JSON，不是 Multisim 工程文件，也不会启动
 Multisim、运行仿真或证明电路指标改善。
 
+MCP 适配
+
+`full` profile 暴露与 CLI 共用同一 `DesignPatchApplicationService` 的七个工具：
+`approve_design_patch`、`apply_design_patch`、`revert_design_patch`、
+`recover_design_patch` 以及验证后闭环的 `approve_verified_design_patch`、
+`apply_verified_design_patch`、`recover_verified_design_patch`。审批工具要求
+`token_output`，令牌只写入新建的本地文件，结构化响应不会包含 bearer token；执行工具
+要求 `approval_token_file`，服务层读取并消费一次性令牌。验证后执行仍只在实验的全部
+硬约束为 `pass` 时提交，`fail`、`unverified` 或实验错误会保留 workflow 证据而不改变
+源设计。基础 profile 不发现这些写入工具，便于只读客户端继续使用原有工具集合。
+
 ## 完整流程
 
 假设人工审查后已把预览中的 `patch` 保存为 `patch.json`。如果补丁修改元件值或设计
@@ -146,8 +157,15 @@ multisim-mcp patch-verify-apply `
 
 工作流清单交叉记录审批 ID、输入/候选/补丁摘要、验收计划、实验目录 manifest、
 `verification.json` 和最终补丁回执。只有 `overall_status == "pass"` 可以提交；
-`unverified` 不会降级成通过。该写入能力仍只存在于本机 CLI，模型的 MCP 补丁预览保持
-只读。
+`unverified` 不会降级成通过。该写入能力也可通过 `full` profile 的本机 MCP 适配器使用；
+`core`、`experiment` 和 `optimization` profile 不发现这些写入工具，模型只有在显式启用
+`full` 后才能调用它们。
+
+验证后 workflow manifest 还记录运行 owner PID。恢复会拒绝仍存活的 owner；若回执已
+落盘但底层事务 journal 仍存在，恢复会先按底层 `patch-recover --action auto` 规则处理
+journal，确认审批消费和回执清理后才把 workflow 标为 `committed`。
+为引入 owner PID，workflow manifest schema 已升级到 2；旧的 schema 1 清单仍可只读检查，
+但恢复会失败关闭并要求人工执行底层 journal 恢复，不会在缺少拥有者安全元数据时自动提交。
 
 ## 故障恢复与边界
 
@@ -207,7 +225,7 @@ multisim-mcp patch-verify-recover `
 ## English summary
 
 Model-authored patch preview remains read-only and in memory. Persistence is a
-separate local CLI boundary: `patch-approve` issues a short-lived one-time
+separate local CLI/MCP boundary: `patch-approve` or `approve_design_patch` issues a short-lived one-time
 bearer token bound to the exact design, patch, candidate, revisions, paths, and
 source-regeneration choice; `patch-apply` consumes it. Revert requires a fresh
 approval and advances the revision while restoring field values.

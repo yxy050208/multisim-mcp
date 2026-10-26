@@ -169,6 +169,19 @@ class ExperimentPipelineTest(unittest.TestCase):
                     "V1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.end\n".encode()
                 ).hexdigest(),
             )
+            manifest_provenance = directory_manifest.metadata["model_provenance"]
+            self.assertEqual(
+                manifest_provenance["provenance_sha256"],
+                compatibility["model_provenance"]["provenance_sha256"],
+            )
+            self.assertEqual(
+                manifest_provenance["model_count"],
+                compatibility["model_provenance"]["model_count"],
+            )
+            self.assertIn(
+                "Declared model provenance digest",
+                (output / "report.md").read_text(encoding="utf-8"),
+            )
 
         self.assertTrue(result["success"])
         self.assertEqual(result["experiment_id"], "exp-pipeline-test")

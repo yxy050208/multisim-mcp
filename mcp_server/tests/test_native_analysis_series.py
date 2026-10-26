@@ -1,6 +1,10 @@
 import unittest
 
 from multisim_mcp.native_analysis_series import (
+    ContinuousResponseContract,
+    DigitalEdgeComparisonContract,
+    compare_continuous_response_series,
+    compare_digital_edge_series,
     compare_native_series,
     extract_native_analysis_series,
     native_series_informative,
@@ -113,6 +117,108 @@ class NativeAnalysisSeriesTest(unittest.TestCase):
             "real": [0.0, 0.0], "imaginary": [0.0, 0.0],
         }
         self.assertFalse(native_series_informative("ac", {"V(out)": ac}))
+
+    def test_digital_edge_comparison_handles_adaptive_axes_without_waveform_resampling(self):
+        expected = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0, 3.0],
+            "real": [0.0, 0.0, 5.0, 5.0], "imaginary": [0.0] * 4,
+        }
+        actual = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.1, 2.1, 3.0],
+            "real": [0.0, 0.0, 5.0, 5.0], "imaginary": [0.0] * 4,
+        }
+        comparison = compare_digital_edge_series(
+            expected, actual,
+            contract=DigitalEdgeComparisonContract(edge_time_tolerance=0.11),
+        )
+        self.assertEqual(comparison["status"], "pass")
+        self.assertEqual(comparison["edge_count"], 1)
+        self.assertAlmostEqual(comparison["maximum_edge_time_error"], 0.1, places=12)
+        self.assertIn("no waveform resampling", comparison["comparison_basis"])
+
+    def test_digital_edge_comparison_rejects_wrong_direction_and_timing(self):
+        expected = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0, 3.0],
+            "real": [0.0, 0.0, 5.0, 5.0], "imaginary": [0.0] * 4,
+        }
+        delayed = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.5, 3.0],
+            "real": [0.0, 0.0, 5.0, 5.0], "imaginary": [0.0] * 4,
+        }
+        failed = compare_digital_edge_series(
+            expected, delayed,
+            contract=DigitalEdgeComparisonContract(edge_time_tolerance=0.1),
+        )
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(failed["mismatches"][0]["expected_direction"], "rising")
+
+        falling = {
+            **expected,
+            "real": [5.0, 5.0, 0.0, 0.0],
+        }
+        direction_failed = compare_digital_edge_series(expected, falling)
+        self.assertEqual(direction_failed["status"], "fail")
+
+    def test_digital_edge_comparison_fails_closed_for_non_digital_samples(self):
+        expected = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0, 3.0],
+            "real": [0.0, 2.0, 2.0, 5.0], "imaginary": [0.0] * 4,
+        }
+        actual = {
+            "status": "pass", "analysis": "tran", "axis": [0.0, 1.0, 2.0],
+            "real": [0.0, 0.0, 5.0], "imaginary": [0.0] * 3,
+        }
+        comparison = compare_digital_edge_series(expected, actual)
+        self.assertEqual(comparison["status"], "invalid")
+
+        missing = compare_digital_edge_series(expected, None)
+        self.assertEqual(missing["status"], "unverified")
+
+    def test_continuous_response_contract_checks_rc_features_without_resampling(self):
+        expected = {
+            "status": "pass", "analysis": "tran",
+            "axis": [0.0, 1.0, 2.0, 3.0, 4.0],
+            "real": [0.0, 1.0, 2.0, 1.0, 0.5],
+            "imaginary": [0.0] * 5,
+        }
+        actual = {
+            "status": "pass", "analysis": "tran",
+            "axis": [0.0, 1.0, 2.0, 3.0, 4.0],
+            "real": [0.0, 1.01, 1.99, 1.0, 0.5],
+            "imaginary": [0.0] * 5,
+        }
+        result = compare_continuous_response_series(
+            expected, actual,
+            contract=ContinuousResponseContract(
+                final_value_tolerance=0.01,
+                extrema_value_tolerance=0.02,
+                response_range_tolerance=0.02,
+                time_tolerance=0.01,
+            ),
+        )
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["comparison_basis"], "native RC response features; no waveform resampling")
+
+    def test_continuous_response_contract_rejects_bad_shape_and_missing_data(self):
+        expected = {
+            "status": "pass", "analysis": "tran",
+            "axis": [0.0, 1.0, 2.0, 3.0],
+            "real": [0.0, 1.0, 2.0, 1.0],
+            "imaginary": [0.0] * 4,
+        }
+        wrong_peak = {**expected, "real": [0.0, 1.0, 3.0, 1.0]}
+        failed = compare_continuous_response_series(
+            expected, wrong_peak,
+            contract=ContinuousResponseContract(extrema_value_tolerance=0.1),
+        )
+        self.assertEqual(failed["status"], "fail")
+        self.assertFalse(failed["passed"])
+        nonfinite = {**expected, "real": [0.0, float("nan"), 2.0, 1.0]}
+        invalid = compare_continuous_response_series(expected, nonfinite)
+        self.assertEqual(invalid["status"], "invalid")
+        missing = compare_continuous_response_series(expected, None)
+        self.assertEqual(missing["status"], "unverified")
 
 
 if __name__ == "__main__":

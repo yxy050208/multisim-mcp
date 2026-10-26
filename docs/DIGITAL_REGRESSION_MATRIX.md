@@ -96,5 +96,13 @@ ReportNetlist 省略 `VDD/VSS` 等隐藏端子时，回归器会读取同一次 
 
 本地模板和实验产物只用于验证，不应提交到开源仓库。
 
+2026-10-16 在 Windows 11、Multisim 14.3、由本机授权样例生成的用户本地模板包上重新
+执行完整五案例矩阵。`logic_chain_load`、`dff_load`、`counter4_load`、`shift4_load`
+和 `counter4_decode_load` 均为通过；布局交叉率分别为 `0.583`、`0.154`、`1.176`、
+`1.395`、`1.132`，拓扑和仿真门禁全部通过，声明输出均可观察。五个案例的命名引脚
+累计 `141/141` 通过，实际引脚不匹配为 0。证据目录为本机
+`release/digital-native-matrix-20261016-pack`，其中包含每个案例的原理图、数据、报告
+和 `matrix.json`；模板包与原生工程未进入仓库。
+
 
 多板数字回归见 [MULTIBOARD_DIGITAL_REGRESSION.md](MULTIBOARD_DIGITAL_REGRESSION.md)。它补充两板 HDR1X4、边界输入夹具和 DC/TRAN/AC 原生验收，不改变本矩阵的单板案例。

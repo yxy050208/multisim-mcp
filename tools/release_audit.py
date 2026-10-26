@@ -12,7 +12,14 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, asdict
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+
+
+TOOLS_ROOT = Path(__file__).resolve().parent
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+
+from public_asset_policy import forbidden_public_asset_reason  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,25 +50,15 @@ def run_git(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def candidate_files() -> list[str]:
-    result = run_git("ls-files", "--cached", "--others", "--exclude-standard")
+    # Preserve Unicode and whitespace exactly; Git's default output quotes paths.
+    result = run_git("ls-files", "--cached", "--others", "--exclude-standard", "-z")
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "git ls-files failed")
-    return sorted(line for line in result.stdout.splitlines() if line)
+    return sorted(path for path in result.stdout.split("\0") if path)
 
 
 def is_forbidden_asset(path: str) -> bool:
-    item = PurePosixPath(path)
-    lowered = path.lower()
-    if item.parts and item.parts[0] == "analysis":
-        return True
-    if lowered.endswith((".ms14", ".ms14.xml", ".chm", ".dll", ".tlb", ".whl")):
-        return True
-    if (
-        lowered.startswith("mcp_server/multisim_mcp/templates/")
-        and lowered.endswith(".xml")
-    ):
-        return True
-    return False
+    return forbidden_public_asset_reason(path) is not None
 
 
 def audit() -> list[Finding]:
@@ -77,6 +74,8 @@ def audit() -> list[Finding]:
         "Dockerfile",
         "server.json",
         "docs/PUBLISHING.md",
+        "docs/OPEN_SOURCE_SCOPE.md",
+        "AGENTS.md",
         "docs/MIGRATION_TO_1.0.md",
         "docs/RECOVERY.md",
         "docs/WORKSPACE_MANIFESTS.md",
@@ -97,7 +96,7 @@ def audit() -> list[Finding]:
                 Finding(
                     "error",
                     "forbidden-asset",
-                    "公开候选中包含本地研究、二进制或许可未确认资产",
+                    "公开候选中包含商业目录、归档包、本地研究或许可未确认资产",
                     relative,
                 )
             )
@@ -109,7 +108,8 @@ def audit() -> list[Finding]:
     )
     text_suffixes = {".py", ".md", ".toml", ".json", ".yml", ".yaml", ".ps1", ".txt"}
     for relative in candidates:
-        if relative == "tools/release_audit.py":
+        # Reject private containers by path; do not inspect their contents.
+        if relative == "tools/release_audit.py" or is_forbidden_asset(relative):
             continue
         path = ROOT / relative
         if not path.is_file() or path.suffix.lower() not in text_suffixes:

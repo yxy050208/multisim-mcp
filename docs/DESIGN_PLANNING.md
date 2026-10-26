@@ -158,8 +158,9 @@
     `approve_executable_netlist` 返回的审批凭证一起传给 `create_schematic_from_netlist`；
     工具会重新验证凭证，并且只使用凭证绑定的 SPICE 文本。
 
-当前版本已经完成第 1--8 步，并实现第 8 步的首个独立编译模板
-`signal-passive / passive-affine-low-pass-v1`。其余 14 个逻辑方案尚无引脚级编译器，会明确
+当前版本已经完成第 1--8 步，并实现第 8 步的两个受限编译模板：
+`signal-passive / passive-affine-low-pass-v1` 和显式理想模型的
+`signal-active / ideal-opamp-affine-low-pass-v1`。其余逻辑方案尚无引脚级编译器，会明确
 拒绝而不是把模块图冒充成电路。第 9 步的批准会绑定编译摘要、CircuitDesign 摘要和 SPICE
 SHA-256；批准后状态为 `approved-for-schematic-and-simulation-planning`，仍不会成图、写
 文件或仿真。
@@ -218,6 +219,16 @@ SHA-256；批准后状态为 `approved-for-schematic-and-simulation-planning`，
 和许可证，足以通过“来源声明”门；它不等于模型字节已被读取或行为已验证。后续编译器仍
 必须读取实际文件、重新计算 SHA-256，并在加载失败或摘要不匹配时拒绝生成可执行网表。
 
+来源元数据现在按原类型与长度校验，拒绝空名称、控制字符和过长字段，不再截断或将
+`null` 强制转为字符串。`pending`、`NOASSERTION`、`unspecified`、`待核对` 等标记
+不能通过模型审批；静态兼容性档案和只读诊断使用相同规则。
+
+`verify_approved_model_files` 只读取 `MULTISIM_MCP_MODEL_ROOT` 之下的明确相对路径，
+拒绝远程 URL、盘符路径、目录穿越、Windows 流/设备别名和指向根目录外的符号链接。
+实际读取上限为 4 MiB，重新校验 SHA-256 后仅返回相对引用、字节数和许可证声明，
+不复制文件、不返回模型正文、不授予模型再分发许可。`local-use-only` 等明确的本地
+使用声明可以记录；通过字节校验仍不等于模型行为已通过原生仿真。
+
 只有具体候选、额定值、模型摘要和许可证都经过人工确认，`approve_component_resolution`
 才会返回 `ready_for_executable_netlist=true` 的审批凭证；该凭证仍保持
 `ready_for_schematic=false`、`ready_for_simulation=false`，后续编译器必须重新校验摘要并
@@ -227,6 +238,12 @@ SHA-256；批准后状态为 `approved-for-schematic-and-simulation-planning`，
 
 工具名：`compile_executable_netlist`
 
+有源模板可以额外提供 `experiment_fixture`，在网表审阅前明确加入 DC/AC 激励与源阻抗。
+这会产生新的组合摘要，并要求 `confirm_fixture` 和匹配的 `fixture_sha256`；
+未传夹具时旧返回值保持兼容。原生保存工程执行可将新预览与网表审批一并传给
+`run_generated_analog_project`，proposal 的 SPICE 必须逐字相同。
+完整合同及分析授权区别见 [有源原生验收](ACTIVE_SIGNAL_NATIVE_ACCEPTANCE_20261011.md)。
+
 ```json
 {
   "draft": "prepare_netlist_draft 返回的完整草案",
@@ -234,13 +251,18 @@ SHA-256；批准后状态为 `approved-for-schematic-and-simulation-planning`，
 }
 ```
 
-当前支持矩阵只有 `signal-passive`，并要求三项获批器件族精确为
+`signal-passive` 要求三项获批器件族精确为
 `series-resistor`、`capacitor`、`resistor-divider`。编译器根据输入/输出范围、源/负载阻抗、
 供电和截止频率求解一个带偏置的一阶无源低通网络；若要求电压增益、超出电源轨，或源/负载
 条件无法得到全正阻值，会建议选择有源方案并拒绝编译。
 
-返回值包含 6 个明确引脚器件、`CircuitDesign`、安全 SPICE、计算值、假设、SHA-256 和
-结构化往返解析门禁。它不添加输入激励或分析命令，因此
+无源模板返回 6 个明确引脚器件；`signal-active` 增加输入 RC、两只显式 `ideal-opamp5`、
+正负偏置及输出负载，要求新增的 `cr-06` 滤波电容额定值审阅。它支持放大和衰减，但不
+将真实运放静默换成理想模型。输入/输出轨范围、源阻抗、有限开环增益和实际加载进入
+计算；完整选择、限制及验证方法见 [有源编译合同](ACTIVE_SIGNAL_COMPILER.md)。
+
+两者均返回 `CircuitDesign`、安全 SPICE、计算值、假设和 SHA-256。结构化往返门禁
+核对元件身份、引脚顺序、数值、模型及参数，不能只比较数量。它们不添加输入激励或分析命令，因此
 `ready_for_netlist_approval=true`，但 `ready_for_schematic=false`、
 `ready_for_simulation=false`。下一步 `approve_executable_netlist` 要求所有审阅确认字段为
 `true`，并只返回绑定该预览的审批凭证。
@@ -315,10 +337,12 @@ netlist, schematic, file, or simulation result. The component resolver adds boun
 rating calculations, and model-provenance gates; it still does not select a silent part number
 or produce an executable netlist. The approval tool binds the reviewed component/rating/model
 provenance snapshot and only authorizes a later compiler; it does not itself generate SPICE.
-`compile_executable_netlist` is the first bounded pin-level compiler. It currently supports only
-`signal-passive`, revalidates the complete approval artifact, re-hashes approved local model bytes,
+`compile_executable_netlist` is a bounded pin-level compiler supporting `signal-passive` and
+`signal-active` with explicitly selected ideal OPAMP5 models. It revalidates the complete approval artifact, re-hashes approved local model bytes,
 and returns an in-memory CircuitDesign/SPICE preview. It does not write files, render a schematic,
-add simulation stimuli, or run an EDA backend, and it fails closed for every unsupported option.
+run an EDA backend, and it fails closed for every unsupported option. An optional explicit
+`experiment_fixture` composes a DC/AC source before netlist review for `signal-active`;
+the derived preview requires separate fixture confirmation and a matching fixture hash.
 `approve_executable_netlist` is a separate human gate: it binds the preview digest, design digest,
 and SPICE SHA-256, authorizes only later schematic planning, and leaves file writes and simulation
 disabled. To generate the schematic, pass the complete compiler response as

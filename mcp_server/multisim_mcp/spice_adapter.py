@@ -40,7 +40,7 @@ _MODEL_COMPONENT_KINDS = frozenset(
 # Native vendor-backed carriers are emitted as portable X instances when a
 # structured design is rebuilt.  They do not require an inline .model record;
 # the user-local Multisim component pack supplies their native identity.
-_NATIVE_CARRIER_KINDS = frozenset({"TIMER8", "DFF8", "CD4017"})
+_NATIVE_CARRIER_KINDS = frozenset({"TIMER8", "DFF8", "CD4017", "LM324AJ"})
 
 
 def _stable_design_id(netlist: str) -> str:
@@ -315,8 +315,9 @@ def _component_to_spice(component: CircuitComponent) -> str:
             [refdes, *_nodes(component, count), _require_model(component), *parameters]
         )
     if kind in _NATIVE_CARRIER_KINDS:
-        if len(component.nodes) != 8:
-            raise ValueError(f"{refdes} native carrier requires 8 nodes")
+        expected_nodes = 5 if kind == "LM324AJ" else 8
+        if len(component.nodes) != expected_nodes:
+            raise ValueError(f"{refdes} native carrier requires {expected_nodes} nodes")
         return " ".join(
             [
                 refdes if refdes[:1].upper() == "X" else f"X{refdes}",

@@ -265,21 +265,61 @@ def evaluate_evidence(root: Path, proposal: dict[str, Any], parts: list[Any]) ->
             "requirements_verified":bool(checks) and all(c["passed"] for c in checks),"checks":checks}
 
 
-def _analyze_saved_values(client: Any, action: Mapping[str, Any], output: Path, *, parts: list[Any]) -> dict:
+def _analyze_saved_values(client: Any, action: Mapping[str, Any], output: Path, *, parts: list[Any], strict_values: bool = False) -> dict:
     from .linear_reference import scalar
     values={p.refdes:float(client.get_rlc_value(p.refdes)['value']) for p in parts if p.kind in {'R','C','L'}}
-    if any(not math.isclose(values[p.refdes],scalar(p.value),rel_tol=1e-9,abs_tol=1e-12) for p in parts if p.refdes in values):
+    if any(not math.isclose(values[p.refdes],scalar(p.value),rel_tol=1e-9,abs_tol=0 if strict_values else 1e-12) for p in parts if p.refdes in values):
         raise RuntimeError('native RLC readback differs from declared values')
     result=analyze_current_project(client,action,output,expected_pins=expected_native_pins(parts))
     _write(output/'native-parameters.json',values)
     return result
 
 
+def ideal_model_fingerprints(path: Path, parts: list[Any]) -> dict[str, str]:
+    """Require the reviewed ideal VCVS expression in generated and saved XML."""
+    from .ideal_models import IDEAL_OPAMP5_GAIN_SPICE
+    from .native_xml import parse_native_xml
+    wanted = {p.refdes for p in parts if p.kind == "OPAMP5"}
+    found = {}
+    for component in parse_native_xml(path).getroot().iter("CiComponent"):
+        ref = component.get("LocalName", "").removeprefix("&ASC")
+        if ref not in wanted:
+            continue
+        expression = component.find("./Attributes/Item/CiaSpiceTmpltExprt")
+        body = expression.get("String", "").removeprefix("&ASC") if expression is not None else ""
+        if ref in found or body != f"e%p %tOUT 0 %tIN+ %tIN- {IDEAL_OPAMP5_GAIN_SPICE}":
+            raise ValueError("native ideal OPAMP5 template differs from the reviewed model contract")
+        found[ref] = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    if set(found) != wanted:
+        raise ValueError("native ideal OPAMP5 component is missing")
+    return found
+
+
 def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, execute: bool=False,
                                 native_source: str | None = None,
                                 native_parameters: Mapping[str, Any] | None = None,
-                                native_model_parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                                native_model_parameters: Mapping[str, Any] | None = None,
+                                executable_netlist: Mapping[str, Any] | None = None,
+                                netlist_approval: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    approved = None
+    if not isinstance(proposal, Mapping):
+        raise ValueError("generated analog proposal must be an object")
+    if executable_netlist is not None or netlist_approval is not None:
+        from .executable_approvals import validate_executable_netlist_approval
+        from .executable_netlists import _digest
+        if executable_netlist is None or netlist_approval is None:
+            raise ValueError("executable_netlist and netlist_approval must be provided together")
+        approved = validate_executable_netlist_approval(executable_netlist, netlist_approval)
+        if "experiment_fixture" not in executable_netlist:
+            raise ValueError("approved native signal execution requires an explicit experiment_fixture")
+        if proposal.get("netlist") != executable_netlist["spice_netlist"]:
+            raise ValueError("native proposal netlist does not match the approved fixture preview")
+        if native_source is not None or native_parameters is not None or native_model_parameters is not None:
+            raise ValueError("approved fixture execution cannot override its native source, parameters or model")
     plan,parts = validate_proposal(proposal)
+    if approved is not None:
+        if any(e["type"] == "ac" for e in plan["experiments"]) and "ac_amplitude_v" not in executable_netlist["experiment_fixture"]["contract"]:
+            raise ValueError("native AC analysis requires a reviewed AC fixture")
     normalized_model_parameters: dict[str, float] | None = None
     if native_model_parameters is not None:
         if not any(part.kind == "QNPN" for part in parts):
@@ -301,6 +341,15 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         raise FileExistsError("output must be a new directory")
     result = {"success":True,"mode":"preview","output_dir":str(root),"proposal":plan,
               "verification_status":"unverified","simulation_started":False}
+    if approved is not None:
+        result["approval_provenance"] = {
+            "kind": "multisim-mcp-native-fixture-netlist-provenance",
+            "compiled_digest": approved["compiled_digest"], "spice_sha256": approved["spice_sha256"],
+            "netlist_approval_id": approved["approval_id"], "netlist_approval_digest": approved["approval_digest"],
+            "fixture": approved["experiment_fixture"], "native_proposal_sha256": _digest(proposal),
+            "analysis_authorization": "explicit-native-proposal-execute",
+            "simulation_plan_approval_present": False,
+        }
     if normalized_model_parameters is not None:
         result["native_model_parameters"] = {
             "model": "2N3904", "parameters": normalized_model_parameters,
@@ -310,6 +359,10 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         return normalize_task_result(result)
     root.mkdir(parents=True,exist_ok=False)
     _write(root/"proposal.json",plan)
+    if approved is not None:
+        _write(root/"approved-preview.json", executable_netlist)
+        _write(root/"netlist-approval.json", approved)
+        _write(root/"approval-provenance.json", result["approval_provenance"])
     (root/"input.cir").write_text(plan["netlist"],encoding="utf-8")
     result.update(success=False,mode="execute",stage="build",verification_status="failed")
     try:
@@ -320,12 +373,19 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
                 raise RuntimeError("generated circuit failed geometry preflight")
             if len(build["probes"]) != len(plan["probe_nets"]):
                 raise RuntimeError("not every requested net has a drawable probe")
+            if approved is not None:
+                ideal_model_fingerprints(root / "source.xml", parts)
         from .multisim_client import Ms14Codec
         from .component_compat import detect_multisim_version
         version = detect_multisim_version()
         result["multisim_version"] = version
         if not re.match(r"^14\.3(?:\.|$)", version):
             raise RuntimeError("this workflow's native pin/model acceptance is currently verified only on Multisim 14.3")
+        if approved is not None:
+            from .multisim_compat import parse_multisim_version
+            target = approved["experiment_fixture"]["target_version"]
+            if parse_multisim_version(version) != parse_multisim_version(target):
+                raise RuntimeError("native installed version differs from the reviewed fixture target")
         if source is None:
             if normalized_model_parameters is not None:
                 from .native_model_override import apply_qnpn_model_parameters
@@ -351,7 +411,7 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         result["stage"] = "native-analysis"
         native = run_native_project(request,str(root/"source.ms14"),str(root/"native"),execute=True,
                     parameters=native_parameters,
-                    analyzer=partial(_analyze_saved_values,parts=parts) if source is not None else partial(analyze_current_project,expected_pins=expected_native_pins(parts)))
+                    analyzer=partial(_analyze_saved_values,parts=parts,strict_values=approved is not None) if source is not None or approved is not None else partial(analyze_current_project,expected_pins=expected_native_pins(parts)))
         result["native_execution"] = native
         result["simulation_started"] = native.get("simulation_started")
         result["native_project"] = str(root/"native"/"circuit.ms14")
@@ -360,6 +420,14 @@ def run_generated_analog_project(proposal: Mapping[str, Any], output: str, *, ex
         if (root/"native"/"schematic.png").read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
             raise RuntimeError("native schematic export does not contain PNG data")
         vendor = any(p.kind in {"LM324AJ", "QNPN", "D"} for p in parts)
+        if approved is not None:
+            decoded = Ms14Codec().decode(str(root/"native"/"circuit.ms14"), str(root/"native-model.xml"))
+            before = ideal_model_fingerprints(root/"source.xml", parts)
+            after = ideal_model_fingerprints(Path(decoded["xml"]), parts)
+            result["model_acceptance"] = {"ok": before == after, "source": before, "native": after}
+            _write(root/"model-identity.json", result["model_acceptance"])
+            if before != after:
+                raise RuntimeError("native save changed the reviewed ideal model")
         if vendor:
             decoded = Ms14Codec().decode(str(root/"native"/"circuit.ms14"), str(root/"native-model.xml"))
             before = vendor_model_fingerprints(root/"source.xml", parts)

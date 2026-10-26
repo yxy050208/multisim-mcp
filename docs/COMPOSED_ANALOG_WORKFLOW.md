@@ -70,6 +70,12 @@ python -m multisim_mcp.generated_analog_run --proposal examples/generated-analog
 
 OPAMP5 是开环增益 100000 的理想受控源，忽略供电饱和、带宽、输出电流和噪声。因此不能据此出具 LM741、LM358 或实物电路的达标结论。现在额外接受明确的 LM324AJ 本地宏模型，要求 OP/AC 和每项分析的指标；可使用 `PULSE(low high delay rise fall width period)`，TRAN 的 `quantity=value` 检查必须指定 `time_min_s/time_max_s`。缺少窗口内样本时失败。此模式返回 `reference_applicable=false`、`reference_passed=null`，不会冒充独立线性参考通过。
 
-LM324AJ 使用每个独立封装的 A 单元；没有自动打包到同一片四运放。其他厂商型号、分立半导体、数字混合、开关电源和多板总体优化仍未在此入口验收。LM324M 替换试验失败，不能视为 LM324AJ 的已验证别名。
+LM324AJ 使用每个独立封装的 A 单元；没有自动打包到同一片四运放。当前真实模型准入
+仅针对 Multisim 14.3 和本机授权的 `LM158_4` 模型，详见
+[`VENDOR_COMPONENT_ACCEPTANCE_20261011.md`](VENDOR_COMPONENT_ACCEPTANCE_20261011.md)。
+未校准的工作点不达标时必须返回 `target-not-met`；测量反馈校准可以重新生成并验收，
+但当前 `VTRIM` 方案只是仿真原型，不是完整硬件校准设计。其他厂商型号、分立半导体、
+数字混合、开关电源和多板总体优化仍未在此入口验收。LM324M 替换试验失败，不能视为
+LM324AJ 的已验证别名。
 
 导线允许有电气上独立的正交交叉，并报告数量；当前仍需人工检查标签与布局可读性。下一步包括分级布局、真实校准电路、容差与温漂、电气额定值验证。实测结果及复现见 [毕业设计插件验收](THESIS_PLUGIN_ACCEPTANCE_20260909.md)。

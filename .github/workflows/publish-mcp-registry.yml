@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Audit public source and product boundary
+        run: python tools/release_audit.py --json
       - name: Verify published PyPI ownership marker
         run: |
           python - <<'PY'

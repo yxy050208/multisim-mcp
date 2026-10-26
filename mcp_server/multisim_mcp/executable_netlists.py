@@ -12,12 +12,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
+from copy import deepcopy
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Final
 
 from .component_approvals import validate_component_approval
-from .eda_core import CircuitComponent, CircuitDesign
+from .eda_core import CircuitComponent, CircuitDesign, ModelReference
+from .active_signal_synthesis import ACTIVE_SIGNAL_TEMPLATE, synthesize_active_signal
+from .ideal_models import IDEAL_OPAMP5_SHA256, IDEAL_OPAMP5_SOURCE
+from .model_provenance import has_declared_model_license, validated_model_source
 from .spice_adapter import circuit_design_from_spice, circuit_design_to_spice
 
 
@@ -36,7 +41,24 @@ COMPILER_SUPPORT_MATRIX: Final[dict[str, dict[str, Any]]] = {
         },
         "status": "pin-level-preview-supported",
         "simulation_status": "requires-input-source-and-analysis-approval",
-    }
+    },
+    "signal-active": {
+        "template": ACTIVE_SIGNAL_TEMPLATE,
+        "required_families": {
+            "cr-01": "series-resistor", "cr-02": "ideal-opamp5",
+            "cr-03": "precision-resistor-network", "cr-04": "ideal-opamp5",
+            "cr-05": "ceramic-capacitor", "cr-06": "capacitor",
+        },
+        "status": "pin-level-preview-supported",
+        "simulation_status": "requires-input-source-and-analysis-approval",
+        "model_scope": "explicit-ideal-vcvs-only",
+        "model_contract_sha256": IDEAL_OPAMP5_SHA256,
+        "spice_dialect": "multisim-mcp-native-carriers",
+        "gain_range_v_per_v": [1e-6, 100],
+        "resistance_range_ohm": [1e-3, 1e12],
+        "capacitance_range_f": [1e-15, 1],
+        "native_validation_status": "unverified-for-this-template",
+    },
 }
 
 
@@ -103,8 +125,25 @@ def _model_relative_path(uri: object) -> Path:
     if not isinstance(uri, str) or not uri.strip():
         raise ValueError("approved external model URI must be a relative file path")
     normalized = uri.strip().replace("\\", "/")
-    if "://" in normalized or normalized.startswith(("/", "//")):
+    if (
+        ":" in normalized
+        or PureWindowsPath(normalized).drive
+        or normalized.startswith("/")
+    ):
         raise ValueError("approved external model URI must stay inside the configured model root")
+    # Check segments before Path can collapse dots or repeated separators.
+    if any(part in {"", ".", ".."} for part in normalized.split("/")):
+        raise ValueError("approved external model URI must stay inside the configured model root")
+    if (
+        any(ord(char) < 32 or ord(char) == 127 for char in normalized)
+        or any(char in '<>"|?*' for char in normalized)
+        or any(part.endswith((".", " ")) for part in normalized.split("/"))
+        or any(
+            re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", part)
+            for part in normalized.split("/")
+        )
+    ):
+        raise ValueError("approved external model URI is invalid")
     candidate = Path(normalized)
     if candidate.is_absolute() or candidate.drive or any(part == ".." for part in candidate.parts):
         raise ValueError("approved external model URI must stay inside the configured model root")
@@ -128,6 +167,9 @@ def verify_approved_model_files(
         if source is not None:
             if not isinstance(source, Mapping):
                 raise ValueError(f"selection_snapshot.{requirement_id}.model_source must be an object")
+            source = validated_model_source(source)
+            if not has_declared_model_license(source["license"]):
+                raise ValueError("approved external model requires a reviewed license declaration")
             model_items.append((str(requirement_id), source))
     if not model_items:
         return []
@@ -166,7 +208,9 @@ def verify_approved_model_files(
                 f"approved external model exceeds {MAX_MODEL_FILE_BYTES} bytes: {relative.as_posix()}"
             )
         try:
-            content = path.read_bytes()
+            # A file may grow after stat(). Bound the actual read as well.
+            with path.open("rb") as stream:
+                content = stream.read(MAX_MODEL_FILE_BYTES + 1)
         except OSError as exc:
             raise ValueError(
                 f"approved external model cannot be read: {relative.as_posix()}"
@@ -184,11 +228,11 @@ def verify_approved_model_files(
         verified.append(
             {
                 "requirement_id": requirement_id,
-                "name": str(source.get("name", "")),
+                "name": source["name"],
                 "relative_path": relative.as_posix(),
                 "sha256": actual,
-                "size_bytes": size,
-                "license": str(source.get("license", "")),
+                "size_bytes": len(content),
+                "license": source["license"],
                 "status": "bytes-rehashed",
             }
         )
@@ -399,11 +443,78 @@ def _synthesize_passive_affine_low_pass(
     return design, synthesis
 
 
+def _synthesize_active_affine_low_pass(
+    draft: Mapping[str, Any], approval: Mapping[str, Any],
+) -> tuple[CircuitDesign, dict[str, Any]]:
+    expected = COMPILER_SUPPORT_MATRIX["signal-active"]["required_families"]
+    selected = _selected_families(approval)
+    if selected != expected:
+        raise ValueError("signal-active compiler requires exact physical families including explicit ideal-opamp5 and filter capacitance")
+    if any(item.get("model_source") is not None for item in approval["selection_snapshot"].values()):
+        raise ValueError("signal-active template cannot substitute external models for its primitives or ideal opamps")
+    raw = draft["design_inputs"]
+    values = {
+        key: _finite_positive(raw.get(key), key) for key in (
+            "supply_voltage_v", "load_impedance_ohm", "cutoff_frequency_hz",
+        )
+    }
+    values.update({key: _finite(raw.get(key), key) for key in (
+        "input_min_v", "input_max_v", "output_min_v", "output_max_v", "source_impedance_ohm",
+    )})
+    if values["source_impedance_ohm"] < 0:
+        raise ValueError("source_impedance_ohm must be non-negative")
+    for side in ("input", "output"):
+        low, high = values[f"{side}_min_v"], values[f"{side}_max_v"]
+        if high <= low:
+            raise ValueError(f"{side}_max_v must be greater than {side}_min_v")
+        if low < 0 or high > values["supply_voltage_v"]:
+            raise ValueError(f"active {side} range must stay within the declared supply rails")
+    components, synthesis = synthesize_active_signal(values)
+    modules = draft["topology"]["modules"]
+    if len(modules) != len(synthesis["module_ports"]):
+        raise ValueError("signal-active module count does not match the compiler contract")
+    for module, ports in zip(modules, synthesis["module_ports"]):
+        if (module["input_nets"] != [ports["input_net"]]
+                or module["output_nets"] != [ports["output_net"]]
+                or set(module["supply_nets"]) != {"rail-positive", "gnd"}):
+            raise ValueError("signal-active module ports or supply rails do not match the compiler contract")
+        ports["module_id"] = module["module_id"]
+    synthesis_digest = _digest({
+        "draft_digest": draft["draft_digest"], "approval_digest": approval["approval_digest"],
+        "synthesis": synthesis,
+    })
+    design = CircuitDesign(
+        design_id=f"compiled:{synthesis_digest[:24]}",
+        title=f"{draft.get('title', 'Signal design')} · pin-level preview",
+        components=components,
+        nets=("gnd", "rail-positive", "path-00", "path-01", "path-02", "path-03", "feedback", "path-04"),
+        model_references=(ModelReference("OPAMP5", IDEAL_OPAMP5_SOURCE, IDEAL_OPAMP5_SHA256, "MIT"),),
+        annotations={
+            "compiler_template": synthesis["template"], "draft_id": draft["draft_id"],
+            "component_approval_id": approval["approval_id"],
+            "input_net": "path-00", "output_net": "path-04",
+            "review_status": "awaiting-human-netlist-approval", "model_scope": "explicit-ideal-vcvs-only",
+        },
+    )
+    return design, synthesis
+
+
+def validate_compiled_round_trip(design: CircuitDesign, parsed: CircuitDesign) -> None:
+    """Require ordered pin, value, model and parameter fidelity, not just count."""
+    def signature(component: CircuitComponent) -> tuple[Any, ...]:
+        nodes = tuple("0" if node.casefold() in {"gnd", "0"} else node for node in component.nodes)
+        return (component.refdes, component.kind, nodes, component.value or "",
+                component.model or "", dict(component.parameters))
+    if [signature(item) for item in design.components] != [signature(item) for item in parsed.components]:
+        raise ValueError("compiled SPICE round-trip changed component identity, pin order, values, model or parameters")
+
+
 def compile_executable_netlist(
     draft: Mapping[str, Any],
     component_approval: Mapping[str, Any],
     *,
     model_root: str | Path | None = None,
+    experiment_fixture: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile one approved, supported topology into in-memory review artifacts."""
     trusted_approval = validate_component_approval(draft, component_approval)
@@ -418,6 +529,8 @@ def compile_executable_netlist(
     )
     if option_id == "signal-passive":
         design, synthesis = _synthesize_passive_affine_low_pass(draft, trusted_approval)
+    elif option_id == "signal-active":
+        design, synthesis = _synthesize_active_affine_low_pass(draft, trusted_approval)
     else:  # pragma: no cover - support matrix and dispatch must change together
         raise ValueError(f"compiler dispatch is missing for {option_id}")
 
@@ -427,8 +540,7 @@ def compile_executable_netlist(
         design_id=design.design_id,
         title=design.title,
     )
-    if len(parsed.components) != len(design.components):
-        raise ValueError("compiled SPICE did not round-trip to the expected component count")
+    validate_compiled_round_trip(design, parsed)
     spice_sha256 = hashlib.sha256(spice.encode("utf-8")).hexdigest()
     compiled_payload = {
         "generator_version": EXECUTABLE_NETLIST_GENERATOR_VERSION,
@@ -440,7 +552,7 @@ def compile_executable_netlist(
         "verified_models": verified_models,
     }
     compiled_digest = _digest(compiled_payload)
-    return {
+    preview = {
         "schema_version": EXECUTABLE_NETLIST_SCHEMA_VERSION,
         "generator_version": EXECUTABLE_NETLIST_GENERATOR_VERSION,
         "kind": "multisim-mcp-executable-netlist-preview",
@@ -452,7 +564,7 @@ def compile_executable_netlist(
         "component_approval_digest": trusted_approval["approval_digest"],
         "selected_option_id": option_id,
         "state": "compiled-awaiting-human-netlist-approval",
-        "support": dict(COMPILER_SUPPORT_MATRIX[option_id]),
+        "support": deepcopy(COMPILER_SUPPORT_MATRIX[option_id]),
         "circuit_design": design.to_dict(),
         "spice_netlist": spice,
         "spice_sha256": spice_sha256,
@@ -489,6 +601,10 @@ def compile_executable_netlist(
             "No Multisim schematic or simulation evidence exists yet.",
         ],
     }
+    if experiment_fixture is not None:
+        from .experiment_fixtures import compose_experiment_fixture
+        return compose_experiment_fixture(preview, experiment_fixture)
+    return preview
 
 
 __all__ = [
@@ -499,4 +615,5 @@ __all__ = [
     "MODEL_ROOT_ENV",
     "compile_executable_netlist",
     "verify_approved_model_files",
+    "validate_compiled_round_trip",
 ]

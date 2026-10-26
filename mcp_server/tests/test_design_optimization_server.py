@@ -53,6 +53,39 @@ SPEC = {
 
 
 class DesignOptimizationServerTest(unittest.TestCase):
+    def test_layout_adapter_forwards_bounded_options(self) -> None:
+        expected = {"success": True, "status": "pass"}
+        with patch.object(
+            server,
+            "evaluate_optimization_layout_directory",
+            return_value=expected,
+        ) as evaluate:
+            result = server.evaluate_optimization_layout(
+                "C:/optimization-output",
+                {"R1": [100, 200]},
+                probe_nets=["out"],
+                step=135.0,
+                moves=2,
+                max_candidates=7,
+                fixed_refdes=["0"],
+                materialize=True,
+                materialize_directory="C:/optimization-output/layouts",
+                overwrite=True,
+            )
+        self.assertEqual(result, expected)
+        evaluate.assert_called_once_with(
+            "C:/optimization-output",
+            {"R1": [100, 200]},
+            probe_nets=["out"],
+            step=135.0,
+            moves=2,
+            max_candidates=7,
+            fixed_refdes=["0"],
+            materialize=True,
+            materialize_directory="C:/optimization-output/layouts",
+            overwrite=True,
+        )
+
     def test_adapter_converts_design_and_forwards_runtime_limits(self) -> None:
         service = Mock()
         service.run.return_value = {"success": True, "status": "baseline_best"}

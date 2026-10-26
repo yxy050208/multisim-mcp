@@ -13,6 +13,7 @@ from .executable_netlists import (
     COMPILER_SUPPORT_MATRIX,
     EXECUTABLE_NETLIST_GENERATOR_VERSION,
     _canonicalize_for_digest,
+    validate_compiled_round_trip,
 )
 from .spice_adapter import circuit_design_from_spice, circuit_design_to_spice
 from .safety import validate_spice_netlist
@@ -47,6 +48,9 @@ def _preview_payload(preview: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(preview, Mapping):
         raise ValueError("executable_netlist must be an object")
     core = _core(preview)
+    if "experiment_fixture" in core:
+        from .experiment_fixtures import validate_fixture_preview
+        return validate_fixture_preview(core)
     if core.get("kind") != "multisim-mcp-executable-netlist-preview":
         raise ValueError("executable_netlist.kind is invalid")
     if core.get("schema_version") != 1:
@@ -102,8 +106,7 @@ def _preview_payload(preview: Mapping[str, Any]) -> dict[str, Any]:
     if circuit_design_to_spice(design, prefer_source=False) != spice:
         raise ValueError("executable_netlist SPICE does not match CircuitDesign")
     parsed = circuit_design_from_spice(spice, design_id=design.design_id, title=design.title)
-    if len(parsed.components) != len(design.components):
-        raise ValueError("executable_netlist SPICE round-trip is incomplete")
+    validate_compiled_round_trip(design, parsed)
     synthesis = core.get("synthesis")
     if not isinstance(synthesis, Mapping):
         raise ValueError("executable_netlist.synthesis is required")
@@ -139,6 +142,8 @@ def _review_payload(
         "confirm_spice",
         "review_note",
     }
+    if "experiment_fixture" in preview:
+        allowed.update({"confirm_fixture", "fixture_sha256"})
     unknown = set(approval) - allowed
     if unknown:
         raise ValueError(f"approval contains unknown fields: {sorted(unknown)}")
@@ -158,7 +163,7 @@ def _review_payload(
     note = approval.get("review_note", "")
     if not isinstance(note, str) or "\x00" in note or len(note) > 2048:
         raise ValueError("approval.review_note is invalid")
-    return {
+    reviewed = {
         "approved": True,
         "compiled_id": preview["compiled_id"],
         "compiled_digest": preview["compiled_digest"],
@@ -168,6 +173,14 @@ def _review_payload(
         "confirm_spice": True,
         "review_note": note.strip(),
     }
+    if "experiment_fixture" in preview:
+        if approval.get("confirm_fixture") is not True:
+            raise ValueError("approval.confirm_fixture must be true after explicit human review")
+        fixture_sha = preview["experiment_fixture"]["contract_sha256"]
+        if approval.get("fixture_sha256") != fixture_sha:
+            raise ValueError("approval.fixture_sha256 does not match the preview")
+        reviewed.update(confirm_fixture=True, fixture_sha256=fixture_sha)
+    return reviewed
 
 
 def _artifact(preview: Mapping[str, Any], reviewed: Mapping[str, Any]) -> dict[str, Any]:
@@ -180,7 +193,7 @@ def _artifact(preview: Mapping[str, Any], reviewed: Mapping[str, Any]) -> dict[s
         "design_digest": _digest(preview["circuit_design"]),
     }
     artifact_digest = _digest(payload)
-    return {
+    artifact = {
         "schema_version": EXECUTABLE_APPROVAL_SCHEMA_VERSION,
         "generator_version": EXECUTABLE_APPROVAL_GENERATOR_VERSION,
         "kind": "multisim-mcp-executable-netlist-approval",
@@ -224,6 +237,18 @@ def _artifact(preview: Mapping[str, Any], reviewed: Mapping[str, Any]) -> dict[s
             "a file write, schematic export, stimulus, analysis command, or simulation result."
         ),
     }
+    if "experiment_fixture" in preview:
+        artifact["experiment_fixture"] = {
+            "contract_sha256": preview["experiment_fixture"]["contract_sha256"],
+            "base_compiled_digest": preview["experiment_fixture"]["base_preview"]["compiled_digest"],
+            "target_version": preview["experiment_fixture"]["contract"]["target_version"],
+        }
+        artifact["review_gates"].insert(-3, {"gate_id": "experiment-fixture", "status": "human-reviewed"})
+        artifact["provenance_note"] = (
+            "This approval binds the composed circuit and explicit fixture; analysis commands, "
+            "measurements and execution require a separate simulation plan or native proposal."
+        )
+    return artifact
 
 
 def approve_executable_netlist(

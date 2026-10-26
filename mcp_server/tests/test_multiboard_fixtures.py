@@ -1,5 +1,7 @@
 import unittest
 import math
+import hashlib
+import json
 
 from multisim_mcp.eda_core import CircuitComponent, CircuitDesign
 from multisim_mcp.multiboard_fixtures import (
@@ -195,6 +197,73 @@ class MultiboardFixtureTest(unittest.TestCase):
         result = materialize_multiboard_fixture_artifacts(artifacts, fixtures)
         signal = next(item for item in result["boards"] if item["board_id"] == "signal")
         self.assertIn("VFIX1 bus 0 DC 0 AC 1", signal["spice_netlist"])
+
+    def test_digital_fixture_reuses_bounded_adapter_contract(self):
+        artifacts = self._divider_artifacts()
+        signal_board = next(item for item in artifacts["boards"] if item["board_id"] == "signal")
+        signal_board["design"]["components"].append(
+            CircuitComponent("RBIAS", "R", ("high", "0"), value="1G").to_dict()
+        )
+        signal_board["design"]["nets"].append("high")
+        fixtures = self._fixtures()
+        fixtures = [item for item in fixtures if item["id"] not in {"signal-bus-drive", "signal-bus-observe"}]
+        fixtures.extend([
+            {
+                "id": "signal-bus-digital-fixture",
+                "board_id": "signal",
+                "kind": "circuit_fragment",
+                "net": "bus",
+                "ports": ["bus", "high", "0"],
+                "source_compiled_digest": "0" * 64,
+                "model_scope": "explicit-digital-fixture",
+                "components": [
+                    {"refdes": "VFIXD", "kind": "V", "nodes": ["din", "0"],
+                     "model": "PULSE(0 5 0 1n 1n 20u 40u)"},
+                    {"refdes": "AFIXD", "kind": "DNOT4", "nodes": ["din", "bus", "high", "0"],
+                     "model": "NOT"},
+                ],
+            },
+            {"id": "signal-bus-observe", "board_id": "signal", "kind": "observation", "net": "bus"},
+            {"id": "signal-high-anchor", "board_id": "signal", "kind": "voltage_source", "net": "high",
+             "reference_net": "0", "refdes": "VHIGH", "value": "5"},
+        ])
+        result = materialize_multiboard_fixture_artifacts(artifacts, fixtures)
+        signal = next(item for item in result["boards"] if item["board_id"] == "signal")
+        self.assertIn("AFIXD din bus high 0 NOT", signal["spice_netlist"])
+        self.assertIn("VFIXD din 0 PULSE(0 5 0 1n 1n 20u 40u)", signal["spice_netlist"])
+
+    def test_digital_fixture_accepts_bv_adapter_with_real_digest(self):
+        artifacts = self._divider_artifacts()
+        signal_board = next(item for item in artifacts["boards"] if item["board_id"] == "signal")
+        signal_board["design"]["components"].append(
+            CircuitComponent("RBIAS", "R", ("high", "0"), value="1G").to_dict()
+        )
+        signal_board["design"]["nets"].append("high")
+        fixtures = [item for item in self._fixtures() if item["id"] not in {"signal-bus-drive", "signal-bus-observe"}]
+        components = [
+            {"refdes": "VFIXA", "kind": "V", "nodes": ["analog_fix", "0"],
+             "model": "PULSE(0 5 0 1n 1n 20u 40u)"},
+            {"refdes": "BFIXD", "kind": "BV", "nodes": ["bus", "0"],
+             "model": "V={if(V(analog_fix)>2.5,5,0)}"},
+            {"refdes": "RFIXA", "kind": "R", "nodes": ["analog_fix", "0"], "value": "1G"},
+            {"refdes": "RFIXHIGH", "kind": "R", "nodes": ["high", "0"], "value": "1G"},
+        ]
+        ports = ["bus", "high", "0"]
+        digest = hashlib.sha256(
+            json.dumps({"ports": ports, "components": components}, ensure_ascii=False,
+                       sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        fixtures.extend([
+            {"id": "signal-bus-bv-fixture", "board_id": "signal", "kind": "circuit_fragment",
+             "net": "bus", "ports": ports, "source_compiled_digest": digest,
+             "model_scope": "explicit-digital-fixture", "components": components},
+            {"id": "signal-bus-observe", "board_id": "signal", "kind": "observation", "net": "bus"},
+            {"id": "signal-high-anchor", "board_id": "signal", "kind": "voltage_source", "net": "high",
+             "reference_net": "0", "refdes": "VHIGH", "value": "5"},
+        ])
+        result = materialize_multiboard_fixture_artifacts(artifacts, fixtures)
+        signal = next(item for item in result["boards"] if item["board_id"] == "signal")
+        self.assertIn("BFIXD bus 0 V={if(V(analog_fix)>2.5,5,0)}", signal["spice_netlist"])
 
 
 if __name__ == "__main__":

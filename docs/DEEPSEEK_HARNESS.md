@@ -9,9 +9,11 @@
 
 ## 当前兼容基线
 
-本说明核对日期为 2026-08-23。DeepSeek Harness 官方仓库仍标记为
+本说明核对日期为 2026-10-19。DeepSeek Harness 官方仓库仍标记为
 Developer Preview，并明确提示可能发生破坏性兼容变更。当前公开的
-`@deepseek-ai/dsh-mcp-client` 已验证版本为 `0.1.1-rc.2`。
+`@deepseek-ai/dsh-mcp-client` 已验证版本为 `0.2.1-rc.2`，对应 DSH CLI
+`0.2.1-rc.2`。插件包声明 `engines.dsh: 0.2.1-rc.2`；缺少该声明时，DSH
+会把插件隐藏为不兼容。
 
 已确认的 MCP Client 行为：
 
@@ -101,7 +103,7 @@ Multisim license -> local Multisim installation -> 32-bit worker
 ## 模型与工具规模
 
 DeepSeek Chat Completions 当前允许最多 128 个函数工具，函数名最长 64 个
-字符。Multisim MCP 的 115 个工具可以被加载，但完整 schema 会占用模型
+字符。Multisim MCP 的 123 个工具可以被加载，但完整 schema 会占用模型
 上下文，也会降低工具选择稳定性。当前已经提供以下服务端 Tool Profile：
 
 | Profile | 工具数 | 用途 |
@@ -109,7 +111,7 @@ DeepSeek Chat Completions 当前允许最多 128 个函数工具，函数名最�
 | `core` | 34 | 确定性设计诊断、连接、电路检查、SPICE 兼容性审计、文件和基础仿真 |
 | `experiment` | 92 | 设计诊断、技术方案规划、方案选择、电气规格准备、逻辑网表草案、器件候选与额定值解析、器件解析明确审批、受限引脚级网表预览、网表人工确认、仿真计划审批、电路生成、多板 DC 原生验收、行为级参考实验、实验任务、SPICE 审计、测量、验证、报告和产物访问 |
 | `optimization` | 70 | 设计诊断、技术方案规划、方案选择、电气规格准备、逻辑网表草案、器件候选与额定值解析、器件解析明确审批、受限引脚级网表预览、网表人工确认、仿真计划审批、同步/持久自治纠错、参数/拓扑全局优化、完整设计比较、SPICE 审计、基础仿真、指标验证、实验扫描和产物访问 |
-| `full` | 115 | 完整兼容模式，也是默认值 |
+| `full` | 123 | 完整兼容模式，也是默认值 |
 
 通过配置生成器的 `--tool-profile` 设置，或手工设置
 `MULTISIM_MCP_TOOL_PROFILE`。Profile 在服务端生成稳定的 `tools/list`；没有被
@@ -125,7 +127,9 @@ Harness bundle 默认使用 `experiment`，因此需要让 Agent 发现有预算
 `resolve_component_requirements` 查看候选族、额定值计算和模型来源状态；完成选择后用
 `approve_component_resolution` 绑定人工审阅凭证。这些前置工具都不生成 SPICE、原理图、
 文件或仿真。审批完成后，仅当方案在支持矩阵中时调用 `compile_executable_netlist` 生成
-内存中的引脚级 `CircuitDesign` / SPICE 预览；当前只支持 `signal-passive`，结果必须再经
+内存中的引脚级 `CircuitDesign` / SPICE 预览；当前支持 `signal-passive` 与显式理想运放的
+`signal-active`。有源模板的范围和原生未验收状态见
+[`ACTIVE_SIGNAL_COMPILER.md`](ACTIVE_SIGNAL_COMPILER.md)；结果必须再经
 `approve_executable_netlist` 人工确认，且不能直接仿真。契约和示例见
 [`DESIGN_PLANNING.md`](DESIGN_PLANNING.md)。
 成图时把完整编译预览作为 `executable_netlist`、审批凭证作为 `netlist_approval`，并将
@@ -203,15 +207,17 @@ Workflow seam 更适合由模型生成编排脚本和子代理的动态任务，
 仓库同时提供可独立安装的 bundle 源码：
 [`integrations/deepseek-harness`](../integrations/deepseek-harness)。它按照官方
 `dsh.bundle.patch` 约定声明 `cordis.patch.yml`，并把 MCP Client 依赖固定为
-`0.1.1-rc.2`。
+`0.2.1-rc.2`。当前修复包为 `multisim-mcp-dsh-plugin@1.3.0`，并声明
+`engines.dsh: 0.2.1-rc.2`，避免被 DSH 0.2.x 的插件兼容筛选隐藏。
 
 ```powershell
 $env:MULTISIM_MCP_PYTHON = "C:\path\to\python32\python.exe"
-dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.1.0"
+dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.0"
 dsh --profile web --dump-config
 ```
 
-`multisim-mcp-dsh-plugin@1.1.0` 已于 2026-08-23 公开发布到 npm。发布后已从
+`multisim-mcp-dsh-plugin@1.1.0` 曾于 2026-08-23 公开发布到 npm；修复包
+`1.3.0` 需要按发布手册推送到 `next` 标签。发布后应从
 Registry 包名完成全新 profile 安装，验证 Cordis 组合、MCP 子进程启动和 Web
 HTTP 200。npm 发布仍与 Python 包独立；配置只转发 `MULTISIM_MCP_*` 和 Python
 运行选项，不会把
@@ -228,7 +234,7 @@ python tools/smoke_deepseek_harness.py --json
 ```
 
 该脚本使用临时 `DSH_HOME`，删除子进程环境中的 `DEEPSEEK_API_KEY`，强制关闭
-Harness 遥测，并固定运行 `@deepseek-ai/dsh@0.1.1-rc.2`。它先验证配置组合，再
+Harness 遥测，并固定运行 `@deepseek-ai/dsh@0.2.1-rc.2`。它先验证配置组合，再
 启动 Web profile；由于 MCP 配置启用了 `failOnStartupError`，只有官方 MCP Client
 成功连接、完成初始工具同步并且 Web 服务就绪才算通过。脚本不执行模型请求，也不
 需要 DeepSeek API Key。
@@ -259,8 +265,8 @@ PDF、图片、raw 和 `.ms14` 默认只返回元数据与本地引用，不应�
 ## 版本门禁与上游监控
 
 仓库使用 [`compatibility/deepseek-harness.json`](../compatibility/deepseek-harness.json)
-记录已验证基线。当前固定值包括 Harness 与 MCP Client `0.1.1-rc.2`、Node
-`^22.19.0 || >=24.0.0`、pnpm `11.7.0` 和上游 MCP SDK `^1.12.0`。
+记录已验证基线。当前固定值包括 Harness 与 MCP Client `0.2.1-rc.2`、Node
+`^22.19.0 || >=24.0.0`、pnpm `11.28.5` 和上游 MCP Client `2.2.0`。
 
 维护者可以执行确定性的本地契约检查；该命令不访问网络：
 

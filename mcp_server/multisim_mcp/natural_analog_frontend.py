@@ -6,8 +6,10 @@ from typing import Any
 _NUM = r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*([A-Za-zΩωµμ]*)"
 _SCALE = {"k":1e3,"m":1e-3,"u":1e-6,"µ":1e-6,"μ":1e-6,"n":1e-9,"p":1e-12,"M":1e6}
 
-def _quantity(text: str, labels: str, units: set[str], *, signed=False) -> float | None:
+def _quantity(text: str, labels: str, units: set[str], *, signed=False, number_before_label=False) -> float | None:
     hits = list(re.finditer(labels + r"\s*(?:[:=：]|为|是|取)?\s*" + _NUM, text, re.I))
+    if number_before_label:
+        hits.extend(re.finditer(_NUM + r"\s*(?:的)?\s*" + labels, text, re.I))
     if len(hits) > 1: raise ValueError("同一工程参数出现多个数值，无法安全选择")
     if not hits: return None
     value, suffix = float(hits[0].group(1)), hits[0].group(2)
@@ -23,6 +25,22 @@ def _spice(value: float) -> str:
         if 1 <= abs(scaled) < 1000: return f"{scaled:.8g}{suffix}"
     return f"{value:.8g}"
 
+
+def _symmetric_supply(text: str) -> float | None:
+    """Parse one explicit ``±12 V``/``+/-12V`` supply declaration."""
+    hits = list(re.finditer(r"(?:±|\+/-)\s*" + _NUM, text, re.I))
+    if len(hits) > 1:
+        raise ValueError("对称供电出现多个数值，无法安全选择")
+    if not hits:
+        return None
+    value, suffix = float(hits[0].group(1)), hits[0].group(2)
+    if suffix not in {"", "v"} and suffix[:1] in _SCALE:
+        value *= _SCALE[suffix[:1]]
+        suffix = suffix[1:]
+    if suffix.casefold() not in {"", "v"} or not math.isfinite(value) or value <= 0:
+        raise ValueError("对称供电的数值或单位无效")
+    return value
+
 def parse_natural_analog_frontend(text: str) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip() or len(text) > 4000: raise ValueError("请输入 1–4000 字的工程需求")
     if not re.search(r"传感器|模拟前端|signal conditioning|sensor|低通|抗混叠|filter", text, re.I): raise ValueError("当前入口需要传感器模拟前端或低通滤波场景")
@@ -30,14 +48,24 @@ def parse_natural_analog_frontend(text: str) -> dict[str, Any]:
     vin = _quantity(text, r"(?:输入(?:幅值|电压)?|input(?: amplitude| voltage)?)", {"","v"}) or .1
     gain = _quantity(text, r"(?:总?增益|gain)", {"","x"}) or 10.
     cutoff = _quantity(text, r"(?:截止(?:频率)?|抗混叠(?:频率)?|cutoff(?: frequency)?)", {"","hz"}) or 1000.
-    vcc = _quantity(text, r"(?:正电源|正轨|vcc|positive supply)", {"","v"}) or 15.
-    vss = _quantity(text, r"(?:负电源|负轨|vss|negative supply)", {"","v"}, signed=True)
-    load = _quantity(text, r"(?:负载|load)", {"","ohm","ω"}) or 100000.
+    symmetric_v = _symmetric_supply(text)
+    explicit_vcc = _quantity(text, r"(?:正电源|正轨|vcc|positive supply)", {"","v"})
+    explicit_vss = _quantity(text, r"(?:负电源|负轨|vss|negative supply)", {"","v"}, signed=True)
+    if symmetric_v is not None and (explicit_vcc is not None or explicit_vss is not None):
+        raise ValueError("请只指定对称供电或正负电源轨，不能同时指定两种写法")
+    vcc = explicit_vcc if explicit_vcc is not None else (symmetric_v or 15.)
+    vss = explicit_vss if explicit_vss is not None else (-symmetric_v if symmetric_v is not None else -vcc)
+    load = _quantity(text, r"(?:负载|load)", {"","ohm","ω"}, number_before_label=True) or 100000.
     if vin > 100 or gain < 1 or gain > 100 or cutoff < 10 or cutoff > 100000 or vcc <= 0 or (vss is not None and vss >= 0) or load < 10000:
         raise ValueError("首版范围：输入≤100V、增益1–100、截止10Hz–100kHz、负载至少10kΩ")
     if vss is None: vss = -vcc
     rg = 10000.; stage_gain = math.sqrt(gain); rf = (stage_gain - 1) * rg; c = 1 / (2 * math.pi * rg * cutoff)
-    stop_start, stop_end = max(cutoff * 10, 10), cutoff * 100; pass_start, pass_end = max(cutoff / 100, 10), max(cutoff / 10, 100)
+    # Keep the pass-band well below the requested cutoff even for low-cutoff
+    # designs.  A fixed 100 Hz floor made a 500 Hz design measure at 100 Hz,
+    # where two cascaded RC poles already attenuate the requested gain.
+    pass_start = max(cutoff / 100, 1.0)
+    pass_end = max(cutoff / 10, pass_start * 2)
+    stop_start, stop_end = max(cutoff * 10, pass_end * 2), cutoff * 100
     # Simulate five time constants so the post-step window is settled.
     duration, delay, rise = 5 / cutoff, .1 / cutoff, .001 / cutoff
     netlist = (f"V1 in 0 DC {vin:g} AC 1 PULSE(0 {vin:g} {_spice(delay)} {_spice(rise)} {_spice(rise)} {_spice(2*duration)} {_spice(4*duration)})\nVCC vcc 0 DC {vcc:g}\nVSS vss 0 DC {vss:g}\n"
@@ -62,10 +90,10 @@ def generate_analog_candidates(plan: dict[str, Any]) -> list[dict[str, Any]]:
     for rf_scale, c_scale in ((1.0,1.0), (0.98,1.0), (1.02,1.0), (1.0,0.95), (1.0,1.05)):
         rf, cap = base_rf * rf_scale, base_c * c_scale
         text = proposal["netlist"]
-        text = re.sub(r"RF1 stage1 fb1 \\S+", f"RF1 stage1 fb1 {_spice(rf)}", text)
-        text = re.sub(r"RF2 out fb2 \\S+", f"RF2 out fb2 {_spice(rf)}", text)
-        text = re.sub(r"C1 lp1 0 \\S+", f"C1 lp1 0 {_spice(cap)}", text)
-        text = re.sub(r"C2 lp2 0 \\S+", f"C2 lp2 0 {_spice(cap)}", text)
+        text = re.sub(r"RF1 stage1 fb1 \S+", f"RF1 stage1 fb1 {_spice(rf)}", text)
+        text = re.sub(r"RF2 out fb2 \S+", f"RF2 out fb2 {_spice(rf)}", text)
+        text = re.sub(r"C1 lp1 0 \S+", f"C1 lp1 0 {_spice(cap)}", text)
+        text = re.sub(r"C2 lp2 0 \S+", f"C2 lp2 0 {_spice(cap)}", text)
         item = dict(proposal, netlist=text)
         item["application"] += f"；反馈电阻比例 {rf_scale:g}，滤波电容比例 {c_scale:g}。"
         candidates.append({"rf_scale":rf_scale,"c_scale":c_scale,"rf_ohm":rf,"c_f":cap,"proposal":item})

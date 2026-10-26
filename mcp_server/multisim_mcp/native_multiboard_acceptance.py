@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .eda_core import CircuitDesign
+from .hybrid_regression import ConverterTransferContract, evaluate_converter_transfer
 from .multiboard_fixtures import (
     compare_multiboard_interface_observations,
     compare_multiboard_interface_series,
@@ -25,6 +26,10 @@ from .multiboard_fixtures import (
 from .multiboard_plan import materialize_circuit_design_partition
 from .multisim_compat import parse_multisim_version
 from .native_analysis_series import (
+    ContinuousResponseContract,
+    DigitalEdgeComparisonContract,
+    compare_continuous_response_series,
+    compare_digital_edge_series,
     compare_native_series,
     extract_native_analysis_series,
     native_series_informative,
@@ -35,6 +40,44 @@ from .topology_validation import compare_pin_connections, compare_roundtrip_topo
 
 
 _ANALYSIS_KINDS = frozenset({"dc", "tran", "ac"})
+
+
+def _normalize_digital_edge_contracts(
+    contracts: Mapping[str, DigitalEdgeComparisonContract] | None,
+) -> dict[str, DigitalEdgeComparisonContract]:
+    if contracts is None:
+        return {}
+    if not isinstance(contracts, Mapping):
+        raise ValueError("digital_edge_contracts must be an object")
+    normalized: dict[str, DigitalEdgeComparisonContract] = {}
+    for raw_net, contract in contracts.items():
+        net = str(raw_net).strip()
+        if not net:
+            raise ValueError("digital edge contract net must not be empty")
+        if not isinstance(contract, DigitalEdgeComparisonContract):
+            raise ValueError("digital edge contracts must use DigitalEdgeComparisonContract")
+        contract.validate()
+        normalized[net] = contract
+    return normalized
+
+
+def _normalize_continuous_response_contracts(
+    contracts: Mapping[str, ContinuousResponseContract] | None,
+) -> dict[str, ContinuousResponseContract]:
+    if contracts is None:
+        return {}
+    if not isinstance(contracts, Mapping):
+        raise ValueError("continuous_response_contracts must be an object")
+    normalized: dict[str, ContinuousResponseContract] = {}
+    for raw_net, contract in contracts.items():
+        net = str(raw_net).strip()
+        if not net:
+            raise ValueError("continuous response contract net must not be empty")
+        if not isinstance(contract, ContinuousResponseContract):
+            raise ValueError("continuous response contracts must use ContinuousResponseContract")
+        contract.validate()
+        normalized[net] = contract
+    return normalized
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -190,6 +233,21 @@ def _write_acceptance_report(path: Path, result: Mapping[str, Any]) -> None:
     if isinstance(comparison, Mapping):
         lines.extend(["", "## 跨板接口比较", ""])
         lines.append(f"接口比较状态：`{comparison.get('status', 'unknown')}`。")
+    event_comparison = result.get("event_interface_comparison", {})
+    if isinstance(event_comparison, Mapping) and event_comparison.get("status") not in {None, "not-applicable"}:
+        lines.append(
+            f"数字边沿事件比较状态：`{event_comparison.get('status', 'unknown')}`。"
+        )
+    converter = result.get("converter_transfer", {})
+    if isinstance(converter, Mapping) and converter.get("status") not in {None, "not-applicable"}:
+        lines.append(
+            f"ADC/DAC 转换合同状态：`{converter.get('status', 'unknown')}`。"
+        )
+    continuous = result.get("continuous_response", {})
+    if isinstance(continuous, Mapping) and continuous.get("status") not in {None, "not-applicable"}:
+        lines.append(
+            f"RC 连续响应合同状态：`{continuous.get('status', 'unknown')}`。"
+        )
     reference = result.get("full_reference")
     if isinstance(reference, Mapping):
         lines.extend(["", "## 完整电路参考比较", ""])
@@ -217,6 +275,13 @@ def _probe_map(build_result: Mapping[str, Any]) -> dict[str, str]:
         for item in probes
         if isinstance(item, Mapping) and item.get("net") and item.get("voltage_output")
     }
+
+
+def _require_native_probe_outputs(build, requested_nets, outputs):
+    mapping = _probe_map(build)
+    missing = [net for net in requested_nets if not mapping.get(net) or mapping[net] not in outputs]
+    if missing:
+        raise RuntimeError(f"saved/reopened project is missing requested native voltage probes: {missing}")
 
 
 def _op_values(result: Mapping[str, Any], outputs: Sequence[str]) -> dict[str, float | None]:
@@ -281,11 +346,154 @@ def _series_observation_values(
     return result
 
 
+def _compare_interface_edge_series(
+    observations: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    contracts: Mapping[str, DigitalEdgeComparisonContract],
+) -> dict[str, Any]:
+    """Compare declared digital edges between every observed board endpoint."""
+    comparisons: list[dict[str, Any]] = []
+    for net, contract in sorted(contracts.items()):
+        boards = sorted(
+            board_id for board_id, values in observations.items()
+            if net in values
+        )
+        if len(boards) < 2:
+            comparisons.append({
+                "net": net, "status": "unverified", "boards": boards,
+                "reason": "digital edge contract requires at least two observed board endpoints",
+            })
+            continue
+        baseline = boards[0]
+        endpoint_comparisons = {
+            board_id: compare_digital_edge_series(
+                observations[baseline].get(net), observations[board_id].get(net),
+                contract=contract,
+            )
+            for board_id in boards[1:]
+        }
+        statuses = [item.get("status") for item in endpoint_comparisons.values()]
+        status = (
+            "fail" if any(value == "fail" for value in statuses) else
+            "invalid" if any(value == "invalid" for value in statuses) else
+            "unverified" if any(value == "unverified" for value in statuses) else
+            "pass"
+        )
+        comparisons.append({
+            "net": net, "status": status, "boards": boards,
+            "baseline_board": baseline,
+            "endpoint_comparisons": endpoint_comparisons,
+        })
+    statuses = [item["status"] for item in comparisons]
+    status = (
+        "fail" if any(value == "fail" for value in statuses) else
+        "invalid" if any(value == "invalid" for value in statuses) else
+        "unverified" if any(value == "unverified" for value in statuses) else
+        "pass" if comparisons else "not-applicable"
+    )
+    return {
+        "status": status,
+        "comparison_basis": "threshold-crossing events; no waveform resampling",
+        "comparisons": comparisons,
+    }
+
+
+def _compare_reference_edge_series(
+    board_records: Sequence[Mapping[str, Any]],
+    reference_series: Mapping[str, Mapping[str, Any]],
+    contracts: Mapping[str, DigitalEdgeComparisonContract],
+) -> dict[str, Any]:
+    observations = _series_observation_values(board_records)
+    comparisons: list[dict[str, Any]] = []
+    for net, contract in sorted(contracts.items()):
+        endpoint_comparisons: dict[str, Any] = {}
+        missing = False
+        expected = reference_series.get(net)
+        for board_id, values in sorted(observations.items()):
+            if net not in values:
+                continue
+            if expected is None:
+                missing = True
+                endpoint_comparisons[board_id] = {
+                    "status": "unverified", "reason": "reference digital series is missing",
+                }
+            else:
+                endpoint_comparisons[board_id] = compare_digital_edge_series(
+                    expected, values[net], contract=contract,
+                )
+        statuses = [item.get("status") for item in endpoint_comparisons.values()]
+        status = (
+            "fail" if any(value == "fail" for value in statuses) else
+            "invalid" if any(value == "invalid" for value in statuses) else
+            "unverified" if missing or not statuses or any(value == "unverified" for value in statuses) else
+            "pass"
+        )
+        comparisons.append({"net": net, "status": status, "endpoint_comparisons": endpoint_comparisons})
+    statuses = [item["status"] for item in comparisons]
+    status = (
+        "fail" if any(value == "fail" for value in statuses) else
+        "invalid" if any(value == "invalid" for value in statuses) else
+        "unverified" if any(value == "unverified" for value in statuses) else
+        "pass" if comparisons else "not-applicable"
+    )
+    return {
+        "status": status,
+        "comparison_basis": "reference threshold-crossing events; no waveform resampling",
+        "comparisons": comparisons,
+    }
+
+
+def _compare_reference_continuous_response_series(
+    board_records: Sequence[Mapping[str, Any]],
+    reference_series: Mapping[str, Mapping[str, Any]],
+    contracts: Mapping[str, ContinuousResponseContract],
+) -> dict[str, Any]:
+    """Compare declared RC responses against the complete native reference."""
+    observations = _series_observation_values(board_records)
+    comparisons: list[dict[str, Any]] = []
+    for net, contract in sorted(contracts.items()):
+        endpoint_comparisons: dict[str, Any] = {}
+        missing = False
+        expected = reference_series.get(net)
+        for board_id, values in sorted(observations.items()):
+            if net not in values:
+                continue
+            if expected is None:
+                missing = True
+                endpoint_comparisons[board_id] = {
+                    "status": "unverified", "reason": "reference continuous response is missing",
+                }
+            else:
+                endpoint_comparisons[board_id] = compare_continuous_response_series(
+                    expected, values[net], contract=contract,
+                )
+        statuses = [item.get("status") for item in endpoint_comparisons.values()]
+        status = (
+            "fail" if any(value == "fail" for value in statuses) else
+            "invalid" if any(value == "invalid" for value in statuses) else
+            "unverified" if missing or not statuses or any(value == "unverified" for value in statuses) else
+            "pass"
+        )
+        comparisons.append({"net": net, "status": status, "endpoint_comparisons": endpoint_comparisons})
+    statuses = [item["status"] for item in comparisons]
+    status = (
+        "fail" if any(value == "fail" for value in statuses) else
+        "invalid" if any(value == "invalid" for value in statuses) else
+        "unverified" if any(value == "unverified" for value in statuses) else
+        "pass" if comparisons else "not-applicable"
+    )
+    return {
+        "status": status,
+        "comparison_basis": "reference RC response features; no waveform resampling",
+        "comparisons": comparisons,
+    }
+
+
 def _compare_full_reference_series(
     board_records: Sequence[Mapping[str, Any]],
     reference_series: Mapping[str, Mapping[str, Any]],
     reference_nets: Sequence[str],
     *,
+    absolute_tolerance: float = 1e-9,
     allow_resampling: bool = False,
 ) -> dict[str, Any]:
     """Compare every declared board-local observation to the original circuit.
@@ -308,7 +516,7 @@ def _compare_full_reference_series(
                 "board_id": board_id, "net": net,
                 **compare_native_series(
                     reference_series.get(net), observations.get(board_id, {}).get(net),
-                    absolute_tolerance=1e-9,
+                    absolute_tolerance=absolute_tolerance,
                     allow_resampling=allow_resampling,
                 ),
             })
@@ -318,7 +526,7 @@ def _compare_full_reference_series(
         "unverified" if missing_nets or not statuses or "unverified" in statuses else "pass"
     )
     return {
-        "status": status, "tolerance": 1e-9, "comparisons": comparisons,
+        "status": status, "tolerance": float(absolute_tolerance), "comparisons": comparisons,
         "missing_nets": missing_nets,
         "comparison_basis": (
             "every-observed-board-net; all-native-samples-real-and-imaginary; "
@@ -414,6 +622,12 @@ def run_native_multiboard_acceptance(
     analysis_options: Mapping[str, Any] | None = None,
     schematic_executor: Callable[..., Mapping[str, Any]] | None = None,
     client: Any | None = None,
+    reopened_contract_validator: Callable[..., Mapping[str, Any]] | None = None,
+    output_directory_created: Callable[[Path], None] | None = None,
+    comparison_tolerance: float = 1e-9,
+    digital_edge_contracts: Mapping[str, DigitalEdgeComparisonContract] | None = None,
+    converter_transfer_contract: ConverterTransferContract | None = None,
+    continuous_response_contracts: Mapping[str, ContinuousResponseContract] | None = None,
 ) -> dict[str, Any]:
     """Preview or execute the first version-gated multi-board native gate.
 
@@ -428,6 +642,25 @@ def run_native_multiboard_acceptance(
     analysis_kind, normalized_analysis_options = _normalize_analysis_options(
         analysis, analysis_options
     )
+    normalized_edge_contracts = _normalize_digital_edge_contracts(digital_edge_contracts)
+    normalized_continuous_contracts = _normalize_continuous_response_contracts(
+        continuous_response_contracts
+    )
+    if normalized_edge_contracts and analysis_kind != "tran":
+        raise ValueError("digital edge contracts require transient analysis")
+    if converter_transfer_contract is not None:
+        converter_transfer_contract.validate()
+        if analysis_kind != "tran":
+            raise ValueError("converter transfer contracts require transient analysis")
+    if normalized_continuous_contracts and analysis_kind != "tran":
+        raise ValueError("continuous response contracts require transient analysis")
+    if (
+        isinstance(comparison_tolerance, bool)
+        or not isinstance(comparison_tolerance, (int, float))
+        or not math.isfinite(float(comparison_tolerance))
+        or comparison_tolerance < 0
+    ):
+        raise ValueError("comparison_tolerance must be a finite non-negative number")
     root = _validate_output_directory(output_directory)
     logical = materialize_circuit_design_partition(
         design,
@@ -448,6 +681,7 @@ def run_native_multiboard_acceptance(
         "target_multisim_version": str(target_multisim_version).strip(),
         "analysis": analysis_kind,
         "analysis_options": normalized_analysis_options,
+        "comparison_tolerance": float(comparison_tolerance),
         "native_connector_status": logical.get("native_connector_status"),
         "native_connector_ready": logical.get("native_connector_ready"),
         "connector_resolutions": logical.get("connector_resolutions", []),
@@ -468,6 +702,8 @@ def run_native_multiboard_acceptance(
         schematic_executor = schematic_executor or server._create_schematic_impl
         client = client or server.client
     root.mkdir(parents=True, exist_ok=False)
+    if output_directory_created is not None:
+        output_directory_created(root)
     records: list[dict[str, Any]] = []
     full_reference: dict[str, Any] | None = None
     try:
@@ -511,7 +747,14 @@ def run_native_multiboard_acceptance(
             client.report_netlist(str(report_path), False, 0)
             reopened_report = report_path.read_bytes().decode("utf-8", errors="replace")
             reopened_topology = _reopened_topology(board, reopened_report)
+            reopened_contract = None
+            if reopened_contract_validator is not None:
+                reopened_contract = dict(reopened_contract_validator(board, client, board_root))
+                _write_json(board_root / "reopened-contract.json", reopened_contract)
+                if reopened_contract.get("status") != "pass":
+                    raise RuntimeError(f"{board_id}: saved/reopened electrical contract failed")
             outputs = [str(item) for item in client.enum_outputs(0)]
+            _require_native_probe_outputs(build, board.get("probe_nets", []), outputs)
             if not outputs:
                 raise RuntimeError(f"{board_id}: saved/reopened project has no native probe outputs")
             native_analysis = _run_native_analysis(
@@ -562,6 +805,8 @@ def run_native_multiboard_acceptance(
             _write_json(board_root / f"{analysis_stem}-series.json", native_series)
             write_native_series_csv(board_root / f"{analysis_stem}-series.csv", native_series)
             reopen_name = "native-reopen-op.json" if analysis_kind == "dc" else f"native-reopen-{analysis_kind}.json"
+            if reopened_contract is not None:
+                record["reopened_electrical_contract"] = reopened_contract
             _write_json(board_root / reopen_name, {
                 **record,
                 "analysis_response": native_analysis,
@@ -578,10 +823,12 @@ def run_native_multiboard_acceptance(
             if item.get("net")
         })
         scalar_interface_comparison = compare_multiboard_interface_observations(
-            prepared, observations, nets=interface_nets or None
+            prepared, observations, nets=interface_nets or None,
+            absolute_tolerance=comparison_tolerance,
         )
         series_interface_comparison = compare_multiboard_interface_series(
             prepared, series_observations, nets=interface_nets or None,
+            absolute_tolerance=comparison_tolerance,
             allow_resampling=normalized_analysis_options.get("series_alignment") == "linear",
         )
         # Preserve the original scalar result for DC consumers; transient and
@@ -590,6 +837,28 @@ def run_native_multiboard_acceptance(
             scalar_interface_comparison
             if analysis_kind == "dc" else series_interface_comparison
         )
+        event_interface_comparison = (
+            _compare_interface_edge_series(series_observations, normalized_edge_contracts)
+            if normalized_edge_contracts else {"status": "not-applicable", "comparisons": []}
+        )
+        converter_transfer = (
+            {"status": "unverified", "passed": False, "reason": "complete reference was not produced"}
+            if converter_transfer_contract is not None
+            else {"status": "not-applicable", "passed": True}
+        )
+        converter_transfer_nets: set[str] = set()
+        if converter_transfer_contract is not None:
+            converter_transfer_nets = {
+                converter_transfer_contract.analog_input,
+                *converter_transfer_contract.digital_bits,
+                converter_transfer_contract.analog_output,
+            }
+        continuous_response = (
+            {"status": "unverified", "passed": False, "reason": "complete reference was not produced"}
+            if normalized_continuous_contracts
+            else {"status": "not-applicable", "passed": True}
+        )
+        continuous_response_nets = set(normalized_continuous_contracts)
         # A complete-design reference uses the original source netlist and the
         # same explicitly observed nets; no fixture is inferred for it.
         reference_nets = [
@@ -622,7 +891,15 @@ def run_native_multiboard_acceptance(
                 {"design": design.to_dict()},
                 reference_report_path.read_bytes().decode("utf-8", errors="replace"),
             )
+            reference_contract = None
+            if reopened_contract_validator is not None:
+                reference_contract = dict(reopened_contract_validator(
+                    {"design": design.to_dict()}, client, reference_root))
+                _write_json(reference_root / "reopened-contract.json", reference_contract)
+                if reference_contract.get("status") != "pass":
+                    raise RuntimeError("full reference saved/reopened electrical contract failed")
             reference_outputs = [str(item) for item in client.enum_outputs(0)]
+            _require_native_probe_outputs(reference_build, reference_nets, reference_outputs)
             if not reference_outputs:
                 raise RuntimeError("full reference project has no native probe outputs")
             reference_analysis = _run_native_analysis(
@@ -635,6 +912,39 @@ def run_native_multiboard_acceptance(
                 reference_analysis, reference_outputs, analysis_kind,
                 normalized_analysis_options,
             )
+            reference_series_by_net = {
+                net: reference_series_by_output[output]
+                for net, output in _probe_map(reference_build).items()
+                if output in reference_series_by_output
+            }
+            if converter_transfer_contract is not None:
+                transfer_series = {
+                    net: item["real"]
+                    for net, item in reference_series_by_net.items()
+                    if item.get("status") == "pass"
+                }
+                transfer_result = evaluate_converter_transfer(
+                    converter_transfer_contract, transfer_series
+                )
+                converter_transfer = {
+                    "status": "pass" if transfer_result.get("passed") is True else "fail",
+                    "passed": transfer_result.get("passed") is True,
+                    "contract": {
+                        "analog_input": converter_transfer_contract.analog_input,
+                        "digital_bits": list(converter_transfer_contract.digital_bits),
+                        "analog_output": converter_transfer_contract.analog_output,
+                        "low_voltage": converter_transfer_contract.low_voltage,
+                        "high_voltage": converter_transfer_contract.high_voltage,
+                        "voltage_tolerance": converter_transfer_contract.voltage_tolerance,
+                        "boundary_guard_voltage": converter_transfer_contract.boundary_guard_voltage,
+                    },
+                    "result": transfer_result,
+                }
+            if normalized_continuous_contracts:
+                continuous_response = _compare_reference_continuous_response_series(
+                    records, reference_series_by_net, normalized_continuous_contracts
+                )
+                continuous_response["passed"] = continuous_response.get("status") == "pass"
             reference_probe_map = _probe_map(reference_build)
             reference_values = {
                 net: reference_values_by_output.get(output)
@@ -653,6 +963,7 @@ def run_native_multiboard_acceptance(
                 "analysis": reference_analysis,
                 "values": reference_values,
                 "reopened_topology": reference_topology,
+                **({"reopened_electrical_contract": reference_contract} if reference_contract is not None else {}),
                 "artifacts": {
                     "json": f"{reference_stem}.json", "csv": f"{reference_stem}.csv",
                     "series_json": f"{reference_stem}-series.json",
@@ -686,10 +997,48 @@ def run_native_multiboard_acceptance(
                     if output in reference_series_by_output
                 },
                 reference_nets,
+                absolute_tolerance=comparison_tolerance,
                 allow_resampling=normalized_analysis_options.get("series_alignment") == "linear",
             )
+            reference_edge_comparison = (
+                _compare_reference_edge_series(
+                    records,
+                    {
+                        net: reference_series_by_output[output]
+                        for net, output in reference_probe_map.items()
+                        if output in reference_series_by_output
+                    },
+                    normalized_edge_contracts,
+                )
+                if normalized_edge_contracts else {"status": "not-applicable", "comparisons": []}
+            )
+            strict_reference_statuses = [
+                item.get("status") for item in reference_comparison.get("comparisons", [])
+                if item.get("net") not in normalized_edge_contracts
+                and item.get("net") not in converter_transfer_nets
+                and item.get("net") not in continuous_response_nets
+            ]
+            reference_status = (
+                "fail" if any(value in {"fail", "invalid"} for value in strict_reference_statuses)
+                or reference_edge_comparison.get("status") in {"fail", "invalid"}
+                or continuous_response.get("status") in {"fail", "invalid"} else
+                "fail" if converter_transfer.get("status") == "fail" else
+                "unverified" if (
+                    not strict_reference_statuses
+                    or any(value == "unverified" for value in strict_reference_statuses)
+                    or reference_comparison.get("missing_nets")
+                    or reference_edge_comparison.get("status") == "unverified"
+                    or converter_transfer.get("status") == "unverified"
+                or continuous_response.get("status") == "unverified"
+                ) else "pass"
+            )
+            reference_comparison["sampled_status"] = reference_comparison.get("status")
+            reference_comparison["status"] = reference_status
             full_reference = {
                 **reference_comparison,
+                "event_comparison": reference_edge_comparison,
+                "converter_transfer": converter_transfer,
+                "continuous_response": continuous_response,
                 "board": reference_board["board_id"] if reference_board is not None else None,
                 "board_values": signal_values,
                 "reference_values": reference_values,
@@ -701,6 +1050,18 @@ def run_native_multiboard_acceptance(
                 ),
                 "analysis_informative": native_series_informative(analysis_kind, reference_series_by_output),
             }
+            if reference_contract is not None:
+                full_reference["reopened_electrical_contract"] = reference_contract
+        strict_interface_statuses = [
+            "pass" if item.get("passed") is True else "fail"
+            for item in series_interface_comparison.get("comparisons", [])
+            if item.get("net") not in normalized_edge_contracts
+        ]
+        interface_series_gate = (
+            all(value == "pass" for value in strict_interface_statuses)
+            and event_interface_comparison.get("status") in {"pass", "not-applicable"}
+            and (not normalized_edge_contracts or event_interface_comparison.get("status") == "pass")
+        )
         native_acceptance = {
             "all_boards_build": all(item["build_success"] for item in records),
             "all_boards_save_reopen": all(item["reopened_outputs"] for item in records),
@@ -718,9 +1079,15 @@ def run_native_multiboard_acceptance(
             "analysis_information_pass": all(item["native_analysis_informative"] for item in records),
             # Kept as a compatibility alias for consumers of the original DC-only gate.
             "all_native_op_ready": all(item["native_analysis_ready"] for item in records),
-            "interface_values_match": interface_comparison["status"] == "pass",
-            "interface_series_match": series_interface_comparison["status"] == "pass",
+            # Scalar endpoint values are a separate gate from sampled-series
+            # alignment. A digital edge contract may deliberately replace
+            # pointwise series equality while still requiring final values to
+            # agree exactly.
+            "interface_values_match": scalar_interface_comparison["status"] == "pass",
+            "interface_series_match": interface_series_gate,
             "matches_full_reference": full_reference is None or full_reference["status"] == "pass",
+            "converter_transfer_match": converter_transfer.get("status") in {"pass", "not-applicable"},
+            "continuous_response_match": continuous_response.get("status") in {"pass", "not-applicable"},
             "full_reference_ready": full_reference is None or (
                 full_reference["analysis_ready"] and full_reference["analysis_informative"]
                 and full_reference["reopened_topology"]["status"] == "pass"
@@ -734,6 +1101,7 @@ def run_native_multiboard_acceptance(
             "execution_started": True,
             "analysis": analysis_kind,
             "analysis_options": normalized_analysis_options,
+            "comparison_tolerance": float(comparison_tolerance),
             "multisim_version": detected_version,
             "multisim_version_tuple": list(detected_version_tuple),
             "target_multisim_version_tuple": list(target_version_tuple),
@@ -742,6 +1110,30 @@ def run_native_multiboard_acceptance(
             "interface_comparison": interface_comparison,
             "scalar_interface_comparison": scalar_interface_comparison,
             "series_interface_comparison": series_interface_comparison,
+            "event_interface_comparison": event_interface_comparison,
+            "converter_transfer": converter_transfer,
+            "continuous_response": continuous_response,
+            "digital_edge_contracts": {
+                net: {
+                    "low_voltage": contract.low_voltage,
+                    "high_voltage": contract.high_voltage,
+                    "threshold_voltage": contract.threshold_voltage,
+                    "level_tolerance": contract.level_tolerance,
+                    "edge_time_tolerance": contract.edge_time_tolerance,
+                    "minimum_edge_separation": contract.minimum_edge_separation,
+                }
+                for net, contract in normalized_edge_contracts.items()
+            },
+            "continuous_response_contracts": {
+                net: {
+                    "final_value_tolerance": contract.final_value_tolerance,
+                    "extrema_value_tolerance": contract.extrema_value_tolerance,
+                    "response_range_tolerance": contract.response_range_tolerance,
+                    "time_tolerance": contract.time_tolerance,
+                    "minimum_samples": contract.minimum_samples,
+                }
+                for net, contract in normalized_continuous_contracts.items()
+            },
             "full_reference": full_reference,
             "native_acceptance": native_acceptance,
             "report": "acceptance-report.md",
