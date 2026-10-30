@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import functools
 import json
@@ -1710,12 +1711,36 @@ def snapshot_open_circuit(
     if netlist_path.exists() or snapshot_path.exists():
         raise FileExistsError("snapshot output already exists; choose a new output_dir")
     exported = client.report_netlist(str(netlist_path), probes_flag, fmt)
+    try:
+        snapshot = _snapshot_from_export(
+            netlist_path,
+            snapshot_path,
+            probes_flag,
+            fmt,
+            allow_unsupported,
+            exported,
+        )
+    except BaseException:
+        # The tool requires an empty output_dir, so a rejected half-export
+        # would make every retry in the same directory fail forever.
+        for created in (netlist_path, snapshot_path):
+            with contextlib.suppress(OSError):
+                created.unlink()
+        raise
+    return snapshot
+
+
+def _snapshot_from_export(
+    netlist_path: Path,
+    snapshot_path: Path,
+    probes_flag: bool,
+    fmt: int,
+    allow_unsupported: bool,
+    exported: dict[str, Any],
+) -> dict[str, Any]:
     if not netlist_path.is_file():
         raise RuntimeError("Multisim did not produce the requested netlist export")
-    try:
-        netlist = netlist_path.read_text(encoding="utf-8")
-    except UnicodeError as exc:
-        raise ValueError("Multisim netlist export is not UTF-8 text") from exc
+    netlist = netlist_path.read_text(encoding="utf-8")
     snapshot = build_existing_design_snapshot(
         netlist,
         circuit_info=client.circuit_info(),
@@ -2341,13 +2366,16 @@ def _create_schematic_impl(
             "layout_validation_path": str(layout_report_path),
             "experimental_probes": include_experimental_probes,
             "delivery_status": "blocked-layout",
-            "error": {
-                "type": "LayoutValidationError",
-                "message": (
-                    "Schematic delivery blocked because layout validation did not pass"
-                ),
-                "finding_count": finding_count,
-            },
+                "error": {
+                    "type": "LayoutValidationError",
+                    "message": (
+                        "Schematic delivery blocked because layout validation "
+                        "did not pass. The partial build already wrote the XML "
+                        "and the layout report next to the target, so retry "
+                        "with overwrite=True after fixing the findings."
+                    ),
+                    "finding_count": finding_count,
+                },
         }
     encode_result = codec.encode(str(xml_path), str(output_path))
     result: dict = {
@@ -2370,6 +2398,12 @@ def _create_schematic_impl(
     if not verify:
         result["verification"] = {"skipped": True, "reason": "verify=False"}
         result["fast_build"] = True
+        # Without a live round-trip there is no fresh topology evidence, and a
+        # report left by an earlier build would look authoritative.
+        stale_diff = output_path.with_name(output_path.stem + ".topology-diff.json")
+        if stale_diff.exists():
+            stale_diff.unlink()
+            result["removed_stale_topology_diff"] = str(stale_diff)
         return result
 
     if open_after_build or image_path:
