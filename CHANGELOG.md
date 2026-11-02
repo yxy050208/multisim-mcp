@@ -2,6 +2,18 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
+## [1.3.1] - 2026-11-02
+
+### 中文
+
+- 修复多分支网络 junction owner 未写入 `ReferencedComponents` 的问题。生成的 Multisim 图纸在拖动元件后不再把正常连接重新解析为悬空节点。
+- 为该问题增加回归测试，并同步发布 PyPI、MCP Registry 与 DeepSeek Harness npm 修复版本。
+
+### English
+
+- Fix multi-drop junction owners missing from `ReferencedComponents`, which could turn apparently connected wires into floating nodes after a component was dragged in Multisim.
+- Add a drag-safe regression test and publish the repair through PyPI, the MCP Registry, and the DeepSeek Harness npm bundle.
+
 ## [Unreleased]
 
 ### 中文

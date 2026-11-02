@@ -115,7 +115,13 @@ English: release the reviewed commit, wait for green CI, tag `v1.3.0`, publish
 PyPI and MCP Registry at that tag, then verify and stage the independent npm
 bundle with the protected environment and maintainer approval.
 
-## 7. v1.2.0 发布顺序
+## 7. v1.3.1 修复发布
+
+`v1.3.0` 已经存在于 PyPI 和 MCP Registry，平台不允许覆盖同名文件或重复 Registry 版本。修复发布必须从包含 Issue #41 修复的提交创建 `v1.3.1` 标签，然后分别运行 PyPI、MCP Registry 和 DSH npm 的工作流。
+
+English: `v1.3.0` is immutable on PyPI and the MCP Registry. The Issue #41 repair therefore ships as `v1.3.1` with a new tag and independent publication checks.
+
+## 8. v1.2.0 发布顺序
 
 1. 推送发布提交并等待 `CI` 全部通过。
 2. 创建并推送签注标签 `v1.2.0`，确认远端标签解引用到已通过 CI 的
@@ -145,7 +151,7 @@ English: publish in order—green CI, annotated tag, manual PyPI dispatch at the
 tag, verified GitHub Release, manual MCP Registry dispatch, then community
 directory metadata.
 
-## 8. DeepSeek Harness npm bundle
+## 9. DeepSeek Harness npm bundle
 
 `integrations/deepseek-harness` 是独立 npm 发布物。首次发布不能使用 npm staged
 publishing，必须由维护者本地登录并通过 2FA 发布。包存在后，在 npm 中把

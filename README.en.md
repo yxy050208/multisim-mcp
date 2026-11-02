@@ -9,7 +9,7 @@ An unofficial local MCP server that lets an AI agent generate editable NI
 Multisim circuits from constrained SPICE input, run experiments, export data,
 and create reproducible reports.
 
-> The `release/v1.3.0` branch is completing the stable-release gates. PyPI, MCP Registry,
+> The `release/v1.3.1` branch is completing the stable-release gates. PyPI, MCP Registry,
 > GitHub, and npm metadata will be verified independently after publication. This project is not affiliated
 > with or endorsed by NI. A
 > locally installed and licensed Multisim 14+ environment is required. The
@@ -21,7 +21,7 @@ and create reproducible reports.
 > `split_logic_load`, `split_mixed_logic`, HDR1X4 pin checks, cross-board
 > interfaces, a remote 1 kΩ load, and DC/TRAN/AC. This remains source-candidate
 > functionality; see the [regression evidence](docs/MULTIBOARD_DIGITAL_REGRESSION.md).
-> The historical `v1.2.0` release remains available while the `v1.3.0` publication is prepared.
+> The historical `v1.2.0` and `v1.3.0` releases remain available while the `v1.3.1` publication is prepared.
 
 > `v1.2.0` is the **frontend-free MCP Core release**. It contains the
 > Python MCP server, CLI, EDA core, model/DeepSeek adapters, tests, documentation,
@@ -34,7 +34,7 @@ The completed development phases and release gates are recorded in the
 
 [PyPI package](https://pypi.org/project/multisim-mcp/) ·
 [Official MCP Registry entry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
-[`1.3.0` release notes](docs/RELEASE_NOTES_v1.3.0.md)
+[`1.3.1` release notes](docs/RELEASE_NOTES_v1.3.1.md)
 
 The `v1.2.0` release exposes 78 tools, 20 resource templates, and five
 bilingual prompts. It adds approval-gated design planning, diagnosis and patch
@@ -42,12 +42,12 @@ evaluation, global optimization, autonomous correction, Multisim/ngspice
 differential validation, and recoverable jobs. See the
 [release notes](docs/RELEASE_NOTES_v1.2.0.md).
 
-The `1.3.0` release branch currently exposes 123 tools in its `full` profile.
+The `1.3.1` release branch currently exposes 123 tools in its `full` profile.
 The public package and registry publication remain separate release steps.
 
 The release branch has passed the local public-artifact and target compatibility checks.
 The final Windows/Linux CI run and the PyPI, MCP Registry, and npm publication checks
-remain required before calling `1.3.0` publicly released.
+remain required before calling `1.3.1` publicly released.
 
 ## End-to-end workflow
 
