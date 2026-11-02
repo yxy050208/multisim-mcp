@@ -3205,6 +3205,11 @@ def _make_junction_pins(
     owner.set("Transformer-M20", f"{x:g}")
     owner.set("Transformer-M21", f"{y:g}")
     _clear(owner.find("./ConnectList"))
+    # Keep the movable junction anchor in ReferencedComponents as well as
+    # Objects.  Without this placeholder Multisim can show a connected wire
+    # until the user moves a component, then reparse the endpoints as a
+    # floating junction.  Native SaveAs writes this reference automatically.
+    _add_placeholder(refs, owner_item)
     member_ids: list[str] = []
     for _ in range(count):
         member_item = _deepcopy(_load_template("junction_member.xml"))

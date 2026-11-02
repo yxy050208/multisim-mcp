@@ -89,5 +89,39 @@ class GeneratedAnalogTest(unittest.TestCase):
             self.assertTrue(package_ids.issubset({p.get('CompLongName') for p in root.findall('.//CSourceSymbolCollectNode')}))
 
 
+    def test_multi_drop_junction_owners_are_referenced_for_drag_safe_editing(self):
+        """Keep junction anchors in the references table used by Multisim's GUI."""
+        if not any((p / 'minimal.ms14.xml').is_file() for p in template_search_paths()):
+            self.skipTest('requires a licensed local template pack')
+        netlist = (
+            'V1 in 0 DC 1\n'
+            'R1 in n 1k\n'
+            'R2 n 0 1k\n'
+            'R3 n 0 2k\n'
+            '.end\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'junctions.xml'
+            build_schematic(netlist, path, probe_nets=[])
+            root = ET.parse(path).getroot()
+
+        referenced_ids = {
+            item.get('ID')
+            for refs in root.iter('ReferencedComponents')
+            for item in refs
+            if item.get('ID')
+        }
+        owners = []
+        for item in root.iter('Item'):
+            pin = item.find('./CODPinComp')
+            links = pin.find('./ConnectList') if pin is not None else None
+            if links is not None and len(links.findall('./Item')) >= 2:
+                owners.append(item)
+
+        self.assertGreaterEqual(len(owners), 2)
+        for owner in owners:
+            self.assertIn(owner.get('ID'), referenced_ids)
+
+
 if __name__ == '__main__':
     unittest.main()
