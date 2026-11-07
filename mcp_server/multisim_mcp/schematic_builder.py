@@ -2423,7 +2423,7 @@ def _set_symbol_labels(
                 value_item.set("Output", f"&ASC{display_value}V ")
             elif kind == "I":
                 value_item.set("Output", f"&ASC{display_value}A ")
-            elif kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8", "CD4017"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
+            elif kind in {"QNPN", "QPNP"} or kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8", "CD4017"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
                 value_item.set("Output", _asc(display_value))
             elif kind.startswith("D"):
                 value_item.set("Output", _asc(display_value))
@@ -3947,6 +3947,95 @@ def _orientation_matrix(orientation: str) -> dict[str, str] | None:
     return dict(_ORIENTATION_MATRICES[canonical])
 
 
+# Native NPN/PNP carrier model cards.  The QNPN template embeds a 2N3904 card,
+# so a netlist that names another part of the family would otherwise keep both
+# the 2N3904 model name and its parameters -- the schematic would say 2N3904 and
+# the simulation would run a 2N3904.  Only cards listed here are substituted;
+# any other model name keeps the carrier default and stays reported as a
+# warning.  These are generic published family cards, not vendor-certified
+# models: run native acceptance before signing a design off.
+_NATIVE_MODEL_CARDS: dict[str, str] = {
+    "2N3903": (
+        "NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=140.6 Ne=1.259 Ise=6.734E-15 "
+        "Ikf=1.147 Isc=0 Nk=1.774 Br=7.5 Ikr=0 Rc=1.5 Cjc=5.167p Mjc=.3937 "
+        "Vjc=.75 Fc=.5 Cje=13.97p Mje=.3394 Vje=.7161 Tr=239.5n Tf=301.2p "
+        "Itf=.4 Vtf=4 Xtf=2 Rb=10)"
+    ),
+}
+# Names the carrier templates themselves use; renamed when a card is applied.
+_CARRIER_MODEL_NAMES = {"2N3904", "2N3903"}
+
+
+def _apply_native_model_card(element_item: ET.Element, model_name: str) -> bool:
+    """Rename the carrier's embedded ``.MODEL`` card to ``model_name``.
+
+    Returns ``True`` only when a known card was substituted, so callers can keep
+    reporting the honest "represented by the native template model" warning for
+    every part they cannot model.
+    """
+    name = (model_name or "").strip().upper()
+    card = _NATIVE_MODEL_CARDS.get(name)
+    if card is None:
+        return False
+    applied = False
+    for item in element_item.iter("Item"):
+        value = item.get("Value")
+        if not value:
+            continue
+        # The codec stores ASCII payload strings behind an "&ASC" escape; keep
+        # whatever prefix the template used and match on the decoded text.
+        prefix = "&ASC" if value.startswith("&ASC") else ""
+        token = value[len(prefix):].strip()
+        if token.upper().startswith(".MODEL"):
+            item.set("Value", f"{prefix}.MODEL {name} {card}")
+            applied = True
+        elif token.upper() in _CARRIER_MODEL_NAMES:
+            item.set("Value", f"{prefix}{name}")
+            applied = True
+    return applied
+
+
+def _rename_bound_model(root: ET.Element, model_ciid: str, model_name: str) -> bool:
+    """Rename the ``<CiModel>`` object bound to one component.
+
+    The element template only carries a *cached* copy of the card; Multisim
+    resolves ``%m`` from the CiModel object, so the simulation is governed by the
+    ``<CiModel>`` written here.  Only the model referenced by ``model_ciid`` is
+    touched, so a design that legitimately mixes 2N3904 and 2N3903 keeps both.
+    """
+    name = (model_name or "").strip().upper()
+    card = _NATIVE_MODEL_CARDS.get(name)
+    if card is None or not model_ciid:
+        return False
+    applied = False
+    # The CiID lives on the wrapping <Item>, not on <CiModel> itself.
+    for item in root.iter("Item"):
+        model = item.find("./CiModel")
+        if model is None or item.get("CiID") != model_ciid:
+            continue
+        local = model.get("LocalName", "")
+        prefix = "&ASC" if local.startswith("&ASC") else ""
+        raw = local[len(prefix):]
+        suffix = raw[raw.find("__"):] if "__" in raw else ""
+        model.set("LocalName", f"{prefix}{name}{suffix}")
+        old_base = raw.split("__")[0]
+        for node in model.iter():
+            for attribute in ("String", "Value"):
+                value = node.get(attribute)
+                if not value:
+                    continue
+                if ".MODEL" in value.upper():
+                    string_prefix = "&ASC" if value.startswith("&ASC") else ""
+                    node.set(attribute, f"{string_prefix}.MODEL {name}{suffix} {card}")
+                    applied = True
+                elif old_base and old_base in value:
+                    # Plain part-name slots (model metadata) follow the rename.
+                    node.set(attribute, value.replace(old_base, name))
+                    applied = True
+        applied = True
+    return applied
+
+
 def build_schematic(
     netlist: str,
     output_path: str | Path,
@@ -4079,6 +4168,7 @@ def build_schematic(
 
     max_component_x = 0.0
     max_component_y = 0.0
+    model_card_overrides: list[str] = []
     for component_index, spec in enumerate(specs):
         definition = COMPONENT_DEFINITIONS[spec.kind]
         # One native model object per instance, exactly as Multisim itself
@@ -4220,6 +4310,22 @@ def build_schematic(
                 spec.model if len(spec.model) <= 48 else spec.model[:45] + "..."
             )
         _set_symbol_labels(symbol_item, spec.kind, spec.refdes + ("A" if spec.kind in NATIVE_OPAMP_MODELS else ""), symbol_display)
+        if (
+            spec.kind in {"QNPN", "QPNP"}
+            and spec.model
+            and _apply_native_model_card(element_item, spec.model)
+        ):
+            # Rewrite the bound <CiModel> too: the element copy alone does not
+            # govern the simulation, and the symbol must show the real part.
+            _rename_bound_model(root, str(comp.get("Model") or ""), spec.model)
+            symbol_display = spec.model.strip().upper()
+            _set_symbol_labels(
+                symbol_item,
+                spec.kind,
+                spec.refdes + ("A" if spec.kind in NATIVE_OPAMP_MODELS else ""),
+                symbol_display,
+            )
+            model_card_overrides.append(spec.refdes)
 
         display_value = spec.value
         numeric_value = None
@@ -4564,6 +4670,11 @@ def build_schematic(
         f"expanded for editable simulation: {item['reason']}"
         for item in parsed.subcircuit_expansion_failures
     )
+    for refdes in model_card_overrides:
+        model_warnings.append(
+            f"{refdes}: model card renamed to the requested part; the card is a "
+            "generic published family model, not a vendor-certified one"
+        )
     for spec in parsed.components:
         if spec.kind in NATIVE_OPAMP_MODELS:
             model_warnings.append(f"{spec.refdes}: local {spec.kind} / {NATIVE_OPAMP_MODELS[spec.kind]} macromodel, section A of a separate package; native topology and electrical acceptance are still required")
@@ -4575,6 +4686,7 @@ def build_schematic(
             and spec.model
             and not spec.model_definition
             and spec.model.upper() not in aliases
+            and spec.refdes not in model_card_overrides
         ):
             model_warnings.append(
                 f"{spec.refdes}: requested model {spec.model!r} is represented by "
@@ -4768,6 +4880,7 @@ def build_schematic(
         },
         "unsupported": parsed.unsupported,
         "model_warnings": model_warnings,
+        "model_card_overrides": model_card_overrides,
         "layout_validation": layout_validation,
         "sheet": {
             "width_px_96dpi": sheet_width,
