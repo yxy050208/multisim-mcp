@@ -194,6 +194,9 @@ class SchematicRequest:
     min_sheet_size: tuple[float, float] | None = None
     verify: bool = True
     require_layout_pass: bool = False
+    # refdes -> "vertical" | "vertical-flip" | "horizontal-flip" | "native".
+    # The builder rotates the symbol and its pins together, so wiring follows.
+    component_orientations: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.design, CircuitDesign):

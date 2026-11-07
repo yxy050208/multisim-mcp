@@ -3900,6 +3900,53 @@ def _add_virtual_instrument_state(
     instruments_data.append(state)
 
 
+# Requested symbol orientation -> Multisim Transformer matrix.  The native
+# orientation is whatever the carrier template was extracted with, and it is not
+# uniform: most passives are horizontal, while the capacitor carrier is already
+# rotated.  ``native`` therefore means "leave the template untouched".
+_ORIENTATION_MATRICES: dict[str, dict[str, str]] = {
+    "vertical": {"M00": "0", "M01": "1", "M10": "-1", "M11": "0"},
+    "vertical-flip": {"M00": "0", "M01": "-1", "M10": "1", "M11": "0"},
+    "horizontal-flip": {"M00": "-1", "M01": "0", "M10": "0", "M11": "-1"},
+}
+_ORIENTATION_ALIASES: dict[str, str] = {
+    "": "native",
+    "native": "native",
+    "h": "native",
+    "horizontal": "native",
+    "0": "native",
+    "v": "vertical",
+    "vertical": "vertical",
+    "90": "vertical",
+    "v-flip": "vertical-flip",
+    "vertical-flip": "vertical-flip",
+    "270": "vertical-flip",
+    "h-flip": "horizontal-flip",
+    "horizontal-flip": "horizontal-flip",
+    "180": "horizontal-flip",
+}
+
+
+def _orientation_matrix(orientation: str) -> dict[str, str] | None:
+    """Map a requested orientation name onto a Multisim ``Transformer`` matrix.
+
+    ``native`` returns ``None`` so the carrier template keeps the orientation it
+    was extracted with. Rotating a symbol also moves its pins, because
+    :func:`_symbol_pin_info` transforms pin connectors through the same matrix;
+    the wire router therefore follows the rotation without further changes.
+    """
+    key = (orientation or "").strip().lower()
+    canonical = _ORIENTATION_ALIASES.get(key)
+    if canonical is None:
+        allowed = ", ".join(sorted({k for k in _ORIENTATION_ALIASES if k}))
+        raise ValueError(
+            f"unsupported component orientation {orientation!r}; expected one of: {allowed}"
+        )
+    if canonical == "native":
+        return None
+    return dict(_ORIENTATION_MATRICES[canonical])
+
+
 def build_schematic(
     netlist: str,
     output_path: str | Path,
@@ -3907,6 +3954,7 @@ def build_schematic(
     probe_nets: list[str] | None = None,
     component_positions: dict[str, Any] | None = None,
     min_sheet_size: tuple[float, float] | None = None,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build an editable Multisim XML design from a simple SPICE netlist.
 
@@ -3978,6 +4026,19 @@ def build_schematic(
     specs = list(parsed.components)
     if parsed.grounded:
         specs.append(ComponentSpec(kind="GND", refdes="0", nodes=["0"]))
+
+    if component_orientations:
+        known_refdes = {spec.refdes for spec in specs}
+        unknown_refdes = sorted(set(component_orientations) - known_refdes)
+        if unknown_refdes:
+            raise ValueError(
+                "component_orientations references unknown refdes: "
+                + ", ".join(unknown_refdes)
+            )
+        # Validate every requested orientation up front so a typo fails before
+        # any file is written.
+        for requested in component_orientations.values():
+            _orientation_matrix(str(requested))
 
     grid_columns = min(6, max(2, math.ceil(math.sqrt(max(1, len(specs))))))
     grid_origin_x = 36
@@ -4185,23 +4246,44 @@ def build_schematic(
             rotation = {'M00':'-1','M01':'0','M10':'0','M11':'-1'} if spec.kind == 'D' else {'M00':'0','M01':'-1','M10':'1','M11':'0'} if spec.kind == 'C' else {'M00':'0','M01':'1','M10':'-1','M11':'0'}
             for key,value in rotation.items():
                 sym.set('Transformer-'+key,value)
+        # A caller-supplied orientation is applied last so it wins over the
+        # topology-profile defaults, and its pins move with the symbol: the
+        # router reads geometry from the already-transformed symbol.
+        requested_orientation = (component_orientations or {}).get(spec.refdes)
+        orientation_matrix = (
+            _orientation_matrix(str(requested_orientation))
+            if requested_orientation is not None
+            else None
+        )
+        if orientation_matrix:
+            for key, value in orientation_matrix.items():
+                sym.set("Transformer-" + key, value)
         pin_info = _symbol_pin_info(symbol_item)
         if pin_info:
             center_x = (min(p['local_x'] for p in pin_info.values()) + max(p['local_x'] for p in pin_info.values())) / 2
             center_y = (min(p['local_y'] for p in pin_info.values()) + max(p['local_y'] for p in pin_info.values())) / 2
-            if (ce_profile and (spec.kind == "C" or spec.refdes in ce_profile["vertical"])) or (rectifier_profile and spec.kind in {'D','C','R'}):
+            # A user-requested orientation rotates the symbol like a native
+            # vertical carrier, so its labels need the same counter-rotation.
+            # Two-terminal passives keep their labels beside the body.
+            rotated_by_request = orientation_matrix is not None
+            side_labels = bool(
+                spec.kind == "R"
+                or rectifier_profile
+                or (rotated_by_request and spec.kind in {"R", "L", "C"})
+            )
+            if rotated_by_request or (ce_profile and (spec.kind == "C" or spec.refdes in ce_profile["vertical"])) or (rectifier_profile and spec.kind in {'D','C','R'}):
                 # Counter-rotate only text; geometry and electrical pins keep
                 # the native rotation. Values remain readable horizontally.
                 a, b, c, d = [float(sym.get("Transformer-"+k)) for k in ("M00","M01","M10","M11")]
                 for tag, offset in (("CIITSymTextCompName", -9), ("CIITSymTextCompValue", 9)):
                     label = sym.find("./Objects/Item/" + tag)
                     if label is not None:
-                        px = center_x + (18 if spec.kind == "R" or rectifier_profile else 0)
-                        py = center_y + (offset if spec.kind == "R" or rectifier_profile else -27 if offset < 0 else 27)
+                        px = center_x + (18 if side_labels else 0)
+                        py = center_y + (offset if side_labels else -27 if offset < 0 else 27)
                         for key, value in {"M00":a,"M01":c,"M10":b,"M11":d,
                                            "M20":a*px+b*py,"M21":c*px+d*py}.items():
                             label.set("Transformer-"+key, f"{value:g}")
-                        label.set("HorizontalAlign", "0" if spec.kind == "R" or rectifier_profile else "1")
+                        label.set("HorizontalAlign", "0" if side_labels else "1")
             # Normalize vendor artwork saved with internal drawing offsets.
             dx, dy = round((center_x - 63) / 9) * 9, round((center_y - 54) / 9) * 9
             sym.set('Transformer-M20', f'{x-dx:g}')

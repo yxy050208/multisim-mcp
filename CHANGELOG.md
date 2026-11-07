@@ -18,6 +18,14 @@
   `dsh.profile.bundles`；`@deepseek-ai/dsh-mcp-client` 必须与宿主 `runtime.json`
   的 `desktopVersion` 同版本（含 `pnpm-workspace.yaml` override）。
 
+- 新增 `component_orientations`：`create_schematic_from_netlist`、
+  `validate_layout_positions` 与 `build_schematic` 现在可以按位号指定器件朝向
+  （`vertical`、`vertical-flip`、`horizontal-flip`、`native`）。符号矩阵与引脚几何
+  同步旋转，因此布线器、几何校验和拓扑回读自动跟随，无需额外改动。此前只有
+  `R`/`C`/`D` 的拓扑专用 profile 会竖放器件，任意网表只能得到全横排的排版。
+  未知位号与非法朝向在写文件前失败关闭；旋转器件的位号/数值文字保持水平可读。
+  新增测试 `tests/test_component_orientations.py`。
+
 ### English
 
 - Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
@@ -32,6 +40,17 @@
 - Documented two silent DeepSeek Harness install failures: the bundle must be listed
   in `dsh.profile.bundles`, and `@deepseek-ai/dsh-mcp-client` must match the host
   `runtime.json` `desktopVersion` (including the `pnpm-workspace.yaml` override).
+
+- Added `component_orientations` to `build_schematic`,
+  `create_schematic_from_netlist` and `validate_layout_positions`: refdes ->
+  `vertical` | `vertical-flip` | `horizontal-flip` | `native`. The symbol matrix
+  and its pin geometry rotate together, so the wire router, the geometry
+  validator and the topology read-back all follow without further changes.
+  Previously only the topology-specific profiles rotated `R`/`C`/`D`, so an
+  arbitrary netlist could only be laid out with every passive horizontal.
+  Unknown refdes and unsupported orientation values fail closed before any file
+  is written, and rotated parts keep their reference/value text horizontal.
+  Adds `tests/test_component_orientations.py`.
 
 ## [1.3.0] - 2026-10-25
 

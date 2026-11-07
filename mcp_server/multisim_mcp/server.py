@@ -2280,6 +2280,7 @@ def _create_schematic_impl(
     min_sheet_size: tuple[float, float] | None = None,
     verify: bool = True,
     require_layout_pass: bool = False,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict:
     validate_spice_netlist(netlist)
     parsed = parse_netlist(netlist)
@@ -2318,6 +2319,7 @@ def _create_schematic_impl(
         probe_nets=selected_probes,
         component_positions=component_positions,
         min_sheet_size=min_sheet_size,
+        component_orientations=component_orientations,
     )
     # Persist the deterministic geometry preflight next to the editable
     # schematic so later import/repair steps can inspect the exact build.
@@ -3171,6 +3173,7 @@ def create_schematic_from_netlist(
     sheet_size: list[float] | None = None,
     verify: bool = True,
     require_layout_pass: bool = False,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict:
     """Create an editable Multisim schematic from a supported SPICE netlist.
 
@@ -3188,6 +3191,14 @@ def create_schematic_from_netlist(
     (example: {"R1": [36, 117]}).  Listed components are placed exactly there
     before the wire router runs, so all wiring follows; unlisted components
     keep the deterministic auto-layout.
+
+    ``component_orientations`` optionally maps refdes -> orientation
+    (``"vertical"``, ``"vertical-flip"``, ``"horizontal-flip"``, or
+    ``"native"``).  The symbol matrix and its pin geometry are rotated together,
+    so the wire router and the layout validator follow automatically; this is
+    what allows a resistor chain to be drawn vertically like a hand-drawn
+    schematic instead of the horizontal-only default.  Orientations are applied
+    after the topology-profile defaults, so they win.
 
     When ``executable_netlist`` and ``netlist_approval`` are both supplied,
     the approval is revalidated against the immutable compiled preview before
@@ -3235,6 +3246,7 @@ def create_schematic_from_netlist(
             min_sheet_size=tuple(sheet_size) if sheet_size else None,
             verify=verify,
             require_layout_pass=require_layout_pass,
+            component_orientations=component_orientations,
         ),
     )
     result = _eda_compatibility_result(execution)
@@ -4750,6 +4762,7 @@ def validate_layout_positions(
     output_ms14: str | None = None,
     include_experimental_probes: bool = False,
     overwrite: bool = False,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict:
     """Dry-run a custom layout and report geometry findings in seconds.
 
@@ -4776,6 +4789,7 @@ def validate_layout_positions(
             moves=moves,
             max_candidates=max_candidates,
             fixed_refdes=fixed_refdes or (),
+            component_orientations=component_orientations,
         )
         if materialize:
             result["materialized"] = component_placement.materialize_layout_positions(
@@ -4793,6 +4807,7 @@ def validate_layout_positions(
         positions=positions,
         sheet_size=tuple(sheet_size) if sheet_size else None,
         probe_nets=probe_nets,
+        component_orientations=component_orientations,
     )
 
 
