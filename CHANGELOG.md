@@ -26,6 +26,13 @@
   未知位号与非法朝向在写文件前失败关闭；旋转器件的位号/数值文字保持水平可读。
   新增测试 `tests/test_component_orientations.py`。
 
+- 新增电位器（`POT`）原生载体支持：`POT <refdes> <end1> <wiper> <end2> <value>
+  [percent]` 语句把三个端子显式写出，避免猜端子顺序；阻值写入参数槽 5、滑动百分比
+  写入交互参数块与符号的 "NN %" 标题，并把百分比文字反向旋转以保持水平可读。非数值或
+  越界百分比在写文件前失败关闭。载体模板需由用户从自己的授权工程提取
+  （`tools/extract_native_component_templates.py`），仓库不分发 NI 元件资产。
+  新增测试 `tests/test_potentiometer.py`。
+
 ### English
 
 - Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
@@ -51,6 +58,16 @@
   Unknown refdes and unsupported orientation values fail closed before any file
   is written, and rotated parts keep their reference/value text horizontal.
   Adds `tests/test_component_orientations.py`.
+
+- Added a native potentiometer (`POT`) carrier: the statement
+  `POT <refdes> <end1> <wiper> <end2> <value> [percent]` names the three terminals
+  explicitly instead of guessing their order. The resistance is written into
+  parameter slot 5, the wiper percentage into the interactive parameter block and
+  the symbol's "NN %" caption, and that caption is counter-rotated so it stays
+  readable. Non-numeric or out-of-range percentages fail closed before any file
+  is written. The carrier templates must be extracted from the user's own
+  licensed design (tools/extract_native_component_templates.py); the repository
+  does not ship NI component assets. Adds tests/test_potentiometer.py.
 
 ## [1.3.0] - 2026-10-25
 

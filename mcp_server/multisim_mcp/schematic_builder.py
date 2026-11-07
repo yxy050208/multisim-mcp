@@ -114,6 +114,14 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         "R", "r_element.xml", "sym_r.xml", ("r_port1.xml", "r_port2.xml"),
         306, 189, 135, "ohm",
     ),
+    # Three-terminal linear potentiometer.  SPICE has no potentiometer element,
+    # so the netlist form is the schematic-carrier statement documented in
+    # parse_netlist: POT <refdes> <end1> <wiper> <end2> <value> [percent].
+    "POT": ComponentDefinition(
+        "POT", "pot_element.xml", "sym_pot.xml",
+        ("pot_port1.xml", "pot_port2.xml", "pot_port3.xml"),
+        306, 189, 135, "ohm",
+    ),
     "C": ComponentDefinition(
         "C", "c_element.xml", "sym_c.xml", ("c_port1.xml", "c_port2.xml"),
         306, 324, 135, "F",
@@ -1157,6 +1165,20 @@ def parse_netlist(text: str) -> ParsedNetlist:
             continue
         refdes = parts[0]
         kind = refdes[0].upper()
+        if refdes.upper() == "POT" and len(parts) >= 6:
+            # POT <refdes> <end1> <wiper> <end2> <value> [percent]
+            # SPICE has no potentiometer element, so this statement names the
+            # three native terminals explicitly instead of guessing an order.
+            parsed.components.append(
+                ComponentSpec(
+                    kind="POT",
+                    refdes=parts[1],
+                    nodes=[_normalize_net(item)[0] for item in parts[2:5]],
+                    value=parts[5],
+                    parameters=[parts[6]] if len(parts) > 6 else [],
+                )
+            )
+            continue
         if kind in {"R", "C", "L"} and len(parts) >= 4:
             parsed.components.append(
                 ComponentSpec(
@@ -2413,7 +2435,7 @@ def _set_symbol_labels(
             "./Objects/Item[@Class='CIITSymTextCompValue']/CIITSymTextCompValue"
         )
         if value_item is not None:
-            if kind == "R":
+            if kind in {"R", "POT"}:
                 value_item.set("Output", f"&UNI{display_value}_uc103a9")
             elif kind == "L":
                 value_item.set("Output", f"&UNI{display_value}_uc100b5H")
@@ -2429,6 +2451,67 @@ def _set_symbol_labels(
                 value_item.set("Output", _asc(display_value))
             elif kind == "K":
                 value_item.set("Output", _asc(f"k={display_value}"))
+
+
+def _apply_pot_values(
+    element_item: ET.Element,
+    symbol_item: ET.Element,
+    display_value: str,
+    percent: float,
+) -> None:
+    """Write the resistance and wiper percentage into the native pot carrier.
+
+    The potentiometer stores its resistance in parameter slot 5, its position in
+    the interactive parameter block ("min;value;") and its "NN %" caption as a
+    symbol text output, so all three have to agree or Multisim shows a pot that
+    disagrees with the netlist.
+    """
+    rendered = _asc(display_value)
+    comp = element_item.find("./CiComponent")
+    if comp is not None:
+        param_list = comp.find(".//CiaParamList")
+        if param_list is not None:
+            parameters = param_list.findall("./parameters/Item")
+            if len(parameters) > 5:
+                parameters[5].set("Value", rendered)
+        attributes = comp.findall("./Attributes/Item")
+        if len(attributes) > 42:
+            for index, value in ((41, rendered), (42, f"&UNI{display_value}_uc103a9")):
+                node = attributes[index].find("./CiaCString")
+                if node is not None:
+                    node.set("String", value)
+    for item in element_item.iter("Item"):
+        value = item.get("Value") or ""
+        if not value.startswith("&ASC") or not value.endswith(";"):
+            continue
+        pieces = value[4:].split(";")
+        if len(pieces) < 3 or not pieces[0].replace(".", "", 1).isdigit():
+            continue
+        item.set("Value", f"&ASC{float(pieces[0]):.6f};{percent:.6f};")
+    symbol = symbol_item.find("./CIITSymbolComp")
+    if symbol is not None:
+        a = float(symbol.get("Transformer-M00") or 1)
+        b = float(symbol.get("Transformer-M01") or 0)
+        c = float(symbol.get("Transformer-M10") or 0)
+        d = float(symbol.get("Transformer-M11") or 1)
+        rotated = (a, b, c, d) != (1.0, 0.0, 0.0, 1.0)
+        caption = f"&ASC{percent:g} %"
+        for node in symbol.iter():
+            output = node.get("Output")
+            if not output or not output.rstrip().endswith("%"):
+                continue
+            node.set("Output", caption)
+            if rotated:
+                # The caption inherits the symbol rotation; transpose it back so
+                # "50 %" stays readable, exactly like the name/value labels.
+                ox = float(node.get("Transformer-M20") or 0)
+                oy = float(node.get("Transformer-M21") or 0)
+                node.set("Transformer-M00", f"{a:g}")
+                node.set("Transformer-M01", f"{c:g}")
+                node.set("Transformer-M10", f"{b:g}")
+                node.set("Transformer-M11", f"{d:g}")
+                node.set("Transformer-M20", f"{a * ox + b * oy:g}")
+                node.set("Transformer-M21", f"{c * ox + d * oy:g}")
 
 
 def _configure_component_semantics(
@@ -4398,6 +4481,26 @@ def build_schematic(
                 pin['right_facing'] = pin['local_x'] > center_x
                 pin['local_x'] -= dx
                 pin['local_y'] -= dy
+        if spec.kind == "POT":
+            # Applied once the symbol matrix is final, so the "%" caption can be
+            # counter-rotated, and with a locally parsed display value because
+            # this statement runs before the shared display_value assignment.
+            raw_percent = (spec.parameters or ["50"])[0]
+            try:
+                percent_value = float(raw_percent)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{spec.refdes}: potentiometer percentage must be numeric, "
+                    f"got {raw_percent!r}"
+                ) from exc
+            if not 0.0 <= percent_value <= 100.0:
+                raise ValueError(
+                    f"{spec.refdes}: potentiometer percentage must be within 0..100"
+                )
+            pot_display = (
+                parse_spice_value(spec.value)[1] if spec.value is not None else ""
+            )
+            _apply_pot_values(element_item, symbol_item, pot_display, percent_value)
         objects.append(symbol_item)
         _add_placeholder(refs, symbol_item)
         component_items.append(element_item)
