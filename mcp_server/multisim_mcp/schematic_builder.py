@@ -114,6 +114,14 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
         "R", "r_element.xml", "sym_r.xml", ("r_port1.xml", "r_port2.xml"),
         306, 189, 135, "ohm",
     ),
+    # Three-terminal linear potentiometer.  SPICE has no potentiometer element,
+    # so the netlist form is the schematic-carrier statement documented in
+    # parse_netlist: POT <refdes> <end1> <wiper> <end2> <value> [percent].
+    "POT": ComponentDefinition(
+        "POT", "pot_element.xml", "sym_pot.xml",
+        ("pot_port1.xml", "pot_port2.xml", "pot_port3.xml"),
+        306, 189, 135, "ohm",
+    ),
     "C": ComponentDefinition(
         "C", "c_element.xml", "sym_c.xml", ("c_port1.xml", "c_port2.xml"),
         306, 324, 135, "F",
@@ -1157,6 +1165,20 @@ def parse_netlist(text: str) -> ParsedNetlist:
             continue
         refdes = parts[0]
         kind = refdes[0].upper()
+        if refdes.upper() == "POT" and len(parts) >= 6:
+            # POT <refdes> <end1> <wiper> <end2> <value> [percent]
+            # SPICE has no potentiometer element, so this statement names the
+            # three native terminals explicitly instead of guessing an order.
+            parsed.components.append(
+                ComponentSpec(
+                    kind="POT",
+                    refdes=parts[1],
+                    nodes=[_normalize_net(item)[0] for item in parts[2:5]],
+                    value=parts[5],
+                    parameters=[parts[6]] if len(parts) > 6 else [],
+                )
+            )
+            continue
         if kind in {"R", "C", "L"} and len(parts) >= 4:
             parsed.components.append(
                 ComponentSpec(
@@ -2413,7 +2435,7 @@ def _set_symbol_labels(
             "./Objects/Item[@Class='CIITSymTextCompValue']/CIITSymTextCompValue"
         )
         if value_item is not None:
-            if kind == "R":
+            if kind in {"R", "POT"}:
                 value_item.set("Output", f"&UNI{display_value}_uc103a9")
             elif kind == "L":
                 value_item.set("Output", f"&UNI{display_value}_uc100b5H")
@@ -2423,12 +2445,73 @@ def _set_symbol_labels(
                 value_item.set("Output", f"&ASC{display_value}V ")
             elif kind == "I":
                 value_item.set("Output", f"&ASC{display_value}A ")
-            elif kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8", "CD4017"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
+            elif kind in {"QNPN", "QPNP"} or kind in {"E", "F", "G", "H", "BV", "BI", "T", "TIMER8", "DFF8", "CD4017"} or kind.startswith("XSUB") or kind in NATIVE_OPAMP_MODELS:
                 value_item.set("Output", _asc(display_value))
             elif kind.startswith("D"):
                 value_item.set("Output", _asc(display_value))
             elif kind == "K":
                 value_item.set("Output", _asc(f"k={display_value}"))
+
+
+def _apply_pot_values(
+    element_item: ET.Element,
+    symbol_item: ET.Element,
+    display_value: str,
+    percent: float,
+) -> None:
+    """Write the resistance and wiper percentage into the native pot carrier.
+
+    The potentiometer stores its resistance in parameter slot 5, its position in
+    the interactive parameter block ("min;value;") and its "NN %" caption as a
+    symbol text output, so all three have to agree or Multisim shows a pot that
+    disagrees with the netlist.
+    """
+    rendered = _asc(display_value)
+    comp = element_item.find("./CiComponent")
+    if comp is not None:
+        param_list = comp.find(".//CiaParamList")
+        if param_list is not None:
+            parameters = param_list.findall("./parameters/Item")
+            if len(parameters) > 5:
+                parameters[5].set("Value", rendered)
+        attributes = comp.findall("./Attributes/Item")
+        if len(attributes) > 42:
+            for index, value in ((41, rendered), (42, f"&UNI{display_value}_uc103a9")):
+                node = attributes[index].find("./CiaCString")
+                if node is not None:
+                    node.set("String", value)
+    for item in element_item.iter("Item"):
+        value = item.get("Value") or ""
+        if not value.startswith("&ASC") or not value.endswith(";"):
+            continue
+        pieces = value[4:].split(";")
+        if len(pieces) < 3 or not pieces[0].replace(".", "", 1).isdigit():
+            continue
+        item.set("Value", f"&ASC{float(pieces[0]):.6f};{percent:.6f};")
+    symbol = symbol_item.find("./CIITSymbolComp")
+    if symbol is not None:
+        a = float(symbol.get("Transformer-M00") or 1)
+        b = float(symbol.get("Transformer-M01") or 0)
+        c = float(symbol.get("Transformer-M10") or 0)
+        d = float(symbol.get("Transformer-M11") or 1)
+        rotated = (a, b, c, d) != (1.0, 0.0, 0.0, 1.0)
+        caption = f"&ASC{percent:g} %"
+        for node in symbol.iter():
+            output = node.get("Output")
+            if not output or not output.rstrip().endswith("%"):
+                continue
+            node.set("Output", caption)
+            if rotated:
+                # The caption inherits the symbol rotation; transpose it back so
+                # "50 %" stays readable, exactly like the name/value labels.
+                ox = float(node.get("Transformer-M20") or 0)
+                oy = float(node.get("Transformer-M21") or 0)
+                node.set("Transformer-M00", f"{a:g}")
+                node.set("Transformer-M01", f"{c:g}")
+                node.set("Transformer-M10", f"{b:g}")
+                node.set("Transformer-M11", f"{d:g}")
+                node.set("Transformer-M20", f"{a * ox + b * oy:g}")
+                node.set("Transformer-M21", f"{c * ox + d * oy:g}")
 
 
 def _configure_component_semantics(
@@ -3900,6 +3983,142 @@ def _add_virtual_instrument_state(
     instruments_data.append(state)
 
 
+# Requested symbol orientation -> Multisim Transformer matrix.  The native
+# orientation is whatever the carrier template was extracted with, and it is not
+# uniform: most passives are horizontal, while the capacitor carrier is already
+# rotated.  ``native`` therefore means "leave the template untouched".
+_ORIENTATION_MATRICES: dict[str, dict[str, str]] = {
+    "vertical": {"M00": "0", "M01": "1", "M10": "-1", "M11": "0"},
+    "vertical-flip": {"M00": "0", "M01": "-1", "M10": "1", "M11": "0"},
+    "horizontal-flip": {"M00": "-1", "M01": "0", "M10": "0", "M11": "-1"},
+}
+_ORIENTATION_ALIASES: dict[str, str] = {
+    "": "native",
+    "native": "native",
+    "h": "native",
+    "horizontal": "native",
+    "0": "native",
+    "v": "vertical",
+    "vertical": "vertical",
+    "90": "vertical",
+    "v-flip": "vertical-flip",
+    "vertical-flip": "vertical-flip",
+    "270": "vertical-flip",
+    "h-flip": "horizontal-flip",
+    "horizontal-flip": "horizontal-flip",
+    "180": "horizontal-flip",
+}
+
+
+def _orientation_matrix(orientation: str) -> dict[str, str] | None:
+    """Map a requested orientation name onto a Multisim ``Transformer`` matrix.
+
+    ``native`` returns ``None`` so the carrier template keeps the orientation it
+    was extracted with. Rotating a symbol also moves its pins, because
+    :func:`_symbol_pin_info` transforms pin connectors through the same matrix;
+    the wire router therefore follows the rotation without further changes.
+    """
+    key = (orientation or "").strip().lower()
+    canonical = _ORIENTATION_ALIASES.get(key)
+    if canonical is None:
+        allowed = ", ".join(sorted({k for k in _ORIENTATION_ALIASES if k}))
+        raise ValueError(
+            f"unsupported component orientation {orientation!r}; expected one of: {allowed}"
+        )
+    if canonical == "native":
+        return None
+    return dict(_ORIENTATION_MATRICES[canonical])
+
+
+# Native NPN/PNP carrier model cards.  The QNPN template embeds a 2N3904 card,
+# so a netlist that names another part of the family would otherwise keep both
+# the 2N3904 model name and its parameters -- the schematic would say 2N3904 and
+# the simulation would run a 2N3904.  Only cards listed here are substituted;
+# any other model name keeps the carrier default and stays reported as a
+# warning.  These are generic published family cards, not vendor-certified
+# models: run native acceptance before signing a design off.
+_NATIVE_MODEL_CARDS: dict[str, str] = {
+    "2N3903": (
+        "NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=140.6 Ne=1.259 Ise=6.734E-15 "
+        "Ikf=1.147 Isc=0 Nk=1.774 Br=7.5 Ikr=0 Rc=1.5 Cjc=5.167p Mjc=.3937 "
+        "Vjc=.75 Fc=.5 Cje=13.97p Mje=.3394 Vje=.7161 Tr=239.5n Tf=301.2p "
+        "Itf=.4 Vtf=4 Xtf=2 Rb=10)"
+    ),
+}
+# Names the carrier templates themselves use; renamed when a card is applied.
+_CARRIER_MODEL_NAMES = {"2N3904", "2N3903"}
+
+
+def _apply_native_model_card(element_item: ET.Element, model_name: str) -> bool:
+    """Rename the carrier's embedded ``.MODEL`` card to ``model_name``.
+
+    Returns ``True`` only when a known card was substituted, so callers can keep
+    reporting the honest "represented by the native template model" warning for
+    every part they cannot model.
+    """
+    name = (model_name or "").strip().upper()
+    card = _NATIVE_MODEL_CARDS.get(name)
+    if card is None:
+        return False
+    applied = False
+    for item in element_item.iter("Item"):
+        value = item.get("Value")
+        if not value:
+            continue
+        # The codec stores ASCII payload strings behind an "&ASC" escape; keep
+        # whatever prefix the template used and match on the decoded text.
+        prefix = "&ASC" if value.startswith("&ASC") else ""
+        token = value[len(prefix):].strip()
+        if token.upper().startswith(".MODEL"):
+            item.set("Value", f"{prefix}.MODEL {name} {card}")
+            applied = True
+        elif token.upper() in _CARRIER_MODEL_NAMES:
+            item.set("Value", f"{prefix}{name}")
+            applied = True
+    return applied
+
+
+def _rename_bound_model(root: ET.Element, model_ciid: str, model_name: str) -> bool:
+    """Rename the ``<CiModel>`` object bound to one component.
+
+    The element template only carries a *cached* copy of the card; Multisim
+    resolves ``%m`` from the CiModel object, so the simulation is governed by the
+    ``<CiModel>`` written here.  Only the model referenced by ``model_ciid`` is
+    touched, so a design that legitimately mixes 2N3904 and 2N3903 keeps both.
+    """
+    name = (model_name or "").strip().upper()
+    card = _NATIVE_MODEL_CARDS.get(name)
+    if card is None or not model_ciid:
+        return False
+    applied = False
+    # The CiID lives on the wrapping <Item>, not on <CiModel> itself.
+    for item in root.iter("Item"):
+        model = item.find("./CiModel")
+        if model is None or item.get("CiID") != model_ciid:
+            continue
+        local = model.get("LocalName", "")
+        prefix = "&ASC" if local.startswith("&ASC") else ""
+        raw = local[len(prefix):]
+        suffix = raw[raw.find("__"):] if "__" in raw else ""
+        model.set("LocalName", f"{prefix}{name}{suffix}")
+        old_base = raw.split("__")[0]
+        for node in model.iter():
+            for attribute in ("String", "Value"):
+                value = node.get(attribute)
+                if not value:
+                    continue
+                if ".MODEL" in value.upper():
+                    string_prefix = "&ASC" if value.startswith("&ASC") else ""
+                    node.set(attribute, f"{string_prefix}.MODEL {name}{suffix} {card}")
+                    applied = True
+                elif old_base and old_base in value:
+                    # Plain part-name slots (model metadata) follow the rename.
+                    node.set(attribute, value.replace(old_base, name))
+                    applied = True
+        applied = True
+    return applied
+
+
 def build_schematic(
     netlist: str,
     output_path: str | Path,
@@ -3907,6 +4126,7 @@ def build_schematic(
     probe_nets: list[str] | None = None,
     component_positions: dict[str, Any] | None = None,
     min_sheet_size: tuple[float, float] | None = None,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Build an editable Multisim XML design from a simple SPICE netlist.
 
@@ -3979,6 +4199,19 @@ def build_schematic(
     if parsed.grounded:
         specs.append(ComponentSpec(kind="GND", refdes="0", nodes=["0"]))
 
+    if component_orientations:
+        known_refdes = {spec.refdes for spec in specs}
+        unknown_refdes = sorted(set(component_orientations) - known_refdes)
+        if unknown_refdes:
+            raise ValueError(
+                "component_orientations references unknown refdes: "
+                + ", ".join(unknown_refdes)
+            )
+        # Validate every requested orientation up front so a typo fails before
+        # any file is written.
+        for requested in component_orientations.values():
+            _orientation_matrix(str(requested))
+
     grid_columns = min(6, max(2, math.ceil(math.sqrt(max(1, len(specs))))))
     grid_origin_x = 36
     grid_origin_y = 117
@@ -4018,6 +4251,7 @@ def build_schematic(
 
     max_component_x = 0.0
     max_component_y = 0.0
+    model_card_overrides: list[str] = []
     for component_index, spec in enumerate(specs):
         definition = COMPONENT_DEFINITIONS[spec.kind]
         # One native model object per instance, exactly as Multisim itself
@@ -4159,6 +4393,22 @@ def build_schematic(
                 spec.model if len(spec.model) <= 48 else spec.model[:45] + "..."
             )
         _set_symbol_labels(symbol_item, spec.kind, spec.refdes + ("A" if spec.kind in NATIVE_OPAMP_MODELS else ""), symbol_display)
+        if (
+            spec.kind in {"QNPN", "QPNP"}
+            and spec.model
+            and _apply_native_model_card(element_item, spec.model)
+        ):
+            # Rewrite the bound <CiModel> too: the element copy alone does not
+            # govern the simulation, and the symbol must show the real part.
+            _rename_bound_model(root, str(comp.get("Model") or ""), spec.model)
+            symbol_display = spec.model.strip().upper()
+            _set_symbol_labels(
+                symbol_item,
+                spec.kind,
+                spec.refdes + ("A" if spec.kind in NATIVE_OPAMP_MODELS else ""),
+                symbol_display,
+            )
+            model_card_overrides.append(spec.refdes)
 
         display_value = spec.value
         numeric_value = None
@@ -4185,23 +4435,44 @@ def build_schematic(
             rotation = {'M00':'-1','M01':'0','M10':'0','M11':'-1'} if spec.kind == 'D' else {'M00':'0','M01':'-1','M10':'1','M11':'0'} if spec.kind == 'C' else {'M00':'0','M01':'1','M10':'-1','M11':'0'}
             for key,value in rotation.items():
                 sym.set('Transformer-'+key,value)
+        # A caller-supplied orientation is applied last so it wins over the
+        # topology-profile defaults, and its pins move with the symbol: the
+        # router reads geometry from the already-transformed symbol.
+        requested_orientation = (component_orientations or {}).get(spec.refdes)
+        orientation_matrix = (
+            _orientation_matrix(str(requested_orientation))
+            if requested_orientation is not None
+            else None
+        )
+        if orientation_matrix:
+            for key, value in orientation_matrix.items():
+                sym.set("Transformer-" + key, value)
         pin_info = _symbol_pin_info(symbol_item)
         if pin_info:
             center_x = (min(p['local_x'] for p in pin_info.values()) + max(p['local_x'] for p in pin_info.values())) / 2
             center_y = (min(p['local_y'] for p in pin_info.values()) + max(p['local_y'] for p in pin_info.values())) / 2
-            if (ce_profile and (spec.kind == "C" or spec.refdes in ce_profile["vertical"])) or (rectifier_profile and spec.kind in {'D','C','R'}):
+            # A user-requested orientation rotates the symbol like a native
+            # vertical carrier, so its labels need the same counter-rotation.
+            # Two-terminal passives keep their labels beside the body.
+            rotated_by_request = orientation_matrix is not None
+            side_labels = bool(
+                spec.kind == "R"
+                or rectifier_profile
+                or (rotated_by_request and spec.kind in {"R", "L", "C"})
+            )
+            if rotated_by_request or (ce_profile and (spec.kind == "C" or spec.refdes in ce_profile["vertical"])) or (rectifier_profile and spec.kind in {'D','C','R'}):
                 # Counter-rotate only text; geometry and electrical pins keep
                 # the native rotation. Values remain readable horizontally.
                 a, b, c, d = [float(sym.get("Transformer-"+k)) for k in ("M00","M01","M10","M11")]
                 for tag, offset in (("CIITSymTextCompName", -9), ("CIITSymTextCompValue", 9)):
                     label = sym.find("./Objects/Item/" + tag)
                     if label is not None:
-                        px = center_x + (18 if spec.kind == "R" or rectifier_profile else 0)
-                        py = center_y + (offset if spec.kind == "R" or rectifier_profile else -27 if offset < 0 else 27)
+                        px = center_x + (18 if side_labels else 0)
+                        py = center_y + (offset if side_labels else -27 if offset < 0 else 27)
                         for key, value in {"M00":a,"M01":c,"M10":b,"M11":d,
                                            "M20":a*px+b*py,"M21":c*px+d*py}.items():
                             label.set("Transformer-"+key, f"{value:g}")
-                        label.set("HorizontalAlign", "0" if spec.kind == "R" or rectifier_profile else "1")
+                        label.set("HorizontalAlign", "0" if side_labels else "1")
             # Normalize vendor artwork saved with internal drawing offsets.
             dx, dy = round((center_x - 63) / 9) * 9, round((center_y - 54) / 9) * 9
             sym.set('Transformer-M20', f'{x-dx:g}')
@@ -4210,6 +4481,26 @@ def build_schematic(
                 pin['right_facing'] = pin['local_x'] > center_x
                 pin['local_x'] -= dx
                 pin['local_y'] -= dy
+        if spec.kind == "POT":
+            # Applied once the symbol matrix is final, so the "%" caption can be
+            # counter-rotated, and with a locally parsed display value because
+            # this statement runs before the shared display_value assignment.
+            raw_percent = (spec.parameters or ["50"])[0]
+            try:
+                percent_value = float(raw_percent)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{spec.refdes}: potentiometer percentage must be numeric, "
+                    f"got {raw_percent!r}"
+                ) from exc
+            if not 0.0 <= percent_value <= 100.0:
+                raise ValueError(
+                    f"{spec.refdes}: potentiometer percentage must be within 0..100"
+                )
+            pot_display = (
+                parse_spice_value(spec.value)[1] if spec.value is not None else ""
+            )
+            _apply_pot_values(element_item, symbol_item, pot_display, percent_value)
         objects.append(symbol_item)
         _add_placeholder(refs, symbol_item)
         component_items.append(element_item)
@@ -4482,6 +4773,11 @@ def build_schematic(
         f"expanded for editable simulation: {item['reason']}"
         for item in parsed.subcircuit_expansion_failures
     )
+    for refdes in model_card_overrides:
+        model_warnings.append(
+            f"{refdes}: model card renamed to the requested part; the card is a "
+            "generic published family model, not a vendor-certified one"
+        )
     for spec in parsed.components:
         if spec.kind in NATIVE_OPAMP_MODELS:
             model_warnings.append(f"{spec.refdes}: local {spec.kind} / {NATIVE_OPAMP_MODELS[spec.kind]} macromodel, section A of a separate package; native topology and electrical acceptance are still required")
@@ -4493,6 +4789,7 @@ def build_schematic(
             and spec.model
             and not spec.model_definition
             and spec.model.upper() not in aliases
+            and spec.refdes not in model_card_overrides
         ):
             model_warnings.append(
                 f"{spec.refdes}: requested model {spec.model!r} is represented by "
@@ -4686,6 +4983,7 @@ def build_schematic(
         },
         "unsupported": parsed.unsupported,
         "model_warnings": model_warnings,
+        "model_card_overrides": model_card_overrides,
         "layout_validation": layout_validation,
         "sheet": {
             "width_px_96dpi": sheet_width,

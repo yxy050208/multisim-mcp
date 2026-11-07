@@ -27,6 +27,51 @@ dsh --profile web --dump-config
 `npm pack .\integrations\deepseek-harness --ignore-scripts` 生成 `.tgz`，再把该
 tarball 的绝对路径交给 `dsh plugin ... add`，以验证与最终发布相同的包边界。
 
+### 安装陷阱（实测记录，务必逐条核对）
+
+只执行 `dsh plugin ... add` 常常**不会**让 `mcp__multisim__*` 出现，而且
+**不产生任何错误日志**——工具就是静默缺失。以下两条是硬性要求。
+
+**① bundle 必须进入 `dsh.profile.bundles`。**
+`pnpm add` / `dsh plugin add` 只会写进 `dependencies`，而 profile 目录下
+`cordis.yml` 的规则是"由 `dsh.profile.bundles` 中每个 bundle 的 patch，再加
+`cordis.patch.yml`"组成。只进 `dependencies` 的包，其 `cordis.patch.yml`
+不会被执行。确认 `profiles/<profile>/package.json` 里有：
+
+```json
+"dsh": {
+  "profile": {
+    "bundles": ["...", "multisim-mcp-dsh-plugin"]
+  }
+}
+```
+
+**② `@deepseek-ai/dsh-mcp-client` 必须与宿主同版本。**
+该包有 9 个 peer 依赖全部指向宿主核心包（`cordis`、`dsh-llm`、`dsh-scope`、
+`dsh-tools`、`dsh-timeout`、`dsh-attachment`、`dsh-subprocess`、
+`dsh-mcp-resources`、`dsh-system-prompt`），靠宿主路由解析。宿主版本由
+`~/.dsh/dsh-runtimes/dsh-primary-runtime/runtime.json` 的 `desktopVersion`
+给出；profile 中安装的 client 及 `pnpm-workspace.yaml` 里的 override 必须与之
+一致，否则节点激活失败且依然无日志：
+
+```powershell
+(Get-Content "$env:USERPROFILE\.dsh\dsh-runtimes\dsh-primary-runtime\runtime.json" -Raw |
+  ConvertFrom-Json).desktopVersion     # 例：0.2.1-rc.3
+```
+
+```yaml
+# pnpm-workspace.yaml
+overrides:
+  '@deepseek-ai/dsh-mcp-client': 0.2.1-rc.3   # 与上面的 desktopVersion 相同
+```
+
+已验证的症状：宿主自动升级到 `0.2.1-rc.3` 而 override 仍固定 `0.2.1-rc.2` 时，
+所有 `mcp__multisim__*` 变为 unknown tool；把 override 与实装版本同步到
+`0.2.1-rc.3` 并重启 profile 后立即恢复（同 profile 下 92 个工具全部注册，进程链为
+`DSH host → python -m multisim_mcp.server → com_worker`）。
+
+因为宿主小版本会随 Harness 更新变化，升级 Harness 后请重新核对这两条。
+
 维护者发布前必须运行 Registry 与包边界守卫。首次发布需要本地 2FA；后续版本使用
 OIDC 暂存并由维护者 2FA 审批。完整步骤见
 [`docs/DEEPSEEK_HARNESS_NPM_RELEASE.md`](../../docs/DEEPSEEK_HARNESS_NPM_RELEASE.md)。
