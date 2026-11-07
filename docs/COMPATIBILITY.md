@@ -27,6 +27,23 @@
 另保留实部、虚部与相位供 Bode 等复数感知工具使用。中文 PDF 使用
 标准 CJK CID 字体描述，极少数缺少 CJK 字体资源的查看器可能需要安装中文字体。
 
+## Multisim 14.0 的 API 限制（实测）
+
+2026-11-04 与 2026-11-07 分别在 Multisim 14.0 和 14.3 上做了对照实测：
+
+| 调用 | 14.0 | 14.3 |
+| --- | --- | --- |
+| `ReportNetlist(path, False, 0)` | 对任意文档均返回 `E_ACCESSDENIED`（-2147024891），包括 NI 自带样例；改用相对路径调用还会令 COM 进程崩溃（0xC0000005） | 正常 |
+| `ReportBOM(...)` | 同样 `E_ACCESSDENIED` | 正常 |
+| `GetCircuitImage(...)` | 正常 | 正常 |
+| `EnumComponents` 与 `DoCommandLine` 命令引擎 | 正常 | 正常 |
+
+由于 `Report*` 一族整体被拒，14.0 上无法取得网表级回读证据。当前实现把该失败降级为
+`verification.netlist_export.available=false`，并把拓扑与引脚比对记为 `unverified`，
+使 `run_circuit_experiment` 与自然语言工程入口在此版本上仍可使用；14.3 上的严格校验
+行为保持不变。此外，`components-14.3.json` 之外没有 14.0 的器件映射表，代码按设计
+不静默回退，因此依赖映射表的工程向导在 14.0 上仍不可用。
+
 ## Release gate
 
 标记为“真实门槛进行中”的适配器在完成 Multisim 14.3 打开、反向网表和仿真回归前

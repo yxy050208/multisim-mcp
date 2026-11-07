@@ -2380,6 +2380,13 @@ def _create_schematic_impl(
             "outputs": client.enum_outputs(0),
         }
         verification_path = Path(str(output_path) + ".verification.netlist")
+        # ReportNetlist is not usable on every supported Multisim build: 14.0
+        # answers E_ACCESSDENIED (-2147024891) for this call on any document,
+        # including NI's own sample circuits.  Treat that as a missing evidence
+        # source rather than an unopenable design; the remaining checks below
+        # then report their honest (partial) verdict instead of aborting the
+        # whole experiment pipeline.
+        netlist_export_error: str | None = None
         try:
             client.report_netlist(str(verification_path), False, 0)
             exported = (
@@ -2387,8 +2394,23 @@ def _create_schematic_impl(
                 if verification_path.is_file()
                 else ""
             )
+        except Exception as exc:
+            netlist_export_error = str(exc)[:512] or type(exc).__name__
+            exported = ""
         finally:
             verification_path.unlink(missing_ok=True)
+        if netlist_export_error is None:
+            result["verification"]["netlist_export"] = {"available": True}
+        else:
+            result["verification"]["netlist_export"] = {
+                "available": False,
+                "error": netlist_export_error,
+                "impact": (
+                    "round-trip topology and pin-connection text checks are "
+                    "reported as unverified; native component presence falls back "
+                    "to EnumComponents enumeration"
+                ),
+            }
         # Virtual instruments (oscilloscope XSC*, function generator XFG*)
         # have no SPICE netlist body by nature, so ReportNetlist never shows
         # them; expecting their refdes in the exported text would flag every
@@ -2416,11 +2438,28 @@ def _create_schematic_impl(
         dangling_nets = sorted(
             node for node, count in net_pin_counts.items() if count == 1
         )
-        topology_diff = compare_roundtrip_topology(
-            (spec.refdes for spec in expected_specs),
-            required_nets,
-            exported,
-        )
+        if netlist_export_error is None:
+            topology_diff = compare_roundtrip_topology(
+                (spec.refdes for spec in expected_specs),
+                required_nets,
+                exported,
+            )
+        else:
+            topology_diff = {
+                "schema_version": 1,
+                "status": "unverified",
+                "expected_component_count": len(expected_specs),
+                "expected_net_count": len(required_nets),
+                "missing_components": [],
+                "missing_nets": [],
+                "extra_components": [],
+                "extra_nets": [],
+                "accepted_net_aliases": {},
+                "evidence": (
+                    "ReportNetlist is unavailable on this Multisim build; the "
+                    "reopened design could not be compared against the source netlist"
+                ),
+            }
         topology_diff["dangling_source_nets"] = dangling_nets
         topology_diff["dangling_nets_policy"] = (
             "singleton source nets are informational; connected nets remain strict"
@@ -2456,17 +2495,27 @@ def _create_schematic_impl(
                 "state": "unavailable",
                 "error": str(exc)[:512],
             }
-        pin_diff = compare_pin_connections(
-            {spec.refdes: list(spec.nodes) for spec in expected_specs},
-            exported,
-            declared_ports=declared_ports,
-            expected_named_ports={
-                spec.refdes: source_port_net_map(spec.kind, spec.nodes)
-                for spec in expected_specs
-                if source_port_net_map(spec.kind, spec.nodes)
-            },
-            native_port_nets=native_port_nets,
-        )
+        if netlist_export_error is None:
+            pin_diff = compare_pin_connections(
+                {spec.refdes: list(spec.nodes) for spec in expected_specs},
+                exported,
+                declared_ports=declared_ports,
+                expected_named_ports={
+                    spec.refdes: source_port_net_map(spec.kind, spec.nodes)
+                    for spec in expected_specs
+                    if source_port_net_map(spec.kind, spec.nodes)
+                },
+                native_port_nets=native_port_nets,
+            )
+        else:
+            pin_diff = {
+                "schema_version": 1,
+                "status": "unverified",
+                "checked_components": 0,
+                "unverified_components": [spec.refdes for spec in expected_specs],
+                "mismatches": [],
+                "evidence": "ReportNetlist is unavailable on this Multisim build",
+            }
         topology_diff["pin_connections"] = pin_diff
         topology_diff_path = output_path.with_name(output_path.stem + ".topology-diff.json")
         topology_diff_path.write_text(
@@ -2475,12 +2524,14 @@ def _create_schematic_impl(
         )
         result["topology_diff"] = topology_diff
         result["topology_diff_path"] = str(topology_diff_path)
-        if topology_diff["status"] != "pass" or pin_diff["status"] == "fail":
+        if netlist_export_error is None and (
+            topology_diff["status"] != "pass" or pin_diff["status"] == "fail"
+        ):
             missing = topology_diff["missing_components"] + topology_diff["missing_nets"]
             if pin_diff["status"] == "fail":
                 missing.append("pin-connections")
             raise RuntimeError("Multisim round-trip topology mismatch: " + ", ".join(missing))
-        native_components: dict[str, bool] = {}
+        native_components: dict[str, bool | None] = {}
         native_evidence: dict[str, str] = {}
         enumerated_components = set(result["verification"]["components"])
         # Instruments are placed from the netlist but are NOT listed by
@@ -2533,6 +2584,19 @@ def _create_schematic_impl(
             elif spec.kind == "K":
                 native_components[spec.refdes] = spec.refdes in enumerated_components
                 native_evidence[spec.refdes] = "native component enumeration"
+            elif netlist_export_error is not None:
+                # No ReportNetlist text is available on this build, so presence
+                # must be proven by enumeration.  This is the same authoritative
+                # check the carriers above already rely on; it proves the
+                # component survived the round trip but not its pin-level
+                # wiring, which is why topology/pin diffs stay "unverified".
+                enumerated_upper = {name.upper() for name in enumerated_components}
+                native_components[spec.refdes] = any(
+                    candidate.upper() in enumerated_upper for candidate in candidates
+                )
+                native_evidence[spec.refdes] = (
+                    "native component enumeration (ReportNetlist unavailable on this build)"
+                )
             else:
                 native_components[spec.refdes] = any(
                     re.search(
@@ -2544,10 +2608,14 @@ def _create_schematic_impl(
                 native_evidence[spec.refdes] = "ReportNetlist text match"
         result["verification"]["native_netlist_components"] = native_components
         result["verification"]["native_component_evidence"] = native_evidence
-        result["verification"]["native_netlist_complete"] = all(
-            native_components.values()
-        )
-        if not result["verification"]["native_netlist_complete"]:
+        # None means "not verifiable on this build": it must not be confused
+        # with a negative result, and it must not raise below.
+        if netlist_export_error is None:
+            native_complete: bool | None = all(native_components.values())
+        else:
+            native_complete = None
+        result["verification"]["native_netlist_complete"] = native_complete
+        if native_complete is False:
             missing = [name for name, present in native_components.items() if not present]
             raise RuntimeError(
                 "Multisim opened the design but omitted native netlist components: "

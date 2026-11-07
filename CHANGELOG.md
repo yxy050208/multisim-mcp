@@ -8,9 +8,30 @@
 
 - 后续变更将在下一版本记录；发布分支中的 1.3.0 内容已冻结，等待 CI、标签和在线发布物核验。
 
+- 修复 Multisim 14.0 上 `ReportNetlist` 失败会让整条成图/实验流水线中断的问题：
+  `_create_schematic_impl` 现在把该调用失败当作"证据源缺失"处理，拓扑与引脚比对记为
+  `unverified`，原生器件存在性回退到 `EnumComponents` 枚举，并新增
+  `verification.netlist_export` 记录原始错误与影响；`native_netlist_complete` 用
+  `null` 表示"本版本无法验证"，不与会失败的 `false` 混淆。新增回归测试
+  `tests/test_report_netlist_degraded.py`，覆盖降级路径与严格路径。
+- 补充 DeepSeek Harness 安装的两个静默失败原因：bundle 必须列入
+  `dsh.profile.bundles`；`@deepseek-ai/dsh-mcp-client` 必须与宿主 `runtime.json`
+  的 `desktopVersion` 同版本（含 `pnpm-workspace.yaml` override）。
+
 ### English
 
 - Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
+
+- Fixed: a failing `ReportNetlist` no longer aborts the whole schematic/experiment
+  pipeline. Multisim 14.0 answers `E_ACCESSDENIED` for that call on every document,
+  including NI's own samples. Round-trip topology and pin checks are now reported as
+  `unverified`, native component presence falls back to `EnumComponents`,
+  `verification.netlist_export` records the error and its impact, and
+  `native_netlist_complete` uses `null` for "not verifiable on this build" instead of
+  a failing `false`. Adds `tests/test_report_netlist_degraded.py`.
+- Documented two silent DeepSeek Harness install failures: the bundle must be listed
+  in `dsh.profile.bundles`, and `@deepseek-ai/dsh-mcp-client` must match the host
+  `runtime.json` `desktopVersion` (including the `pnpm-workspace.yaml` override).
 
 ## [1.3.0] - 2026-10-25
 
