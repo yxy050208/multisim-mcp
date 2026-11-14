@@ -6,13 +6,35 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from multisim_mcp.schematic_builder import build_schematic
+from multisim_mcp.schematic_builder import build_schematic, template_search_paths
 
 NETLIST = "V1 c 0 DC 12\nR1 c b 100k\nQ1 c b 0 2N3903\n.end\n"
 
 
 class NativeModelCardTest(unittest.TestCase):
     def setUp(self) -> None:
+        required = (
+            "minimal.ms14.xml",
+            "wire.xml",
+            "v_element.xml",
+            "sym_v.xml",
+            "v_port1.xml",
+            "v_port2.xml",
+            "r_element.xml",
+            "sym_r.xml",
+            "r_port1.xml",
+            "r_port2.xml",
+            "qnpn_element.xml",
+            "sym_qnpn.xml",
+            "qnpn_port1.xml",
+            "qnpn_port2.xml",
+            "qnpn_port3.xml",
+        )
+        if not all(
+            any((path / name).is_file() for path in template_search_paths())
+            for name in required
+        ):
+            self.skipTest("requires a licensed local template pack")
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
 
