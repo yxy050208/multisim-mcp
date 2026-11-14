@@ -146,7 +146,19 @@ class GeneratedWorkflowTests(unittest.TestCase):
             self.assertEqual(b['layout_validation']['status'],'pass',b['layout_validation'])
             self.assertEqual(b['counts']['components'],15)
             for probe in b['probes']:
-                self.assertIn((probe['x'],probe['y']),b['geometry']['pins'][probe['net']])
+                self.assertIn(
+                    [probe['x'], probe['y']],
+                    b['geometry']['probe_points'][probe['net']],
+                )
+                self.assertTrue(
+                    any(
+                        (start[0] == end[0] == probe['x'] and min(start[1], end[1]) <= probe['y'] <= max(start[1], end[1]))
+                        or (start[1] == end[1] == probe['y'] and min(start[0], end[0]) <= probe['x'] <= max(start[0], end[0]))
+                        for path in b['geometry']['wires'][probe['net']]
+                        for start, end in zip(path, path[1:])
+                    ),
+                    probe,
+                )
             settings={e.get('Key'):e.find('Item').get('Value') for e in ET.parse(path).findall('.//CircPrefs/CIITCircuitPrefs/Settings/Element') if e.find('Item') is not None}
             self.assertGreater(float(settings['&ASCSheet Width'].removeprefix('&ASC')),960)
             self.assertGreater(float(settings['&ASCSheet Height'].removeprefix('&ASC')),720)

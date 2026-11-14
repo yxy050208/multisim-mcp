@@ -8,7 +8,7 @@
 让 AI Agent 根据实验要求自动生成 Multisim 电路、运行仿真、提取实验数据，并导出
 电路图、CSV、波形图和实验报告。
 
-> 当前 `release/v1.3.0` 分支正在完成稳定版发布门禁；在线 PyPI、MCP Registry 和 DSH 状态会在发布后分别核对。项目非 NI 官方产品，需要本机安装并授权
+> 当前 `release/v1.3.1` 分支正在完成稳定版发布门禁；在线 PyPI、MCP Registry 和 DSH 状态会在发布后分别核对。项目非 NI 官方产品，需要本机安装并授权
 > Multisim 14+；COM 在独立 32 位 Python worker 中运行，MCP 前端可使用 32 或 64 位
 > Python。
 
@@ -31,7 +31,7 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 当前仅实测 Multisim 14.3；新工程仍需图面复核，不代表第二阶段全部完成。
 
 当前发布分支的准确变更、验证结果和发布边界见
-[`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md)；已发布的 rc1 仍保留在
+[`1.3.1 发布说明`](docs/RELEASE_NOTES_v1.3.1.md)；已发布的 rc1 仍保留在
 [`rc1 发布说明`](docs/RELEASE_NOTES_v1.3.0rc1.md)。
 
 后续源码开发新增 [桥式整流原生插件工作流](docs/RECTIFIER_NATIVE_ACCEPTANCE.md)：
@@ -53,7 +53,7 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 逐针连接、布局、接口比较和报告导出。该证据只覆盖当前案例、元件族和 Multisim 14.3；
 其他连接器、版本或更复杂的多板拓扑仍需独立 manifest 与实机验收。
 
-> `v1.3.0` 仍是发布分支中的 MCP Core 版本：包含 Python MCP 服务、CLI、EDA 核心、
+> `v1.3.1` 是包含 Issue #41 修复的 MCP Core 修复版本：包含 Python MCP 服务、CLI、EDA 核心、
 > 模型适配、测试和文档；React Workbench 仍是独立的可选本地工作台。发布前不把
 > 本地模板、Multisim 工程或实验输出放入公开工件。
 
@@ -62,11 +62,11 @@ OP/AC、完整电路图和报告导出。已在 Multisim 14.3 实测两级（14 
 [PyPI 安装包](https://pypi.org/project/multisim-mcp/) ·
 [官方 MCP Registry 条目](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.yxy050208%2Fmultisim-mcp) ·
 [DeepSeek Harness npm 插件](https://www.npmjs.com/package/multisim-mcp-dsh-plugin) ·
-[`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md)
+[`1.3.1 发布说明`](docs/RELEASE_NOTES_v1.3.1.md)
 
 ## 开源发布状态
 
-`v1.2.0` 的历史发布说明仍保留用于迁移参考；`v1.3.0` 的 PyPI、MCP Registry、GitHub
+`v1.2.0` 和 `v1.3.0` 的历史发布说明仍保留用于迁移参考；`v1.3.1` 的 PyPI、MCP Registry、GitHub
 Release 和 npm bundle 必须在各自工作流完成后独立核对。由本地 NI
 样例提取的 XML 模板不属于
 MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需要运行
@@ -75,20 +75,20 @@ MIT 代码授权范围，公开仓库默认不应包含这些文件。用户需�
 请不要上传 `analysis/`、`.ms14`、解码 XML、类型库转储、实验输出或当前包含 142 个
 本地模板的开发 wheel。完整发布步骤见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
-`1.3.0` 发布分支已经通过当前本地的公开工件和目标兼容性检查；完整 GitHub Actions、PyPI、
+`1.3.1` 发布分支已经通过当前本地的公开工件和目标兼容性检查；完整 GitHub Actions、PyPI、
 MCP Registry 和 npm 发布仍是待执行门禁。
 发布流程仍将 npm bundle、PyPI 核心和 MCP Registry 作为三个独立发布物；npm 的
 `latest`/`next` 标签必须在 Trusted Publishing 完成后再核对，不由源码提交自动宣称。
 
-历史 `v1.2.0` 的 78 工具兼容面仍受支持；`1.3.0` 将在同一安全边界内加入已验证的
-布局、双板、模型来源和 Agent 工作流能力，具体以 [`1.3.0 发布说明`](docs/RELEASE_NOTES_v1.3.0.md) 为准。
+历史 `v1.2.0` 的 78 工具兼容面仍受支持；`1.3.0` 的已验证布局、双板、模型来源和 Agent 工作流能力在
+`1.3.1` 修复版中继续保持，具体以 [`1.3.1 发布说明`](docs/RELEASE_NOTES_v1.3.1.md) 为准。
 
 开发分支新增只读的 `review_design_requirements` 需求契约审查：在基线实验前区分硬约束、
 软目标、偏好和假设，并拦截同一信号上的明显冲突。接口说明见
 [`需求契约审查`](docs/REQUIREMENT_ENGINEERING.md)。
 开发分支还新增 `bind_requirement_review_to_design`，把契约绑定到已有设计快照并报告
 缺失信号与可优化参数，以及 `snapshot_open_circuit` 的 COM 导入快照入口；已发布的
-`v1.2.0` 仍保持 78 个工具，当前 `1.3.0` 发布分支的 `full` profile 为 123 个工具。
+`v1.2.0` 仍保持 78 个工具，当前 `1.3.1` 发布分支的 `full` profile 为 123 个工具。
 
 开发分支已提供 [自然语言 RC/RLC/OPAMP 工程入口](docs/NATURAL_ENGINEERING.md)：从明确的中文/英文需求生成
 可编辑 Multisim 工程，原生仿真并比较 E24 候选，导出带验收状态的报告。当前为有限规则解析，
