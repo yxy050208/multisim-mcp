@@ -22,12 +22,31 @@ def _overlap(a: Mapping[str, float], b: Mapping[str, float], margin: float) -> b
     )
 
 
+def _point_on_segment(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+    *,
+    tolerance: float = 0.01,
+) -> bool:
+    """Return whether a point lies on an axis-aligned wire segment."""
+    px, py = point
+    sx, sy = start
+    ex, ey = end
+    if abs(sx - ex) <= tolerance:
+        return abs(px - sx) <= tolerance and min(sy, ey) - tolerance <= py <= max(sy, ey) + tolerance
+    if abs(sy - ey) <= tolerance:
+        return abs(py - sy) <= tolerance and min(sx, ex) - tolerance <= px <= max(sx, ex) + tolerance
+    return False
+
+
 def validate_schematic_geometry(
     components: Sequence[Mapping[str, Any]],
     wires: Mapping[str, Sequence[Sequence[tuple[float, float]]]],
     *,
     pin_points: Mapping[str, Sequence[tuple[float, float]]] | None = None,
     pin_exits: Mapping[str, Sequence[tuple[tuple[float,float],tuple[float,float]]]] | None = None,
+    probe_points: Mapping[str, Sequence[tuple[float, float]]] | None = None,
     component_width: float = 126.0,
     component_height: float = 108.0,
     clearance: float = 12.0,
@@ -83,6 +102,7 @@ def validate_schematic_geometry(
                 })
 
     pin_points = pin_points or {}
+    probe_points = probe_points or {}
     for net, paths in wires.items():
         for path in paths:
             try:
@@ -193,6 +213,46 @@ def validate_schematic_geometry(
                     legacy_anchor = not pin_points and (endpoint_on_boundary or endpoint_inside)
                     if crosses and not allowed_pin_exit and not legacy_anchor:
                         findings.append({"severity": "error", "code": "wire-crosses-component", "net": str(net), "refdes": component["refdes"]})
+
+    # Probes may intentionally sit at a safe interior point of a wire.  They
+    # must still be attached to the requested net's geometry; checking them
+    # against pin endpoints alone rejects valid midpoint probes and misses
+    # genuinely floating probe symbols.
+    for net, points in probe_points.items():
+        paths = wires.get(str(net), ())
+        for raw_point in points:
+            try:
+                if len(raw_point) != 2:
+                    raise ValueError
+                point = (float(raw_point[0]), float(raw_point[1]))
+            except (TypeError, ValueError, IndexError):
+                findings.append({"severity": "error", "code": "invalid-probe-point", "net": str(net)})
+                continue
+            if not all(math.isfinite(value) for value in point):
+                findings.append({"severity": "error", "code": "invalid-probe-point", "net": str(net), "point": list(point)})
+                continue
+            on_wire = False
+            for path in paths:
+                try:
+                    normalized_path = [
+                        (float(item[0]), float(item[1]))
+                        for item in path
+                    ]
+                except (TypeError, ValueError, IndexError):
+                    continue
+                if any(
+                    _point_on_segment(point, start, end)
+                    for start, end in zip(normalized_path, normalized_path[1:])
+                ):
+                    on_wire = True
+                    break
+            if not on_wire:
+                findings.append({
+                    "severity": "error",
+                    "code": "probe-off-wire",
+                    "net": str(net),
+                    "point": [point[0], point[1]],
+                })
 
     segments: list[tuple[str, tuple[float, float], tuple[float, float]]] = []
     for net, paths in wires.items():

@@ -92,6 +92,23 @@ class LayoutValidationTest(unittest.TestCase):
                     & {"invalid-wire-point", "degenerate-wire"}
                 )
 
+    def test_accepts_probe_on_wire_interior(self) -> None:
+        result = validate_schematic_geometry(
+            [],
+            {"out": [[(0, 0), (100, 0)]]},
+            probe_points={"out": [(50, 0)]},
+        )
+        self.assertEqual(result["status"], "pass", result)
+
+    def test_rejects_probe_that_is_not_on_requested_net(self) -> None:
+        result = validate_schematic_geometry(
+            [],
+            {"out": [[(0, 0), (100, 0)]]},
+            probe_points={"out": [(50, 20)]},
+        )
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("probe-off-wire", {item["code"] for item in result["findings"]})
+
 
 if __name__ == "__main__":
     unittest.main()

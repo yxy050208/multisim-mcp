@@ -2,14 +2,30 @@
 
 本项目遵循语义化版本的预发布形式。中文为主要说明，英文摘要紧随其后。
 
+## [1.3.1] - 2026-11-02
+
+### 中文
+
+- 修复多分支网络 junction owner 未写入 `ReferencedComponents` 的问题。生成的 Multisim 图纸在拖动元件后不再把正常连接重新解析为悬空节点。
+- 为该问题增加回归测试，并同步发布 PyPI、MCP Registry 与 DeepSeek Harness npm 修复版本。
+
+### English
+
+- Fix multi-drop junction owners missing from `ReferencedComponents`, which could turn apparently connected wires into floating nodes after a component was dragged in Multisim.
+- Add a drag-safe regression test and publish the repair through PyPI, the MCP Registry, and the DeepSeek Harness npm bundle.
+
 ## [Unreleased]
 
 ### 中文
 
+- 修复组合模拟几何测试把探针错误地当作元件引脚端点的问题。探针现在按“落在对应网络导线”校验，合法的线段内部探针不会被误报，真正悬空的探针会失败关闭；构建结果新增 `geometry.probe_points` 供下游复核。
+- 修正本地 `LM324AJ` 载体的正负供电端子绑定：网表中的 `VS+`、`VS-` 现在按语义顺序连接，避免从授权模板提取后出现 VCC/VSS 反接；已在 Multisim 14.3 原生 OP/AC/TRAN 验收中复核。
 - 后续变更将在下一版本记录；发布分支中的 1.3.0 内容已冻结，等待 CI、标签和在线发布物核验。
 
 ### English
 
+- Fix composed-analog geometry validation treating probes as component pin endpoints. Probes are now validated against the requested net's wire paths, safe interior probes are accepted, floating probes fail closed, and build results expose `geometry.probe_points` for downstream checks.
+- Fix local `LM324AJ` carrier supply binding: netlist `VS+` and `VS-` now follow semantic order, preventing VCC/VSS reversal with freshly extracted licensed templates; verified by native Multisim 14.3 OP/AC/TRAN acceptance.
 - Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
 
 ## [1.3.0] - 2026-10-25

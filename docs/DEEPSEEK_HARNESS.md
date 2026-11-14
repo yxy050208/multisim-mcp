@@ -207,17 +207,17 @@ Workflow seam 更适合由模型生成编排脚本和子代理的动态任务，
 仓库同时提供可独立安装的 bundle 源码：
 [`integrations/deepseek-harness`](../integrations/deepseek-harness)。它按照官方
 `dsh.bundle.patch` 约定声明 `cordis.patch.yml`，并把 MCP Client 依赖固定为
-`0.2.1-rc.2`。当前修复包为 `multisim-mcp-dsh-plugin@1.3.0`，并声明
+`0.2.1-rc.2`。当前修复包为 `multisim-mcp-dsh-plugin@1.3.1`，并声明
 `engines.dsh: 0.2.1-rc.2`，避免被 DSH 0.2.x 的插件兼容筛选隐藏。
 
 ```powershell
 $env:MULTISIM_MCP_PYTHON = "C:\path\to\python32\python.exe"
-dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.0"
+dsh plugin --profile web add "multisim-mcp-dsh-plugin@1.3.1"
 dsh --profile web --dump-config
 ```
 
 `multisim-mcp-dsh-plugin@1.1.0` 曾于 2026-08-23 公开发布到 npm；修复包
-`1.3.0` 需要按发布手册推送到 `next` 标签。发布后应从
+`1.3.1` 需要按发布手册完成独立 npm 发布。发布后应从
 Registry 包名完成全新 profile 安装，验证 Cordis 组合、MCP 子进程启动和 Web
 HTTP 200。npm 发布仍与 Python 包独立；配置只转发 `MULTISIM_MCP_*` 和 Python
 运行选项，不会把

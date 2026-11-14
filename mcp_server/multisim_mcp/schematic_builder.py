@@ -395,23 +395,17 @@ COMPONENT_DEFINITIONS: dict[str, ComponentDefinition] = {
     # Local-only LM324AJ section A. A separate kind prevents a real vendor
     # device from inheriting ideal OPAMP5 semantics.
     #
-    # Port order follows the part's own pin table, NOT the SPICE template.
-    # The extracted LM324AJ carrier carries the full quad pin table in
-    # CiaCollString[39]/[40]:
-    #     names : 1IN+ 1IN- VS- VS+ 1OUT 2IN+ 2IN- VS- VS+ 2OUT 3IN+ ...
-    #     pins  : 3    2    11   4   1    5    6    11   4    7    10  ...
-    # so section A is (3,2,11,4,1) == (1IN+, 1IN-, VS-, VS+, 1OUT).
-    # Multisim's netlister walks that table, and its own SaveAs rewrites our
-    # <Ports> list into this order, so the builder must emit it directly.
-    # Getting this wrong is what makes the exporter reject the instance with
-    #   Error: RefDes 'u41', element 'xu41_a':
-    #          Invalid subckt definition name 'lm158_4__opamp__1'
-    # even though the CiModel object and its card are byte-identical to NI's
-    # own working sample (samples/Non-InvertingOpAmp.ms14).
+    # The source netlist contract is semantic order:
+    #     1IN+ 1IN- VS+ VS- 1OUT
+    # The local carrier's physical pin numbers are 3, 2, 4, 11, 1, so the
+    # extracted files must be selected by native pin identity rather than by
+    # filename or by the order of the full quad pin table (which lists the
+    # supply pins as VS-, VS+).  This keeps ``XU1 ... vcc vss ... LM324AJ``
+    # connected to the positive and negative supply pins respectively.
     "LM324AJ": ComponentDefinition(
         "LM324AJ", "lm324aj_element.xml", "sym_lm324aj.xml",
-        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port5.xml",
-         "lm324aj_port4.xml", "lm324aj_port3.xml"), 432, 657, 180,
+        ("lm324aj_port1.xml", "lm324aj_port2.xml", "lm324aj_port4.xml",
+         "lm324aj_port5.xml", "lm324aj_port3.xml"), 432, 657, 180,
     ),
     # Verified native LM555CN carrier. The files are intentionally supplied
     # by the user-local component pack, not bundled with this open-source
@@ -3205,6 +3199,11 @@ def _make_junction_pins(
     owner.set("Transformer-M20", f"{x:g}")
     owner.set("Transformer-M21", f"{y:g}")
     _clear(owner.find("./ConnectList"))
+    # Keep the movable junction anchor in ReferencedComponents as well as
+    # Objects.  Without this placeholder Multisim can show a connected wire
+    # until the user moves a component, then reparse the endpoints as a
+    # floating junction.  Native SaveAs writes this reference automatically.
+    _add_placeholder(refs, owner_item)
     member_ids: list[str] = []
     for _ in range(count):
         member_item = _deepcopy(_load_template("junction_member.xml"))
@@ -4654,12 +4653,26 @@ def build_schematic(
         pin_points=net_pin_points,
         pin_exits={net: [((c['x'],c['y']), pin_escape(c,placement_boxes)) for c in pins]
                    for net,pins in connections.items()},
+        probe_points={
+            net: [(probe["x"], probe["y"])
+                  for probe in probes if probe["net"] == net]
+            for net in sorted({probe["net"] for probe in probes})
+        },
     )
 
     return {
         "xml": str(output_path),
         "layout_profile": "bridge_rectifier" if rectifier_profile else "common_emitter" if ce_profile else "source_series_shunt" if simple_profile else "digital_signal_chain" if digital_profile else "pin_escape_obstacle_routing",
-        "geometry": {"placements": placements, "wires": net_wires, "pins": net_pin_points},
+        "geometry": {
+            "placements": placements,
+            "wires": net_wires,
+            "pins": net_pin_points,
+            "probe_points": {
+                net: [[probe["x"], probe["y"]]
+                      for probe in probes if probe["net"] == net]
+                for net in sorted({probe["net"] for probe in probes})
+            },
+        },
         "components": [
             {
                 "refdes": spec.refdes,
