@@ -59,6 +59,12 @@ class _FakeClient:
 
 
 class ReportNetlistDegradedTest(unittest.TestCase):
+    def setUp(self) -> None:
+        try:
+            server._require_schematic_prerequisites(server.parse_netlist(NETLIST))
+        except RuntimeError as exc:
+            self.skipTest(f"requires local schematic prerequisites: {exc}")
+
     def _run(self, fake: _FakeClient) -> dict:
         with tempfile.TemporaryDirectory() as tmp:
             out = str(Path(tmp) / "divider.ms14")
