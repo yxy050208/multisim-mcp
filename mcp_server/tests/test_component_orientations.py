@@ -6,7 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from multisim_mcp.schematic_builder import _orientation_matrix, build_schematic
+from multisim_mcp.schematic_builder import (
+    _orientation_matrix,
+    build_schematic,
+    template_search_paths,
+)
 
 NETLIST = "V1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 10n\n.end\n"
 
@@ -41,6 +45,27 @@ class OrientationMatrixTest(unittest.TestCase):
 
 class OrientationBuildTest(unittest.TestCase):
     def setUp(self) -> None:
+        required = (
+            "minimal.ms14.xml",
+            "wire.xml",
+            "v_element.xml",
+            "sym_v.xml",
+            "v_port1.xml",
+            "v_port2.xml",
+            "r_element.xml",
+            "sym_r.xml",
+            "r_port1.xml",
+            "r_port2.xml",
+            "c_element.xml",
+            "sym_c.xml",
+            "c_port1.xml",
+            "c_port2.xml",
+        )
+        if not all(
+            any((path / name).is_file() for path in template_search_paths())
+            for name in required
+        ):
+            self.skipTest("requires a licensed local template pack")
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = self._tmp.name
 
