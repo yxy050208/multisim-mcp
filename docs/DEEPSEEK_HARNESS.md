@@ -26,6 +26,23 @@ Developer Preview，并明确提示可能发生破坏性兼容变更。当前公
 因此目前可直接使用 Multisim MCP 的工具层；实验 Resource 已有 Tool 等价入口，
 五个 MCP Prompt 也已经通过 Harness Skill Bundle 提供等价工作流。
 
+### 安装后必须核对的两件事（实测）
+
+只执行 `dsh plugin --profile <p> add ...` 往往**不会**让 `mcp__multisim__*` 出现，
+而且**没有任何错误日志**。两个原因都已实测复现：
+
+1. **bundle 必须列入 `dsh.profile.bundles`**。profile 下 `cordis.yml` 说明配置树由
+   "`dsh.profile.bundles` 中每个 bundle 的 patch，再加 `cordis.patch.yml`"组成；
+   仅存在于 `dependencies` 的包，其 `cordis.patch.yml` 不会被执行。
+2. **`@deepseek-ai/dsh-mcp-client` 必须与宿主同版本**。它声明的 9 个 peer 依赖全部
+   指向宿主核心包，靠宿主路由解析。宿主版本见
+   `~/.dsh/dsh-runtimes/dsh-primary-runtime/runtime.json` 的 `desktopVersion`；
+   profile 实装版本与 `pnpm-workspace.yaml` 的 override 都必须等于它。
+
+宿主随 Harness 更新升版后（例如 `0.2.1-rc.2` → `0.2.1-rc.3`），若 override 未同步，
+就会出现"工具全部 unknown tool 且无日志"；同步版本并重启 profile 后即恢复。因此每次
+升级 Harness 后请重新核对插件声明的 `engines.dsh` 与实装 client 版本。
+
 上游资料：
 
 - <https://github.com/deepseek-ai/deepseek-harness>

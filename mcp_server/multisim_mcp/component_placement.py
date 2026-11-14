@@ -712,6 +712,7 @@ def validate_layout_positions(
     positions: dict[str, list[float]] | None = None,
     sheet_size: tuple[float, float] | None = None,
     probe_nets: list[str] | None = None,
+    component_orientations: dict[str, str] | None = None,
 ) -> dict:
     """Dry-run a custom layout and report geometry findings -- no COM, no files.
 
@@ -720,6 +721,10 @@ def validate_layout_positions(
     component-overlap pairs, wire-through-body points and the final sheet
     size.  Use it to iterate on a ``component_positions`` map in seconds
     before committing to the minute-scale build + verification cycle.
+
+    ``component_orientations`` maps refdes -> orientation and must match what
+    the final build will use, because rotating a symbol moves its pins and
+    therefore changes every wire that touches it.
     """
     import tempfile
 
@@ -737,6 +742,7 @@ def validate_layout_positions(
             probe_nets=probe_nets,
             component_positions=positions,
             min_sheet_size=tuple(sheet_size) if sheet_size else None,
+            component_orientations=component_orientations,
         )
 
     lv = result.get("layout_validation", {})
@@ -799,6 +805,7 @@ def optimize_layout_positions(
     moves: int = 1,
     max_candidates: int = 32,
     fixed_refdes: list[str] | tuple[str, ...] = (),
+    component_orientations: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run a bounded single-board layout search through the real dry-run builder.
 
@@ -809,16 +816,25 @@ def optimize_layout_positions(
     """
     from .layout_optimization import optimize_single_board_layout
 
-    return optimize_single_board_layout(
+    result = optimize_single_board_layout(
         base_positions,
         lambda positions: validate_layout_positions(
-            netlist, dict(positions), probe_nets=list(probe_nets or ())
+            netlist,
+            dict(positions),
+            probe_nets=list(probe_nets or ()),
+            component_orientations=component_orientations,
         ),
         step=step,
         moves=moves,
         max_candidates=max_candidates,
         fixed_refdes=fixed_refdes,
     )
+    # Carry the orientation map into the materialize step: the candidate
+    # coordinates are meaningless without the pinned rotations that produced
+    # them, because rotating a symbol moves its pins.
+    if isinstance(result, dict) and component_orientations:
+        result["component_orientations"] = dict(component_orientations)
+    return result
 
 
 def _normalise_selected_positions(
@@ -891,6 +907,7 @@ def materialize_layout_positions(
         probe_nets=selected_probes,
         component_positions=positions,
         min_sheet_size=sheet_size,
+        component_orientations=optimization.get("component_orientations"),
     )
     layout_validation = build_result.get("layout_validation", {})
     layout_report_path.write_text(

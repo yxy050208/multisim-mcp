@@ -8,9 +8,66 @@
 
 - 后续变更将在下一版本记录；发布分支中的 1.3.0 内容已冻结，等待 CI、标签和在线发布物核验。
 
+- 修复 Multisim 14.0 上 `ReportNetlist` 失败会让整条成图/实验流水线中断的问题：
+  `_create_schematic_impl` 现在把该调用失败当作"证据源缺失"处理，拓扑与引脚比对记为
+  `unverified`，原生器件存在性回退到 `EnumComponents` 枚举，并新增
+  `verification.netlist_export` 记录原始错误与影响；`native_netlist_complete` 用
+  `null` 表示"本版本无法验证"，不与会失败的 `false` 混淆。新增回归测试
+  `tests/test_report_netlist_degraded.py`，覆盖降级路径与严格路径。
+- 补充 DeepSeek Harness 安装的两个静默失败原因：bundle 必须列入
+  `dsh.profile.bundles`；`@deepseek-ai/dsh-mcp-client` 必须与宿主 `runtime.json`
+  的 `desktopVersion` 同版本（含 `pnpm-workspace.yaml` override）。
+
+- 新增 `component_orientations`：`create_schematic_from_netlist`、
+  `validate_layout_positions` 与 `build_schematic` 现在可以按位号指定器件朝向
+  （`vertical`、`vertical-flip`、`horizontal-flip`、`native`）。符号矩阵与引脚几何
+  同步旋转，因此布线器、几何校验和拓扑回读自动跟随，无需额外改动。此前只有
+  `R`/`C`/`D` 的拓扑专用 profile 会竖放器件，任意网表只能得到全横排的排版。
+  未知位号与非法朝向在写文件前失败关闭；旋转器件的位号/数值文字保持水平可读。
+  新增测试 `tests/test_component_orientations.py`。
+
+- 新增电位器（`POT`）原生载体支持：`POT <refdes> <end1> <wiper> <end2> <value>
+  [percent]` 语句把三个端子显式写出，避免猜端子顺序；阻值写入参数槽 5、滑动百分比
+  写入交互参数块与符号的 "NN %" 标题，并把百分比文字反向旋转以保持水平可读。非数值或
+  越界百分比在写文件前失败关闭。载体模板需由用户从自己的授权工程提取
+  （`tools/extract_native_component_templates.py`），仓库不分发 NI 元件资产。
+  新增测试 `tests/test_potentiometer.py`。
+
 ### English
 
 - Future changes will be recorded here. The 1.3.0 release branch is frozen pending CI, tag, and live artifact verification.
+
+- Fixed: a failing `ReportNetlist` no longer aborts the whole schematic/experiment
+  pipeline. Multisim 14.0 answers `E_ACCESSDENIED` for that call on every document,
+  including NI's own samples. Round-trip topology and pin checks are now reported as
+  `unverified`, native component presence falls back to `EnumComponents`,
+  `verification.netlist_export` records the error and its impact, and
+  `native_netlist_complete` uses `null` for "not verifiable on this build" instead of
+  a failing `false`. Adds `tests/test_report_netlist_degraded.py`.
+- Documented two silent DeepSeek Harness install failures: the bundle must be listed
+  in `dsh.profile.bundles`, and `@deepseek-ai/dsh-mcp-client` must match the host
+  `runtime.json` `desktopVersion` (including the `pnpm-workspace.yaml` override).
+
+- Added `component_orientations` to `build_schematic`,
+  `create_schematic_from_netlist` and `validate_layout_positions`: refdes ->
+  `vertical` | `vertical-flip` | `horizontal-flip` | `native`. The symbol matrix
+  and its pin geometry rotate together, so the wire router, the geometry
+  validator and the topology read-back all follow without further changes.
+  Previously only the topology-specific profiles rotated `R`/`C`/`D`, so an
+  arbitrary netlist could only be laid out with every passive horizontal.
+  Unknown refdes and unsupported orientation values fail closed before any file
+  is written, and rotated parts keep their reference/value text horizontal.
+  Adds `tests/test_component_orientations.py`.
+
+- Added a native potentiometer (`POT`) carrier: the statement
+  `POT <refdes> <end1> <wiper> <end2> <value> [percent]` names the three terminals
+  explicitly instead of guessing their order. The resistance is written into
+  parameter slot 5, the wiper percentage into the interactive parameter block and
+  the symbol's "NN %" caption, and that caption is counter-rotated so it stays
+  readable. Non-numeric or out-of-range percentages fail closed before any file
+  is written. The carrier templates must be extracted from the user's own
+  licensed design (tools/extract_native_component_templates.py); the repository
+  does not ship NI component assets. Adds tests/test_potentiometer.py.
 
 ## [1.3.0] - 2026-10-25
 
