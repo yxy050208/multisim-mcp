@@ -10,6 +10,7 @@ from multisim_mcp.schematic_builder import (
     COMPONENT_DEFINITIONS,
     build_schematic,
     parse_netlist,
+    template_search_paths,
 )
 
 NETLIST = """* pot check
@@ -38,6 +39,28 @@ class PotStatementTest(unittest.TestCase):
 
 class PotBuildTest(unittest.TestCase):
     def setUp(self) -> None:
+        required = (
+            "minimal.ms14.xml",
+            "wire.xml",
+            "v_element.xml",
+            "sym_v.xml",
+            "v_port1.xml",
+            "v_port2.xml",
+            "r_element.xml",
+            "sym_r.xml",
+            "r_port1.xml",
+            "r_port2.xml",
+            "pot_element.xml",
+            "sym_pot.xml",
+            "pot_port1.xml",
+            "pot_port2.xml",
+            "pot_port3.xml",
+        )
+        if not all(
+            any((path / name).is_file() for path in template_search_paths())
+            for name in required
+        ):
+            self.skipTest("requires a licensed local template pack")
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
 
